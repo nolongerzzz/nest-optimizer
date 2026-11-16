@@ -25,7 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { execFileSync } = require('child_process');
-const { withApp, loadSTL, selectModel, statusOf, closeTopMenus, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, selectModel, statusOf, closeTopMenus, toggleCrop, ROOT } = require('./nso_app_harness');
 const { readSTL, writeSTL } = require('./nso_stl_io.js');
 
 const OUT = path.join(__dirname, 'detach-out');
@@ -84,7 +84,7 @@ const modelIds = page => page.evaluate(() => state.models.map(m => m.id));
    its summary, opening Lift a real click on its button. */
 const openCard = async (page, id) => {
   const open = await page.evaluate(i => document.getElementById(i).open, id);
-  if (!open) await page.click('#' + id + ' > summary');
+  if (!open) { if (id === 'menu-crop') await toggleCrop(page); else await page.click('#' + id + ' > summary'); }   // Crop: the Cut / Crop card's switch
 };
 const openCutter = async page => {
   await openCard(page, 'menu-crop');

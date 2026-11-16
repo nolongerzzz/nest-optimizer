@@ -19,12 +19,16 @@ const check = (name, cond, detail) => {
    pieces panel is pinned in the top-right corner. The column's slabs top to
    bottom, in their groups (tools/nso_shell_v3_test.js gates the groups'
    pitch and gaps); the view row (X, the eye, the target) is pinned under
-   them. */
+   them.
+   The card regroup (2026-11-16): Print (menu-supports) ends the row's left group, after
+   Lock plate; Generate (menu-gen, was Gen+) heads the column; Crop shares the Cut / Crop
+   slab (no slab of its own); Punch is a card under it; Assemble follows Sculpt; Weave is a
+   section of Fill & fix, which sits between G-scope and Check & repair. */
 const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip',
-             'menu-gen', 'btn-lock-pos', 'btn-plate-lock', 'btn-undo', 'btn-delete-placed', 'menu-export'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-assemble', 'menu-supports',
-             'menu-add', 'menu-bit', 'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt',
-             'btn-microscope', 'menu-repair'];
+             'btn-lock-pos', 'btn-plate-lock', 'menu-supports', 'btn-undo', 'btn-delete-placed', 'menu-export'];
+const COL = ['menu-gen', 'menu-scale', 'menu-cut', 'menu-punch', 'menu-connect',
+             'menu-add', 'menu-bit', 'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt',
+             'menu-assemble', 'btn-microscope', 'menu-fillfix', 'menu-repair'];
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL.filter(id => id.startsWith('menu-')));
 
 /* Every control that lived in the sidebar, and where it is now (Join and
@@ -166,7 +170,7 @@ withApp(async (page, logs) => {
       });
       return out;
     }, ROW);
-    const FIXED = ['menu-import', 'menu-gen', 'btn-undo', 'btn-delete-placed', 'menu-export'];
+    const FIXED = ['menu-import', 'menu-supports', 'btn-undo', 'btn-delete-placed', 'menu-export'];
     const atRest = await measure();
     const widthOf = id => atRest.find(b => b.id === id).w;
     check('at 1500 px wide, with this font, no row label is cut',

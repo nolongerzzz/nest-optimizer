@@ -26,8 +26,9 @@ const LIFT_ONLY = argv.includes('--lift-only');   // import, select, arm Lift (v
 if (!FILE) { console.error('usage: nso_big_mesh_profile.js <file.3mf|file.stl> [--label before|after] [--out dir]'); process.exit(2); }
 fs.mkdirSync(OUT, { recursive: true });
 
-const COLUMN_CARDS = ['menu-measure', 'menu-connect', 'menu-assemble', 'menu-supports',
-                      'menu-add', 'menu-bit', 'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
+const COLUMN_CARDS = ['menu-measure', 'menu-supports', 'menu-punch', 'menu-connect',
+                      'menu-add', 'menu-bit', 'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-assemble',
+                      'menu-fillfix', 'menu-repair'];
 
 const pause = (page, ms) => page.waitForTimeout(ms);
 

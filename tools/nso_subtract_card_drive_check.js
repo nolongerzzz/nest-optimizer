@@ -11,7 +11,7 @@
 
    GATES
      1. The card opens with its tools in order - Subtract B from A, Extract bit
-        (with Carve), Punch, Hollow, Split to parts - each button showing, no
+        (with Carve), Hollow, Split to parts - each button showing, no
         collapsing section anywhere on it.
      2. Every control the card has is on it, under the id it had. Lift, with
         Detach flange in its panel, is not: it moved to the Crop card (its
@@ -27,7 +27,7 @@
      7. The preview goes away, and the piece comes back opaque, when the card
         shuts, on leave-tool, on a different piece, and on a refusal; a wall
         under the nozzle floor is refused in the readout, not the status line.
-     8. Punch's card still opens. */
+     8. Punch is its own card now; opening it arms Punch. */
 
 const fs = require('fs');
 const path = require('path');
@@ -45,11 +45,6 @@ if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 const SECTIONS = [
   [null, 'Subtract B from A', ['btn-subtract']],
   [null, 'Extract bit', ['btn-extract-bit']],
-  [null, 'Punch',
-    ['btn-punch', 'punch-card', 'inp-punch-dia', 'sel-punch-depth', 'punch-depth-mm-row', 'inp-punch-depth',
-     'punch-pattern-row', 'punch-grid-rows', 'inp-punch-rows', 'inp-punch-cols', 'btn-punch-pitch-xy', 'punch-pitch-label',
-     'inp-punch-pitch', 'punch-pitch-y-row', 'inp-punch-pitch-y', 'punch-anchor-row', 'punch-radial-rows',
-     'inp-punch-count', 'inp-punch-radius', 'punch-readout', 'btn-punch-go', 'btn-punch-cancel']],
   [null, 'Hollow',
     ['btn-hollow', 'inp-hollow-mm', 'inp-hollow-slider', 'hollow-slider-read', 'hollow-readout', 'btn-hollow-safe']],
   [null, 'Split to parts', ['btn-split-parts', 'split-count', 'split-readout']]
@@ -118,7 +113,7 @@ withApp(async (page, logs) => {
   check('each tool\'s button is showing as soon as the card opens', lead.shown.every(Boolean), JSON.stringify(lead.shown));
   const order = await page.evaluate(ids => ids.map(i => document.getElementById(i)).every((e, k, a) =>
     k === 0 || !!(a[k - 1].compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING)), SECTIONS.map(s => s[2][0]));
-  check('...in the order Subtract, Extract bit, Punch, Hollow, Split to parts', order);
+  check('...in the order Subtract, Extract bit, Hollow, Split to parts (Punch is its own card since 2026-11-16)', order);
   await shot(page, '1-card');
 
   /* ---------------------------------------------------------------- 2 */
@@ -281,12 +276,13 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { nsoHollowPreview.close(); });
 
   /* ---------------------------------------------------------------- 8 */
-  console.log('8. Punch still runs from the card');
+  console.log('8. Punch runs from its own card (out of Subtract, 2026-11-16)');
   await page.evaluate(() => window.leaveTool());
-  await page.click('#btn-punch');
+  await page.click('#menu-punch > summary');
   await sleep(page, 300);
-  const punch = await page.evaluate(() => ({ card: !document.getElementById('punch-card').hidden, inCard: !!document.getElementById('punch-card').closest('#menu-bit') }));
-  check('Punch opens its card on the card', punch.card && punch.inCard, JSON.stringify(punch));
+  const punch = await page.evaluate(() => ({ card: !document.getElementById('punch-card').hidden, inOwn: !!document.getElementById('punch-card').closest('#menu-punch'),
+                                              notInSubtract: !document.querySelector('#menu-bit #punch-card') }));
+  check('opening the Punch card arms Punch; Subtract no longer holds it', punch.card && punch.inOwn && punch.notInSubtract, JSON.stringify(punch));
   await shot(page, '6-punch-armed');
   await page.click('#btn-punch-cancel');
   await page.evaluate(() => window.leaveTool());

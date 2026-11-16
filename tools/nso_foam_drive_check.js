@@ -7,7 +7,7 @@
    view and the hand: click Foam, HOLD the mouse on the piece, let go, Set -
    the way a person does it, with real pointer events on the canvas.
 
-     1. the button: in Finish > Shape, in Fill / Densify's row, wired
+     1. the button: in the Fill & fix card, in Fill / Densify's row, wired
      2. box_cavity_30.stl: Foam on - the ghost (translucent, depth-write off,
         not wireframe), the void, the list "Hollow 1 - 17,576 mm³" chosen
      3. hold on the piece for 1.5 s: the level rises at about a third of the
@@ -119,11 +119,11 @@ withApp(async (page, logs) => {
     const sec = f && f.closest('[data-sec]');
     return { present: !!f, text: f && f.textContent.trim(), wired: !!f && f.dataset.nsoWired === '1',
              besideFill: !!f && !!fill && f.parentElement === fill.parentElement,
-             group: sec && sec.dataset.sec, inAdd: !!f && !!f.closest('#menu-add'),
+             group: sec && sec.dataset.sec, inAdd: !!f && !!f.closest('#menu-fillfix'),
              panelHidden: document.getElementById('foam-panel').hidden };
   });
   check('#btn-foam present, labelled "Foam"', b.present && b.text === 'Foam', b.text);
-  check('...in the Add menu, in Fill / Densify\'s row', b.inAdd && b.group === 'add' && b.besideFill,
+  check('...in the Fill & fix card (out of Add, 2026-11-16), in Fill / Densify\'s row', b.inAdd && b.group === 'fillfix' && b.besideFill,
         'group ' + b.group);
   check('...wired at load; its panel hidden until it is on', b.wired && b.panelHidden);
 
@@ -352,10 +352,10 @@ withApp(async (page, logs) => {
   await frameOn(page);
   const g0 = await page.evaluate(() => {
     const b = document.getElementById('btn-foam-gun'), foam = document.getElementById('btn-foam');
-    return { present: !!b, text: b && b.textContent.trim(), wired: !!b && b.dataset.nsoWired === '1', inAdd: !!b && !!b.closest('#menu-add'),
+    return { present: !!b, text: b && b.textContent.trim(), wired: !!b && b.dataset.nsoWired === '1', inAdd: !!b && !!b.closest('#menu-fillfix'),
              besideFoam: !!b && b.parentElement === foam.parentElement, panelHidden: document.getElementById('foam-gun-panel').hidden };
   });
-  check('#btn-foam-gun "GUN" in the Add menu beside Foam, wired, its panel hidden', g0.present && g0.text === 'GUN' && g0.inAdd && g0.besideFoam && g0.wired && g0.panelHidden, JSON.stringify(g0));
+  check('#btn-foam-gun "GUN" in the Fill & fix card beside Foam, wired, its panel hidden', g0.present && g0.text === 'GUN' && g0.inAdd && g0.besideFoam && g0.wired && g0.panelHidden, JSON.stringify(g0));
   const depthG = await undoDepth(page), rawG = await raw(page);
   await page.click('#btn-foam-gun');
   await page.waitForTimeout(250);

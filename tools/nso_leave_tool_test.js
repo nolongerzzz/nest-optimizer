@@ -377,10 +377,13 @@ withApp(async (page, logs) => {
        Subtract, Shape, Text, Paint, Surface & edges, Sculpt and Check & repair in
        the column. Then a member open inside a merged one (Photo in Gen+):
        the double-click shuts it and the drop-down holding it. Plate & pieces is pinned open, not a drop-down: it stays. */
-    const COL = ['menu-measure', 'menu-connect', 'menu-assemble', 'menu-supports', 'menu-add', 'menu-bit',
-                 'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
+    /* The card regroup (2026-11-16): Print (the supports card) moved to the row, Punch and Fill & fix
+       are cards, Weave is a section of Fill & fix, Assemble sits under Sculpt. */
+    const COL = ['menu-measure', 'menu-supports', 'menu-punch', 'menu-connect', 'menu-add', 'menu-bit',
+                 'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-assemble',
+                 'menu-fillfix', 'menu-repair'];
     const ids = await page.evaluate(() => [...document.querySelectorAll('.vp-col-menu')].map(d => d.id));
-    check('the shell holds these thirteen (Slice is the supports card\'s last section)', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
+    check('the shell holds these fourteen (Slice is the supports card\'s last section)', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
     for (const id of COL.concat(['menu-photo'])) {
       await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
       await page.click('#' + id + ' > summary');

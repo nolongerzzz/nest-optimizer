@@ -164,7 +164,7 @@ withApp(async (page, logs) => {
     return t ? { label: sum.textContent.trim(), col: t.classList.contains('vp-col-menu'), prev: prev.id, next: next.id,
       order: y(prev).top < y(t).top && y(t).top < y(next).top, sameX: Math.abs(y(prev).left - y(t).left) < 1 } : null;
   });
-  check('TEXT is a column button between SHAPE and WEAVE (which Weave put before PAINT), in line with them', place && place.label === 'Text' && place.col && place.prev === 'menu-shape' && place.next === 'menu-weave' && place.order && place.sameX,
+  check('TEXT is a column button between SHAPE and PAINT (Weave is a section of Fill & fix since 2026-11-16), in line with them', place && place.label === 'Text' && place.col && place.prev === 'menu-shape' && place.next === 'menu-paint' && place.order && place.sameX,
     JSON.stringify(place));
   await page.click('#menu-text > summary');
   await page.waitForFunction(() => nsoTextState().open, null, { timeout: 5000 });

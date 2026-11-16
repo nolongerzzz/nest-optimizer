@@ -24,7 +24,7 @@ const path = require('path');
 const M = require('../app-measure.js');
 const RL = require('../app-ruler.js');
 const { readSTL } = require('./nso_stl_io');
-const { withApp, loadSTL, selectModel, openMenuFor, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, selectModel, openMenuFor, toggleCrop, ROOT } = require('./nso_app_harness');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 
@@ -816,7 +816,7 @@ async function partD() {
     await page.evaluate(() => { state.camera.position.set(60, 70, 90); state.controls.target.set(0, 5, 0); state.controls.update(); });
 
     console.log('\n=== D1. a Crop ghost stays up while Measure opens, arms and measures ===');
-    await page.click('#menu-crop > summary');
+    await toggleCrop(page);
     await page.evaluate(() => { selectPlaced(0); });
     await page.click('#btn-crop-shape-box');
     await page.waitForFunction(() => { const S = NSO_CropCard.state(); return S.shape && !S.timer && S.plan; }, null, { timeout: 20000 });

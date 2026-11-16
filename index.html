@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=1024cb92" />
+  <link rel="stylesheet" href="styles.css?v=d9bef23d" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -150,8 +150,542 @@
               <p class="hint" style="margin:2px 0 0">Arrow keys tilt while this menu is open.</p>
             </div>
           </details>
+          <button id="btn-lock-pos" class="vp-bar-btn btn-lock-pos" type="button" disabled aria-pressed="false" title="Lock the selected piece's position. A locked piece refuses drag, the nudge arrows, Raise/Lower and the pose buttons, so a stray click cannot move it. Seat, Center, Align and Skin still place it. Shown by a teal outline and a 'locked' tag.">🔒 Lock position</button>
+          <button id="btn-plate-lock" class="vp-bar-btn btn-plate-lock" type="button" disabled aria-pressed="false" title="Lock the plate configuration: hold every piece where it is, in their current relative positions, in one action. Separate from the per-piece lock - it sets no piece flag, so unlocking the plate gives back exactly the piece locks you had.">🔒 Lock plate</button>
+          <!-- SUPPORTS: one card on the main page (app-supports-card.js,
+               docs/SUPPORTS-CARD.md), a verb with a state. Opening it detects
+               at once on the selected piece: every hanging area is outlined on
+               it and the card says how many, at what angle, on which piece -
+               the angle is editable right here. Click an outline to leave that
+               area out (or put it back); Shift-click the piece to add a spot.
+               GENERATE builds; the card is locked while it does and one bar
+               under the readout fills with the build ("Planning 142 / 377 -
+               38 %", then "Building ...", then "Welding - 14 s"; Escape
+               cancels), and a build ends as BUILT or as "Could not build: ...".
+               Once built it reads
+               the result (held / unsupported / unreachable, a row for each
+               area that needs a look) and offers REGENERATE, REMOVE ALL and
+               REMOVE. G-scope's support row stays for layer-view work; both
+               call the same planner.
+               With two or more pieces on the plate the card also offers
+               "Generate for plate" (#sup-plate): every piece is lit, the readout
+               counts pieces and hanging areas, and GENERATE builds the supports of
+               all of them in one go - one bar ("Piece 2 of 6 ..."), one Undo. -->
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">
+            <summary class="vp-bar-btn" title="Everything a print is set by - the printer, the slice, the supports - and the one button that slices the plate">Print</summary>
+            <!-- THE PRINT CARD (docs/PRINT-CARD.md): the one place the plate's printer, slice and supports settings live. Slice builds the supports
+                 (when Supports is ticked) and slices the plate; Preview opens that slice in G-scope; Export saves it. Its ids are the Supports card's
+                 and the Slice section's own (sup-*, slice-set-*): app-supports-card.js and app-print.js drive them as before. -->
+            <div class="vp-menu-body vp-top-body sup-card print-card slice-card" id="supports-card" data-state="pick">
+              <span id="slice-card" hidden></span>
+              <p id="sup-count" class="bend-readout sup-count">Click a piece to see where it needs holding.</p>
+              <div id="sup-progress" class="sup-progress" role="progressbar" aria-label="Building supports" aria-valuemin="0" aria-valuemax="100" hidden><div class="sup-progress-fill"></div></div>
+              <!-- SAVED SETTINGS (app-supports-card.js PRESETS): every lever of this card under a name, kept in this browser; Export / Import in Tree planner -->
+              <div class="sup-preset-row" role="group" aria-label="Saved settings">
+                <select id="sup-preset" class="vp-select" autocomplete="off"
+                        title="Saved settings: every lever of this card - angle, style, Tree settings, Advanced, the interface and raft rows - under a name. Pick one to put its values back; nothing rebuilds until Generate.">
+                  <option value="">Settings: not saved</option>
+                </select>
+                <button id="sup-preset-save" class="sup-seg" type="button" title="Save the card's settings as they stand under a name (a name already there is replaced). Kept in this browser.">Save</button>
+                <button id="sup-preset-delete" class="sup-seg" type="button" disabled title="Take the picked saved settings away.">Delete</button>
+              </div>
+              <label class="vp-bend-field print-printer" for="print-printer">Printer
+                <select id="print-printer" class="vp-select" autocomplete="off"
+                        title="The plate's printer and size: the same choice as the Plate panel's. The settings below start at this printer's profile."></select></label>
+              <p id="slice-profile" class="bend-readout slice-profile" title="The printer profile the plate is sliced for.">&nbsp;</p>
+              <div class="sup-go-row">
+                <button id="btn-sup-all" class="btn btn-primary sup-go" type="button" disabled
+                        title="Slice the plate for its printer. With Supports ticked the supports are built first - again when a setting, a piece or its tips changed - and the plate is sliced with them; unticked, the plate's supports come off and the pieces are sliced alone. One Undo puts the plate back.">Slice</button>
+                <button id="btn-sup-slice-cancel" class="btn btn-secondary" type="button" hidden
+                        title="Stop: the build and the slice it ends with. Nothing is added.">Cancel</button>
+                <button id="btn-slice-cancel" class="btn btn-secondary" type="button" hidden
+                        title="Stop slicing. Nothing is kept.">Cancel</button>
+              </div>
+              <div class="sup-go-row sup-slice-row print-two">
+                <button id="btn-sup-slice" class="btn btn-secondary" type="button"
+                        title="Open the plate's slice in G-scope. If the plate or a setting changed since the last Slice, it slices first.">Preview</button>
+                <button id="btn-slice-export" class="btn btn-secondary" type="button" disabled
+                        title="Download the sliced plate as a Bambu .gcode.3mf, named after the file its pieces were opened from: open it in Bambu Studio and print it without slicing it again.">Export</button>
+                <button id="btn-slice-saveas" class="btn btn-secondary" type="button" disabled style="grid-column: 1 / -1;"
+                        title="Save the sliced plate under a name you pick. Chrome and Edge open the save dialog, so the folder is yours to pick too; Safari and Firefox ask for the name and put the file in Downloads.">Save as&hellip;</button>
+              </div>
+              <div id="slice-progress" class="sup-progress is-indeterminate" role="progressbar" aria-label="Slicing" hidden><div class="sup-progress-fill"></div></div>
+              <p id="slice-stage" class="bend-readout" hidden></p>
+              <p id="sup-slice-line" class="hint sup-slice-line" role="status" hidden></p>
+              <p id="slice-readout" class="bend-readout slice-readout" role="status">Press Slice to slice the plate.</p>
+              <ul id="sup-rows" class="sup-rows" hidden aria-label="Areas that need a look"></ul>
+              <details class="vp-sec print-sec" id="print-sec-printer">
+                <summary class="vp-sec-head" title="The printer profile's nozzle, the filament and its temperatures. An empty temperature is the filament's own.">Printer and filament</summary>
+                <div class="vp-sec-body">
+                  <label class="vp-bend-field" for="slice-set-nozzle">Nozzle
+                    <select class="vp-select" id="slice-set-nozzle" title="The printer profile's nozzle. A 0.6 nozzle needs its own profile (start and end G-code), which this printer does not have yet." autocomplete="off">
+                        <option value="0.4" selected>0.4</option>
+                        <option value="0.6" disabled>0.6</option>
+                      </select></label>
+                  <label class="vp-bend-field" for="slice-set-filament">Filament
+                    <select class="vp-select" id="slice-set-filament" title="The filament the plate prints with. Profile is the printer profile's own (PLA). Another filament brings its own temperatures, max flow, retraction, fan and start G-code, and the file names it so the printer knows what is loaded." autocomplete="off">
+                        <option value="profile" selected>Profile (PLA)</option>
+                        <option value="cr-tpu">Creality CR-TPU 95A</option>
+                      </select></label>
+                  <label class="vp-bend-field" for="slice-set-nozzle-temp">Nozzle temp
+                    <input type="number" id="slice-set-nozzle-temp" min="170" max="300" step="5" placeholder="auto" inputmode="numeric"
+                             title="Nozzle temperature after the first layer, °C. Empty: the filament's own. With a temp step, this is the temperature the steps start from." autocomplete="off"><span>&deg;C</span></label>
+                  <label class="vp-bend-field" for="slice-set-first-temp">First layer temp
+                    <input type="number" id="slice-set-first-temp" min="170" max="300" step="5" placeholder="auto" inputmode="numeric"
+                             title="Nozzle temperature of the first layer, °C. Empty: the filament's own." autocomplete="off"><span>&deg;C</span></label>
+                  <label class="vp-bend-field" for="slice-set-bed-temp">Bed temp
+                    <input type="number" id="slice-set-bed-temp" min="0" max="110" step="5" placeholder="auto" inputmode="numeric"
+                             title="Bed temperature, °C. Empty: the filament's own for this plate." autocomplete="off"><span>&deg;C</span></label>
+                  <label class="vp-bend-field" for="slice-set-max-flow">Max flow
+                    <input type="number" id="slice-set-max-flow" min="0.5" max="40" step="0.2" placeholder="auto" inputmode="decimal"
+                             title="The most filament the hotend is asked to melt, mm³ a second. Every speed is held under it (and the start's purge line follows it). Empty: the filament's own." autocomplete="off"><span>mm&sup3;/s</span></label>
+                  <label class="vp-bend-field" for="slice-set-flow-ratio">Flow ratio
+                    <input type="number" id="slice-set-flow-ratio" min="0.8" max="1.2" step="0.01" placeholder="auto" inputmode="decimal"
+                             title="How much of the computed filament is extruded (1 = all of it). A little under 1 thins every line: less ooze, fewer blobs and strings. Empty: the filament's own." autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-retract-len">Retraction length
+                    <input type="number" id="slice-set-retract-len" min="0" max="3" step="0.1" placeholder="auto" inputmode="decimal"
+                             title="How far the filament is pulled back before a travel, mm. Longer pulls more pressure off the nozzle (fewer strings); too long on a soft filament lets it buckle or jam. Empty: the filament's own." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-retract-speed">Retraction speed
+                    <input type="number" id="slice-set-retract-speed" min="5" max="80" step="5" placeholder="auto" inputmode="numeric"
+                             title="How fast the filament is pulled back and pushed forward again, mm/s. A soft filament stretches when pulled fast, so slower can retract more of it. Empty: the filament's own." autocomplete="off"><span>mm/s</span></label>
+                  <label class="vp-bend-field" for="slice-set-retract-before">Retract before wipe
+                    <input type="number" id="slice-set-retract-before" min="0" max="100" step="10" placeholder="auto" inputmode="numeric"
+                             title="How much of the retraction is pulled standing still at the end of a line, before the nozzle wipes and leaves. 0: all of it during the wipe, as Bambu's profiles do. 100: all of it first, so the nozzle leaves with the pressure off - for a soft filament that strings. Empty: the filament's own." autocomplete="off"><span>%</span></label>
+                  <label class="vp-bend-field" for="slice-set-zhop">Z hop
+                    <input type="number" id="slice-set-zhop" min="0" max="2" step="0.1" placeholder="auto" inputmode="decimal"
+                             title="How far the nozzle lifts for a travel after retracting, mm. 0: no lift - the nozzle stays on the surface and wipes its ooze off there, at the risk of dragging on the part. Empty: the filament's own." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-temp-step">Temp step
+                    <input type="number" id="slice-set-temp-step" value="0" min="-25" max="25" step="1" inputmode="numeric"
+                             title="Change the nozzle temperature by this much at every band of height: -5 with temp 240 prints 240, 235, 230 ... up the model (a temperature tower from any model). 0: off. The change is made without stopping, at the layer change." autocomplete="off"><span>&deg;C</span></label>
+                  <label class="vp-bend-field" for="slice-set-temp-band">Temp step every
+                    <input type="number" id="slice-set-temp-band" value="10" min="1" max="100" step="1" inputmode="decimal"
+                             title="The height of one temperature band, mm, counted from the plate." autocomplete="off"><span>mm</span></label>
+                  <p class="slice-settings-note" id="slice-filament-note" hidden></p>
+                </div>
+              </details>
+              <details class="vp-sec print-sec" id="print-sec-quality">
+                <summary class="vp-sec-head" title="Layer height, the wall generator (Classic or Arachne), and how a bridge is printed. The first layer stays the profile's.">Quality</summary>
+                <div class="vp-sec-body">
+                  <label class="vp-bend-field" for="slice-set-layer">Layer height
+                    <input type="number" id="slice-set-layer" value="0.2" min="0.05" max="0.3" step="0.05" title="Layer height, mm. The first layer stays the profile's." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-wall-gen">Wall generator
+                    <select class="vp-select" id="slice-set-wall-gen" title="How the walls are laid. Classic: every wall one width, a fixed spacing apart - a part that is not a whole number of walls thick gets a gap down its middle, and a feature thinner than a wall prints nothing. Arachne: the walls' count and width fitted to the part's thickness, so thin ribs, fins and text are filled wall to wall. The supports always slice Classic." autocomplete="off">
+                      <option value="classic" selected>Classic</option>
+                      <option value="arachne">Arachne</option>
+                    </select></label>
+                  <div class="slice-arachne-rows" id="slice-arachne-rows" hidden>
+                    <label class="vp-bend-field" for="slice-set-wall-angle">Wall transitioning threshold angle
+                      <input type="number" id="slice-set-wall-angle" value="10" min="1" max="59" step="1" inputmode="numeric"
+                             title="Where a part widens like a wedge more steeply than this, no wall is put in its middle to fill the gap between the walls either side. Higher fills steeper wedges." autocomplete="off"><span>&deg;</span></label>
+                    <label class="vp-bend-field" for="slice-set-wall-filter">Wall transitioning filter margin
+                      <input type="number" id="slice-set-wall-filter" value="25" min="0" max="100" step="5" inputmode="numeric"
+                             title="A wall's width changes only when the room for it moves by more than this, % of the nozzle - so a wall does not flicker between widths along a part whose thickness wobbles." autocomplete="off"><span>%</span></label>
+                    <label class="vp-bend-field" for="slice-set-wall-translen">Wall transition length
+                      <input type="number" id="slice-set-wall-translen" value="100" min="1" max="500" step="10" inputmode="numeric"
+                             title="How far along a wall its width follows the room around it, % of the nozzle: longer makes smoother, slower changes of width." autocomplete="off"><span>%</span></label>
+                    <label class="vp-bend-field" for="slice-set-wall-dist">Wall distribution count
+                      <input type="number" id="slice-set-wall-dist" value="1" min="1" max="10" step="1" inputmode="numeric"
+                             title="How many walls each side, counted from the middle, share a thin part's leftover width. 1: only the innermost walls change width, the outer wall keeps its own." autocomplete="off"></label>
+                    <label class="vp-bend-field" for="slice-set-min-wall">Minimum wall width
+                      <input type="number" id="slice-set-min-wall" value="85" min="5" max="100" step="5" inputmode="numeric"
+                             title="The narrowest wall laid, % of the nozzle. A feature thinner than this (and no thinner than the minimum feature size) is printed this wide." autocomplete="off"><span>%</span></label>
+                    <label class="vp-bend-field" for="slice-set-min-feature">Minimum feature size
+                      <input type="number" id="slice-set-min-feature" value="25" min="0" max="100" step="5" inputmode="numeric"
+                             title="A feature thinner than this, % of the nozzle, is not printed at all." autocomplete="off"><span>%</span></label>
+                  </div>
+                  <label class="vp-bend-field" for="slice-set-bridge-speed">Bridge speed
+                    <input type="number" id="slice-set-bridge-speed" min="1" max="300" step="1" placeholder="auto" inputmode="decimal"
+                             title="How fast a bridge (a line laid over air) is printed, mm/s. A bridge never prints faster than the filament's max flow allows, whatever is set here. Slower is not always better: on CR-TPU, 12 mm/s left the strands hanging in curls where 25 mm/s did not." autocomplete="off"><span>mm/s</span></label>
+                  <label class="vp-bend-field" for="slice-set-bridge-flow">Bridge flow
+                    <input type="number" id="slice-set-bridge-flow" min="0.5" max="1.5" step="0.05" placeholder="auto" inputmode="decimal"
+                             title="How much plastic a bridge line gets (1 = a strand the nozzle's width). A little under 1 makes a thinner strand that pulls tight instead of drooping." autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-hang-speed">Hanging wall speed
+                    <input type="number" id="slice-set-hang-speed" min="1" max="300" step="1" placeholder="auto" inputmode="decimal"
+                             title="How fast a wall that hangs over open air from end to end is printed, mm/s - the edge of a roof over a window, found automatically the way overhangs are. Empty: the filament's own, else the bridge's speed, as Studio prints it (on CR-TPU, 10 made the lip no better and the bridges worse). Never faster than the bridge speed; walls that only partly hang keep the profile's overhang speeds." autocomplete="off"><span>mm/s</span></label>
+                  <label class="vp-bend-field" for="slice-set-bridge-temp">Bridge temp
+                    <input type="number" id="slice-set-bridge-temp" min="0" max="300" step="5" placeholder="off" inputmode="numeric"
+                             title="A nozzle temperature for bridges over open air, °C. Before a layer with such a bridge the nozzle waits at the printer's purge position for this temperature, primes and wipes; that layer and the one over it print whole at it; then the same wait brings the layer's own temperature back. One change in and one out for each stretch of bridge layers. A filament can bring its own (CR-TPU: 215 on the A1 mini); empty is the filament's, 0 turns it off. A1 mini only so far." autocomplete="off"><span>&deg;C</span></label>
+                  <label class="vp-bend-field" for="slice-set-bridge-temp-from">Bridge temp from layer
+                    <input type="number" id="slice-set-bridge-temp-from" min="2" max="100000" step="1" placeholder="bridges only" inputmode="numeric"
+                             title="A layer number, as the preview counts them (the first layer is 1): from it to the top every layer prints at the bridge temperature - one change at the park going in, none coming out. For a part whose walls want it hotter and whose roof wants it cooler: on CR-TPU, 235 for the walls and 215 from the layer after the cone's tip. Empty: only the bridges' own stretches. Needs a Bridge temp." autocomplete="off"></label>
+                  <p class="slice-settings-note" id="slice-bridge-note" hidden></p>
+                </div>
+              </details>
+              <details class="vp-sec print-sec" id="print-sec-strength">
+                <summary class="vp-sec-head" title="Walls, the sparse infill and the pattern of the surfaces.">Strength</summary>
+                <div class="vp-sec-body">
+                  <label class="vp-bend-field" for="slice-set-walls">Wall loops
+                    <input type="number" id="slice-set-walls" value="2" min="1" max="10" step="1" autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-density">Sparse infill density
+                    <input type="number" id="slice-set-density" value="15" min="0" max="100" step="5" autocomplete="off"><span>%</span></label>
+                  <label class="vp-bend-field" for="slice-set-pattern">Sparse infill pattern
+                    <select class="vp-select" id="slice-set-pattern" title="Sparse infill pattern" autocomplete="off">
+                      <option value="grid" selected>grid</option>
+                      <option value="zigzag" title="Bambu Studio's Rectilinear (zig-zag in its profile): lines at 45 and 135 degrees, turning with every layer, joined at their ends">rectilinear</option>
+                      <option value="lines">lines</option>
+                      <option value="concentric" title="Rings that follow the walls, a spacing over the density apart">concentric</option>
+                      <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle of the part outward, the same on every layer">archimedean chords</option>
+                      <option value="3dhoneycomb" title="3D honeycomb: wavy lines whose waves and direction change with height, so the cells close over each other">3D honeycomb</option>
+                      <option value="gyroid" title="Gyroid: each layer the cut through one smooth surface, wavy lines that turn from X to Y with height">gyroid</option>
+                      <option value="honeycomb" title="Honeycomb: regular hexagons, drawn as zigzags along one of their three edge directions a layer">honeycomb</option>
+                      <option value="cubic" title="Cubic: three families of straight lines that slide with height - cubes standing on a corner">cubic</option>
+                      <option value="adaptivecubic" title="Adaptive cubic: the cubic's lines at 0, 60 and 120 degrees, wider apart, about the part's own middle (every cell the finest: Bambu's coarser cells deep inside a large part are not done)">adaptive cubic</option>
+                      <option value="lightning" title="Lightning: only what holds the top up - lines under every roof, shorter with every layer down, none below (combs where Bambu draws trees)">lightning</option>
+                    </select></label>
+                  <label class="vp-bend-field" for="slice-set-surface">Surface pattern
+                    <select class="vp-select" id="slice-set-surface" title="The pattern of the top and bottom surfaces and the solid infill" autocomplete="off">
+                        <option value="zigzag" selected title="Lines at 45 and 135 degrees, turning with every layer (Bambu's Rectilinear; its Monotonic is the same lines in another order)">rectilinear</option>
+                        <option value="concentric" title="Rings that follow the walls, from the middle outward">concentric</option>
+                        <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward">archimedean chords</option>
+                        <option value="hilbertcurve" title="Hilbert curve: one square space-filling line, a spacing apart, at 45 degrees">hilbert curve</option>
+                        <option value="octagramspiral" title="Octagram spiral: eight-pointed stars, one inside the next, drawn as one line from the middle outward">octagram spiral</option>
+                      </select></label>
+                </div>
+              </details>
+              <details class="vp-sec print-sec" id="print-sec-supports" open>
+                <summary class="vp-sec-head" title="Whether the plate is sliced with supports, and everything they are built and laid by.">Supports</summary>
+                <div class="vp-sec-body">
+                  <label class="vp-check print-on" for="sup-on" title="On: Slice builds the supports first (again, when a setting, the piece or its tips changed) and slices the plate with them. Off: Slice takes the plate's supports off and slices the pieces alone. One Undo puts them back.">
+                    <input type="checkbox" id="sup-on" checked autocomplete="off"> Supports</label>
+                  <div id="print-sup-body">
+                  <div class="sup-modes" role="group" aria-label="Where the supports start">
+                    <button id="sup-mode-auto" class="sup-seg is-on" type="button" aria-pressed="true"
+                            title="The planner finds every hanging area and holds all of it. Nothing to place.">Auto</button>
+                    <button id="sup-mode-assisted" class="sup-seg" type="button" aria-pressed="false"
+                            title="The detected spots show as points on the piece: click one to turn it off, or on. Circles on the plate say where the supports may land.">Assisted</button>
+                    <button id="sup-mode-custom" class="sup-seg" type="button" aria-pressed="false"
+                            title="No detected spots: click the underside of the piece to place a tip, click a tip to take it away. Circles on the plate say where the supports may land.">Custom</button>
+                  </div>
+                  <div id="sup-tools" class="sup-tools" role="group" aria-label="What the pointer does" hidden>
+                    <button id="sup-tool-tips" class="sup-seg is-on" type="button" aria-pressed="true"
+                            title="Work on the piece: the spots or tips. The view orbits as usual.">Tips</button>
+                    <button id="sup-tool-circles" class="sup-seg" type="button" aria-pressed="false"
+                            title="Start drawing landing circles on the plate; press again (or Esc) to stop and orbit. Orbit to a good view first.">Circles</button>
+                    <button id="sup-tool-erase" class="sup-seg" type="button" aria-pressed="false" disabled
+                            title="After a Generate: hover a built member to light it and what it holds up; click to remove it and plan again. Press again (or Esc) to stop.">Erase</button>
+                  </div>
+                  <div id="sup-paint-row" class="sup-tools sup-paint-row" role="group" aria-label="Paint where supports are missing" hidden>
+                    <button id="sup-paint" class="sup-seg" type="button" aria-pressed="false" disabled
+                            title="Drag a brush over the piece where the supports do not reach: each stroke asks for tips right under it and lays the raft up to the surface, to the brush's edge, stopping at the gap. One Undo each. Press again (or Esc) to orbit.">Paint</button>
+                    <label class="sup-brush" for="sup-brush" title="The brush's diameter, mm.">
+                      <input type="number" id="sup-brush" value="4" min="0.8" max="20" step="0.5" aria-label="Brush diameter, mm" autocomplete="off"><span>mm</span></label>
+                    <button id="sup-paint-clear" class="sup-seg" type="button" disabled
+                            title="Take all the paint off this piece. One Undo puts it back.">Clear paint</button>
+                  </div>
+                  <div id="sup-blocker-row" class="sup-tools sup-blocker-row" role="group" aria-label="Supports blockers">
+                    <button id="sup-blocker-add" class="sup-seg" type="button"
+                            title="Put a ghost box on the plate: no support is made inside it. Drag the box to move it (Shift: up and down), drag a handle on a face to stretch it, add as many as you like - boxes that overlap are one larger area. Click a box to pick it; Delete takes the picked one away.">Supports Blocker</button>
+                    <button id="sup-blocker-delete" class="sup-seg" type="button" disabled
+                            title="Take the picked blocker away. One Undo puts it back.">Delete</button>
+                    <button id="sup-blocker-clear" class="sup-seg" type="button" disabled
+                            title="Take every blocker off the plate. One Undo puts them back.">Clear</button>
+                  </div>
+                  <p id="sup-blocker-read" class="hint sup-blocker-read" hidden></p>
+                  <label class="vp-bend-field" for="sup-angle">Angle
+                    <input type="number" id="sup-angle" value="30" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
+                           title="Faces within this many degrees of horizontal get support. Bambu Studio's threshold means the same thing, and its default is 30. A smaller angle finds only the flatter undersides; a larger one reaches steeper faces too. The outlines follow as you type." autocomplete="off"><span id="sup-angle-note" class="sup-angle-note">35&deg; &middot; Bambu 30&deg;</span></label>
+                  <label class="vp-bend-field" for="sup-style">Type
+                    <select id="sup-style" class="vp-select" title="Straight strut: one post per spot. Tree: branches that join on the way down (Bambu's tree). Gecko Hands: the tree with a hand at every spot." autocomplete="off">
+                      <option value="strut">Straight strut</option>
+                      <option value="tree" selected>Tree</option>
+                      <option value="gecko-hand">Gecko Hands</option>
+                    </select></label>
+                  <label class="vp-bend-field" for="sup-size">Size
+                    <input type="number" id="sup-size" value="1.2" min="0.4" max="6" step="0.1" aria-label="Strut side, mm"
+                           title="The cross-section side of the struts, trunks and branches. Never below the nozzle's wall floor - the planner raises it if asked for less." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-check" for="sup-rest" title="Off: every support stands on the plate, and a spot with no clear way down is left unreachable. On: such a spot may be held from a part below it.">
+                    <input type="checkbox" id="sup-rest" autocomplete="off"> May rest on the part</label>
+                  <label class="vp-check" for="sup-small" title="On: the small steps - an edge no slicer calls an overhang, which a thin horn off the tree catches - get no horn, and the part holds them as it prints. Every other spot keeps its branch and interface.">
+                    <input type="checkbox" id="sup-small" autocomplete="off"> Exclude small overhangs</label>
+                  <label class="vp-check" for="sup-one" hidden style="display:none" title="On (Auto, Tree): the way Bambu's tree slim grows - a tip every 5 mm, a sheet between them, one trunk to a cluster of tips. Off: a tip on every spot of the 3 mm grid and as many trunks as the grid needs.">
+                    <input type="checkbox" id="sup-one" checked autocomplete="off"> One trunk per cluster</label>
+                  <label class="vp-bend-field" for="slice-set-iface-angle">Interface angle
+                    <select id="slice-set-iface-angle" class="vp-select" title="How the support's transition and interface layers turn under the part (the column rule). Profile (Bambu): Bambu's own rule off the profile - the first layer at support_angle + 90, the top square to the bridge at bridge_angle, one turn a layer down (a Dense support prints with the reference's 20 / 45: 110, then 45 / 135). Square to bridge: the top interface layer crosses the part's bridge lines at 90 degrees, one turn a layer down (parallel lines weld, crossed ones release). 3.6 (Studio 2.9): Bambu Studio 02.09's own - the first layer at 90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports laid at 3.6 (the owner's P1S print released clean). Crosshatch: the old 45 / 135. A testing ground: Generate slices with it." autocomplete="off">
+                      <option value="profile">Profile (Bambu)</option>
+                      <option value="bridge">Square to bridge</option>
+                      <option value="studio36" selected>3.6&deg; (Studio 2.9)</option>
+                      <option value="crosshatch">Crosshatch 45/135</option>
+                    </select></label>
+                  <details class="vp-sec sup-tree-sec" id="sup-tree-sec">
+                    <summary class="vp-sec-head" title="Bambu's own Tree settings, by its names and with its defaults: Generate builds the tree with them (the column interface rule).">Tree settings</summary>
+                    <div class="vp-sec-body">
+                      <label class="vp-bend-field" for="sup-tree-distance">Branch distance
+                        <input type="number" id="sup-tree-distance" value="5" min="1" max="20" step="0.5" autocomplete="off" aria-label="Branch distance, mm"
+                               title="How far apart the branch tips stand under an overhang (Bambu's tree_support_branch_distance). Default 5."><span>mm</span></label>
+                      <label class="vp-bend-field" for="sup-tree-diameter">Branch diameter
+                        <input type="number" id="sup-tree-diameter" value="2" min="0.5" max="10" step="0.1" autocomplete="off" aria-label="Branch diameter, mm"
+                               title="A branch's diameter at its top; it widens from here going down (Bambu's tree_support_branch_diameter). Default 2."><span>mm</span></label>
+                      <label class="vp-bend-field" for="sup-tree-angle">Branch angle
+                        <input type="number" id="sup-tree-angle" value="45" min="10" max="60" step="1" autocomplete="off" aria-label="Branch angle, degrees"
+                               title="The most a branch leans off straight down (Bambu's tree_support_branch_angle). Default 45."><span>&deg;</span></label>
+                      <label class="vp-bend-field" for="sup-tree-dangle">Branch diameter angle
+                        <input type="number" id="sup-tree-dangle" value="5" min="0" max="15" step="0.5" autocomplete="off" aria-label="Branch diameter angle, degrees"
+                               title="How fast a branch and the trunk widen going down, measured along the branches from the farthest tip: 5 widens the diameter about 0.17 mm a mm (Bambu's tree_support_branch_diameter_angle). Default 5."><span>&deg;</span></label>
+                      <label class="vp-bend-field" for="sup-tree-tip">Tip diameter
+                        <input type="number" id="sup-tree-tip" value="0.8" min="0.3" max="3" step="0.1" autocomplete="off" aria-label="Tip diameter, mm"
+                               title="A branch's diameter at the tip, where it meets the interface (Bambu's tree_support_tip_diameter). Default 0.8."><span>mm</span></label>
+                    </div>
+                  </details>
+                  <details class="vp-sec sup-bambu-sec" id="sup-bambu-sec">
+                    <summary class="vp-sec-head" title="Bambu Studio's Advanced support settings, by its names and in its order. Each row starts at what this slicer does today (its tooltip names Bambu's own default where that differs); Save keeps them with the rest of the card.">Advanced</summary>
+                    <div class="vp-sec-body">
+                      <label class="vp-bend-field" for="slice-set-sup-density">Initial layer density
+                        <input type="number" id="slice-set-sup-density" value="100" min="10" max="100" step="5" autocomplete="off" aria-label="Initial layer density"
+                               title="How densely a support's first layer is filled (Bambu's raft_first_layer_density, its default 90). 100: solid, as this slicer has always laid it."><span>%</span></label>
+                      <label class="vp-bend-field" for="slice-set-sup-expand">Initial layer expansion
+                        <input type="number" id="slice-set-sup-expand" value="-1" min="-1" max="10" step="0.1" autocomplete="off" aria-label="Initial layer expansion"
+                               title="How far the first-layer pad under a trunk reaches past its foot (Bambu's raft_first_layer_expansion). -1: automatic - 0.6 mm. Generate builds the pad."><span>mm</span></label>
+                      <label class="vp-bend-field" for="slice-set-sup-walls">Support wall loops
+                        <input type="number" id="slice-set-sup-walls" value="-1" min="-1" max="5" step="1" autocomplete="off" aria-label="Support wall loops"
+                               title="Walls round every piece of the tree (Bambu's tree_support_wall_count). -1 (or 0): automatic - one."></label>
+                      <label class="vp-bend-field" for="slice-set-sup-topz">Top Z distance
+                        <input type="number" id="slice-set-sup-topz" value="0.18" min="0" max="2" step="0.01" autocomplete="off" aria-label="Top Z distance"
+                               title="The gap between the support's top and the part over it (Bambu's support_top_z_distance, its default 0.2). 0.18 is this slicer's own. Larger releases easier and sags more."><span>mm</span></label>
+                      <label class="vp-bend-field" for="slice-set-sup-bottomz">Bottom Z distance
+                        <input type="number" id="slice-set-sup-bottomz" value="0.2" min="0" max="2" step="0.05" autocomplete="off" aria-label="Bottom Z distance"
+                               title="With May rest on the part: the gap between a support that stands on the part and the face under it (Bambu's support_bottom_z_distance). Generate builds the foot; the slicer holds its layers to it."><span>mm</span></label>
+                      <label class="vp-bend-field" for="slice-set-sup-base">Base pattern
+                        <select id="slice-set-sup-base" class="vp-select" autocomplete="off" title="What fills the tree (Bambu's support_base_pattern). Default: walls, and a line across each branch ring just under the interface. Rectilinear: lines through the whole tree, one way. Rectilinear grid: both ways. Hollow: walls alone.">
+                          <option value="default" selected>Default</option>
+                          <option value="rectilinear">Rectilinear</option>
+                          <option value="rectilinear-grid">Rectilinear grid</option>
+                          <option value="hollow">Hollow</option>
+                        </select></label>
+                      <label class="vp-bend-field" for="slice-set-sup-base-spacing">Base pattern spacing
+                        <input type="number" id="slice-set-sup-base-spacing" value="2.5" min="0.5" max="20" step="0.1" autocomplete="off" aria-label="Base pattern spacing"
+                               title="How far apart the base pattern's lines lie (Bambu's support_base_pattern_spacing)."><span>mm</span></label>
+                      <label class="vp-bend-field" for="slice-set-sup-angle">Pattern angle
+                        <input type="number" id="slice-set-sup-angle" value="0" min="0" max="180" step="1" autocomplete="off" aria-label="Pattern angle"
+                               title="The direction of the base pattern's lines, and - with Interface angle on Profile - of the interface's first layer, a quarter turn on (Bambu's support_angle)."><span>&deg;</span></label>
+                      <label class="vp-bend-field" for="sup-interface">Top interface layers
+                        <select id="sup-interface" class="vp-select" title="How many interface layers lie under the part (Bambu's support_interface_top_layers). Under them the slicer lays 2 transition layers, then the tree. 0: no interface - the transition meets the part." autocomplete="off">
+                          <option value="0">0</option>
+                          <option value="1">1</option>
+                          <option value="2">2</option>
+                          <option value="3" selected>3</option>
+                        </select></label>
+                      <label class="vp-bend-field" for="slice-set-sup-iface-pattern">Interface pattern
+                        <select id="slice-set-sup-iface-pattern" class="vp-select" autocomplete="off" title="How the interface layers are laid (Bambu's support_interface_pattern). Default: the Interface angle rule below. Rectilinear: every layer one way. Rectilinear Interlaced: a quarter turn a layer. Grid: both ways on every layer. Concentric: rings in from the edge.">
+                          <option value="default" selected>Default</option>
+                          <option value="rectilinear">Rectilinear</option>
+                          <option value="concentric">Concentric</option>
+                          <option value="rectilinear_interlaced">Rectilinear Interlaced</option>
+                          <option value="grid">Grid</option>
+                        </select></label>
+                      <label class="vp-bend-field" for="slice-set-sup-iface-spacing">Top interface spacing
+                        <input type="number" id="slice-set-sup-iface-spacing" value="0.5" min="0" max="5" step="0.05" autocomplete="off" aria-label="Top interface spacing"
+                               title="The gap between the interface's lines (Bambu's support_interface_spacing). 0.5 releases easily; 0.1 is nearly solid."><span>mm</span></label>
+                      <label class="vp-bend-field" for="slice-set-sup-expansion">Normal Support expansion
+                        <input type="number" id="slice-set-sup-expansion" value="0" min="-2" max="5" step="0.1" autocomplete="off" aria-label="Normal Support expansion"
+                               title="How much further past an overhang's edge the interface reaches (Bambu's support_expansion, which widens its normal supports; here the tree's interface). Negative: less far."><span>mm</span></label>
+                      <label class="vp-bend-field" for="slice-set-sup-xy">Support/object xy distance
+                        <input type="number" id="slice-set-sup-xy" value="0.35" min="0" max="3" step="0.05" autocomplete="off" aria-label="Support/object xy distance"
+                               title="How far the support stays from the part beside it (Bambu's support_object_xy_distance). The tree is planned a tenth further off and the slicer cuts to this."><span>mm</span></label>
+                      <label class="vp-check" for="slice-set-sup-zover" title="On: under an overhang the support comes in to 0.2 mm of the wall beside it and the top Z distance decides how close it stands - a slope is held right up to its foot. Off: the xy distance everywhere (Bambu's top_z_overrides_xy_distance).">
+                        <input type="checkbox" id="slice-set-sup-zover" autocomplete="off"> Z overrides X/Y</label>
+                      <label class="vp-bend-field" for="slice-set-sup-first-gap">Support/object first layer gap
+                        <input type="number" id="slice-set-sup-first-gap" value="0.2" min="0" max="3" step="0.05" autocomplete="off" aria-label="Support/object first layer gap"
+                               title="How far a support's first layer stays from the part's first layer (Bambu's support_object_first_layer_gap)."><span>mm</span></label>
+                      <label class="vp-bend-field" for="slice-set-sup-bridge">Max bridge length
+                        <input type="number" id="slice-set-sup-bridge" value="5" min="0" max="100" step="0.5" autocomplete="off" aria-label="Max bridge length"
+                               title="A span this long or shorter between two holds is a bridge and gets no support (Bambu's max_bridge_length). 0: every bridge is supported. 5 is this detector's own. The outlines follow."><span>mm</span></label>
+                      <label class="vp-check" for="slice-set-sup-indep" title="On: the support is cut on layers of its own, as thick as the nozzle allows (0.28), meeting the part's at every interface. Off: on the part's layers (Bambu's independent_support_layer_height).">
+                        <input type="checkbox" id="slice-set-sup-indep" checked autocomplete="off"> Independent support layer height</label>
+                    </div>
+                  </details>
+                  <details class="vp-sec sup-adv-sec" id="sup-adv-sec">
+                    <summary class="vp-sec-head" title="The tree planner's own numbers (nso_support_flow.js), each with its default. Nothing rebuilds as you type; Generate builds with them. Save keeps them with the rest of the card.">Tree planner</summary>
+                    <div class="vp-sec-body">
+                      <label class="vp-bend-field" for="sup-adv-cover">Tip spacing
+                        <input type="number" id="sup-adv-cover" value="0.44" min="0.2" max="1.2" step="0.02" autocomplete="off" aria-label="Tip spacing, a share of the branch distance"
+                               title="How far a spot may lie from its tip, as a share of the Branch distance: 0.44 x 5 mm stands a tip about every 3 - 4 mm. Larger: fewer tips, more for the interface to span. Default 0.44."><span>x</span></label>
+                      <label class="vp-bend-field" for="sup-adv-tipdrop">Tip column
+                        <input type="number" id="sup-adv-tipdrop" value="2.8" min="0.8" max="8" step="0.1" autocomplete="off" aria-label="Tip column, mm"
+                               title="How far a tip stands straight under its spot, on its own, before it may lean and join others. Shorter: branches join higher (less material, wider bodies under the interface). Default 2.8."><span>mm</span></label>
+                      <label class="vp-bend-field" for="sup-adv-gather">Gather
+                        <input type="number" id="sup-adv-gather" value="0.25" min="0" max="1" step="0.05" autocomplete="off" aria-label="Gather, 0 to 1"
+                               title="How much a branch heads for the middle of everything it can still reach, rather than its nearest neighbour. 0: neighbours pair up where they stand (more trunks). 1: the whole canopy draws to one point (long leaning branches). Default 0.25."></label>
+                      <label class="vp-bend-field" for="sup-adv-reach">Join reach
+                        <input type="number" id="sup-adv-reach" value="0.95" min="0.2" max="1.5" step="0.05" autocomplete="off" aria-label="Join reach"
+                               title="Two branches go for one another when they can meet within this share of the height they have left. Smaller: fewer long leans, more trunks. Default 0.95."><span>x</span></label>
+                      <label class="vp-bend-field" for="sup-adv-floor">Straight foot
+                        <input type="number" id="sup-adv-floor" value="2.4" min="0.5" max="10" step="0.1" autocomplete="off" aria-label="Straight foot, mm"
+                               title="Over the plate a trunk stands straight this high: nothing leans or joins lower. Default 2.4."><span>mm</span></label>
+                      <label class="vp-bend-field" for="sup-adv-flare">Flare height
+                        <input type="number" id="sup-adv-flare" value="2" min="0" max="6" step="0.1" autocomplete="off" aria-label="Flare height, mm"
+                               title="A trunk widens to its foot over this height above the plate. 0: no flare. Default 2."><span>mm</span></label>
+                      <label class="vp-bend-field" for="sup-adv-flaretan">Flare slope
+                        <input type="number" id="sup-adv-flaretan" value="0.45" min="0" max="1.5" step="0.05" autocomplete="off" aria-label="Flare slope, mm a mm"
+                               title="How much wider a side the flare makes the trunk for every mm of its height: 0.45 x 2 mm is 0.9 mm a side at the plate. Default 0.45."></label>
+                      <div class="sup-tune-row">
+                        <span id="sup-adv-note" class="sup-tune-note"></span>
+                        <button id="sup-adv-defaults" class="btn btn-secondary" type="button" title="Put every Advanced number back to its default. Nothing rebuilds; Generate does.">Defaults</button>
+                      </div>
+                      <div class="sup-tune-row">
+                        <button id="sup-preset-export" class="btn btn-secondary" type="button" title="Save every saved setting of this browser as one file (nso-supports-settings.json): a backup, or to carry them to another browser.">Export saved</button>
+                        <button id="sup-preset-import" class="btn btn-secondary" type="button" title="Read a file Export saved wrote: its settings are added to this browser's (one of the same name is replaced).">Import</button>
+                        <input type="file" id="sup-preset-file" accept=".json,application/json" hidden>
+                      </div>
+                    </div>
+                  </details>
+                  <details class="vp-sec sup-tune" id="sup-tune" hidden>
+                    <summary class="vp-sec-head" id="sup-tune-head" title="Custom only: the numbers the planner builds its trees by. Nothing rebuilds as you type; Regenerate builds with them.">Tune<span id="sup-tune-count" class="sup-tune-count"></span></summary>
+                    <div class="vp-sec-body">
+                      <label class="vp-bend-field" for="sup-knob-tip">Trunk top
+                        <input type="number" id="sup-knob-tip" value="2" min="0" step="0.1" aria-label="Trunk top diameter, mm"
+                               title="How thick a trunk is at its top, in mm. The trunk widens from here on its way down. Default 2." autocomplete="off"><span>mm</span></label>
+                      <label class="vp-bend-field" for="sup-knob-growth">Trunk growth
+                        <input type="number" id="sup-knob-growth" value="5.5" min="0" step="0.5" aria-label="Trunk growth, degrees"
+                               title="How fast a trunk widens going down: the angle of its side off vertical, in degrees. 0 is a straight trunk. Default 5.5." autocomplete="off"><span>&deg;</span></label>
+                      <label class="vp-bend-field" for="sup-knob-lean">Lean limit
+                        <input type="number" id="sup-knob-lean" value="30" min="0" step="1" aria-label="Lean limit, degrees"
+                               title="The most a branch may lean off straight down, in degrees. Smaller: more, straighter trunks. Default 30." autocomplete="off"><span>&deg;</span></label>
+                      <label class="vp-bend-field" for="sup-knob-node">Node spacing
+                        <input type="number" id="sup-knob-node" value="5" min="0" step="0.5" aria-label="Node spacing, mm"
+                               title="How far apart the points are where branches may join, in mm. Default 5." autocomplete="off"><span>mm</span></label>
+                      <div class="sup-tune-row">
+                        <span id="sup-tune-note" class="sup-tune-note"></span>
+                        <button id="sup-tune-defaults" class="btn btn-secondary" type="button" disabled
+                                title="Put all four back to the defaults. Nothing rebuilds; Regenerate does.">Defaults</button>
+                      </div>
+                    </div>
+                  </details>
+                  <p id="sup-hint" class="hint sup-hint">Click an outlined area to leave it out, or put it back. Shift-click the piece to add a spot. Click a support to pick it.</p>
+                  </div>
+                </div>
+              </details>
+              <details class="vp-sec print-sec" id="print-sec-adhesion">
+                <summary class="vp-sec-head" title="The brim and the raft. They are the plate's, with supports or without.">Adhesion</summary>
+                <div class="vp-sec-body">
+                  <label class="vp-bend-field" for="slice-set-brim">Brim
+                    <select class="vp-select" id="slice-set-brim" title="A brim round the first layer, 5 mm, 0.1 mm off the wall (Bambu's auto_brim: a part that is tall for its foot gets one). It stays off a support's pad." autocomplete="off">
+                        <option value="auto" selected>auto</option>
+                        <option value="outer">every part</option>
+                        <option value="none">off</option>
+                      </select></label>
+                  <label class="vp-bend-field" for="slice-set-raft">Raft
+                    <input type="number" id="slice-set-raft" value="0" min="0" max="30" step="1" aria-label="Raft layers"
+                           title="Raft layers under everything on the plate - its own system between the plate and the first layer of every part and support, with or without a support style (Bambu's raft_layers): the top half (rounded up) Support interface, the rest Support. 0: no raft (and the brim as set); with a raft there is no brim. Generate slices with it." autocomplete="off"><span>layers</span></label>
+                  <label class="vp-bend-field" for="slice-set-raft-gap">Raft contact
+                    <input type="number" id="slice-set-raft-gap" value="0.1" min="0" max="1" step="0.05" aria-label="Raft contact Z distance, mm"
+                           title="Raft contact Z distance, mm: the gap between the raft's top and the first layer on it (Bambu's raft_contact_distance, 0.1)." autocomplete="off"><span>mm</span></label>
+                </div>
+              </details>
+              <p class="slice-settings-note" id="slice-settings-note">Each row starts at the printer profile's value. They take effect on the next Slice, and the exported file records them.</p>
+              <button id="slice-settings-reset" type="button" class="btn btn-secondary"
+                      title="Every row back to the printer profile's value, the filament included. The saved setting shown is let go.">Profile values</button>
+            </div>
+          </details>
+          <!-- UNDO with REDO under it, the same stack as REMOVE / CLEAR PLATE and
+               EXPORT / OPTIMIZE: one slab tall in the row, the second below it. -->
+          <div class="vp-shell-stack" id="stack-undo">
+            <button id="btn-undo" class="vp-bar-btn" type="button" disabled>↶ Undo</button>
+            <button id="btn-redo" class="vp-bar-btn" type="button" disabled
+                    title="Nothing to redo">↷ Redo</button>
+          </div>
+          <!-- REMOVE with CLEAR PLATE under it, EXPORT with OPTIMIZE under it: two
+               stacks, each as wide as its wider label and one slab tall in the row,
+               so the column still starts under Import. Optimize is the old Pack
+               menu's one button; Clear plate came from the old Plate menu. -->
+          <div class="vp-shell-stack">
+            <button id="btn-delete-placed" class="vp-bar-btn" type="button" disabled
+                    title="Delete the selected piece from the plate. One Undo puts it back.">⌫ Remove</button>
+            <button id="btn-clear-plate" class="vp-bar-btn" type="button"
+                    title="Take every piece off the plate. The loaded pieces are in Import &gt; Recent.">Clear plate</button>
+          </div>
+          <div class="vp-shell-stack">
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-export">
+            <summary class="vp-bar-btn" title="Everything the Export card held: format, cooling profile, downloads, Save to Library, Delete model">Export</summary>
+            <div class="vp-menu-body vp-top-body" id="export-card">
+              <label class="hint" for="export-format" style="margin-bottom:4px;display:block">Format</label>
+              <select id="export-format" title="File format for both export buttons">
+              <option value="stl">STL</option>
+              <option value="3mf">3MF - Bambu Studio project, cooling settings baked in</option>
+              </select>
+              <div id="cooling-profile-row" hidden>
+              <label class="hint" for="cooling-profile" style="margin-bottom:4px;display:block">Cooling profile</label>
+              <select id="cooling-profile" title="Cooling / overhang-fan settings baked into the 3MF"></select>
+              <p class="hint" id="cooling-profile-note"></p>
+              </div>
+              <button id="btn-export-model" class="btn btn-primary" type="button">Download selected STL</button>
+              <!-- Save As: the same selected piece, the same STL bytes, into the
+              Library instead of onto your disk. app-library-save.js binds it;
+              deleting this button and that script tag removes the feature. -->
+              <button id="btn-library-save" class="btn btn-secondary" type="button"
+              title="Save the selected piece into the Library catalog">Save selected to Library</button>
+              <!-- The plate export's file name (STL and 3MF): empty takes the default, nest_<plate>_<n>pcs, shown as the placeholder.
+              app-core.js plateExportFilename() reads it. -->
+              <label class="hint" for="export-plate-name" style="margin-bottom:4px;display:block">Plate file name</label>
+              <input id="export-plate-name" class="export-name" type="text" spellcheck="false" autocomplete="off"
+              title="Name for Export plate (STL or 3MF). Leave empty for the default shown." placeholder="nest_plate_0pcs">
+              <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate STL</button>
+              <button id="btn-delete-model" class="btn btn-secondary" type="button">Delete model</button>
+            </div>
+          </details>
+            <button id="btn-optimize" class="vp-bar-btn" type="button" disabled
+                    title="Optimize plate: nest the pieces on the plate">Optimize</button>
+          </div>
+          </div>
+          <!-- PLATE & PIECES: the old Plate menu's Plate and Pieces members, pinned
+               open in the top-right corner as one panel - always visible, never a
+               drop-down, so no one-panel-at-a-time rule ever shuts it. The row keeps
+               clear of it (styles.css, --plate-panel-w); the pieces list is the same
+               #model-list renderModelList() fills, so it updates live. -->
+          <section id="plate-panel" class="vp-plate-panel" aria-label="Plate and pieces">
+            <!-- + plate: the next bed, up to six (app-beds.js, docs/BEDS.md). Top-right corner of the card. -->
+            <button id="btn-add-plate" class="vp-plate-add" type="button" title="Add a plate (up to six)">+ plate</button>
+            <div id="menu-plate" class="vp-plate-sec">
+              <p class="vp-plate-head" title="Plate size, bed grid and snap">Plate</p>
+                <select id="plate-select">
+                  <option value="a1mini">A1 Mini 180</option>
+                  <option value="a1">A1 / X1C 256</option>
+                  <option value="p1s">P1S 256</option>
+                  <option value="prusa">Prusa 250 × 210</option>
+                  <option value="ender">Ender 220</option>
+                  <option value="custom">Custom…</option>
+                </select>
+                <div id="custom-size" class="custom-size hidden">
+                  <label>W <input type="number" id="custom-w" value="180" min="50" max="500"></label>
+                  <label>D <input type="number" id="custom-d" value="180" min="50" max="500"></label>
+                  <label>H <input type="number" id="custom-h" value="180" min="20" max="900"
+                                title="Build height. The plate picker has never carried one; the build-volume warning needs it."></label>
+                </div>
+                <div class="plate-info hidden-quiet">
+                  <span id="plate-dims">180 × 180 mm</span>
+                  <span id="plate-area">32,400 mm²</span>
+                </div>
+                <div class="plate-grid-controls">
+                  <label class="hint" for="plate-grid-show">Bed grid (10 mm)</label>
+                  <select id="plate-grid-show" title="A flat reference grid fixed to the plate. It is drawn only - it never takes a click.">
+                    <option value="auto">Auto - while positioning</option>
+                    <option value="on" selected>Always on</option>
+                    <option value="off">Off</option>
+                  </select>
+                  <label class="plate-grid-snap-row" for="chk-plate-grid-snap"
+                         title="A soft pull toward the nearest grid intersection while you drag. It assists, it does not lock - drag away from a line at any time.">
+                    <input type="checkbox" id="chk-plate-grid-snap"> Snap to grid
+                  </label>
+                </div>
+                <p id="build-volume-warning" class="build-warning" hidden></p>
+            </div>
+            <div id="menu-pieces" class="vp-plate-sec">
+              <p class="vp-plate-head" title="The pieces on the plate, and Clone">Pieces</p>
+              <div id="model-list" class="model-list"></div>
+              <div class="edit-row" style="margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap;">
+                <label for="clone-count">Clone</label>
+                <input id="clone-count" type="number" min="1" max="20" value="1" style="width:4rem;" />
+                <button id="btn-clone" class="btn btn-secondary" type="button" disabled>Clone piece</button>
+              </div>
+            </div>
+          </section>
+          <!-- The column: make/edit (Generate, Scale, Cut / Crop, Punch, Draw, Add, Subtract)
+               under Import, surface (Shape .. Sculpt, Assemble), and at the bottom G-scope,
+               Fill & fix and Check & repair over the view row (X-ray, Eye, Frame). Print
+               is in the top row, after Lock plate. -->
+          <div class="vp-shell-col">
+          <!-- GENERATE (was Gen+, in the top row): first in the column, right under Import. -->
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-gen">
-            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, a tray or plate of your own outline (Custom shape), a relief slab from a picture, or a silicone mold of the selected piece; or check a photogrammetry capture">Gen+</summary>
+            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, a tray or plate of your own outline (Custom shape), a relief slab from a picture, or a silicone mold of the selected piece; or check a photogrammetry capture">Generate</summary>
             <div class="vp-menu-body vp-top-body">
               <details class="vp-menu vp-wheel-menu">
               <summary>Wheel</summary>
@@ -647,115 +1181,6 @@
               </details>
             </div>
           </details>
-          <button id="btn-lock-pos" class="vp-bar-btn btn-lock-pos" type="button" disabled aria-pressed="false" title="Lock the selected piece's position. A locked piece refuses drag, the nudge arrows, Raise/Lower and the pose buttons, so a stray click cannot move it. Seat, Center, Align and Skin still place it. Shown by a teal outline and a 'locked' tag.">🔒 Lock position</button>
-          <button id="btn-plate-lock" class="vp-bar-btn btn-plate-lock" type="button" disabled aria-pressed="false" title="Lock the plate configuration: hold every piece where it is, in their current relative positions, in one action. Separate from the per-piece lock - it sets no piece flag, so unlocking the plate gives back exactly the piece locks you had.">🔒 Lock plate</button>
-          <!-- UNDO with REDO under it, the same stack as REMOVE / CLEAR PLATE and
-               EXPORT / OPTIMIZE: one slab tall in the row, the second below it. -->
-          <div class="vp-shell-stack" id="stack-undo">
-            <button id="btn-undo" class="vp-bar-btn" type="button" disabled>↶ Undo</button>
-            <button id="btn-redo" class="vp-bar-btn" type="button" disabled
-                    title="Nothing to redo">↷ Redo</button>
-          </div>
-          <!-- REMOVE with CLEAR PLATE under it, EXPORT with OPTIMIZE under it: two
-               stacks, each as wide as its wider label and one slab tall in the row,
-               so the column still starts under Import. Optimize is the old Pack
-               menu's one button; Clear plate came from the old Plate menu. -->
-          <div class="vp-shell-stack">
-            <button id="btn-delete-placed" class="vp-bar-btn" type="button" disabled
-                    title="Delete the selected piece from the plate. One Undo puts it back.">⌫ Remove</button>
-            <button id="btn-clear-plate" class="vp-bar-btn" type="button"
-                    title="Take every piece off the plate. The loaded pieces are in Import &gt; Recent.">Clear plate</button>
-          </div>
-          <div class="vp-shell-stack">
-          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-export">
-            <summary class="vp-bar-btn" title="Everything the Export card held: format, cooling profile, downloads, Save to Library, Delete model">Export</summary>
-            <div class="vp-menu-body vp-top-body" id="export-card">
-              <label class="hint" for="export-format" style="margin-bottom:4px;display:block">Format</label>
-              <select id="export-format" title="File format for both export buttons">
-              <option value="stl">STL</option>
-              <option value="3mf">3MF - Bambu Studio project, cooling settings baked in</option>
-              </select>
-              <div id="cooling-profile-row" hidden>
-              <label class="hint" for="cooling-profile" style="margin-bottom:4px;display:block">Cooling profile</label>
-              <select id="cooling-profile" title="Cooling / overhang-fan settings baked into the 3MF"></select>
-              <p class="hint" id="cooling-profile-note"></p>
-              </div>
-              <button id="btn-export-model" class="btn btn-primary" type="button">Download selected STL</button>
-              <!-- Save As: the same selected piece, the same STL bytes, into the
-              Library instead of onto your disk. app-library-save.js binds it;
-              deleting this button and that script tag removes the feature. -->
-              <button id="btn-library-save" class="btn btn-secondary" type="button"
-              title="Save the selected piece into the Library catalog">Save selected to Library</button>
-              <!-- The plate export's file name (STL and 3MF): empty takes the default, nest_<plate>_<n>pcs, shown as the placeholder.
-              app-core.js plateExportFilename() reads it. -->
-              <label class="hint" for="export-plate-name" style="margin-bottom:4px;display:block">Plate file name</label>
-              <input id="export-plate-name" class="export-name" type="text" spellcheck="false" autocomplete="off"
-              title="Name for Export plate (STL or 3MF). Leave empty for the default shown." placeholder="nest_plate_0pcs">
-              <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate STL</button>
-              <button id="btn-delete-model" class="btn btn-secondary" type="button">Delete model</button>
-            </div>
-          </details>
-            <button id="btn-optimize" class="vp-bar-btn" type="button" disabled
-                    title="Optimize plate: nest the pieces on the plate">Optimize</button>
-          </div>
-          </div>
-          <!-- PLATE & PIECES: the old Plate menu's Plate and Pieces members, pinned
-               open in the top-right corner as one panel - always visible, never a
-               drop-down, so no one-panel-at-a-time rule ever shuts it. The row keeps
-               clear of it (styles.css, --plate-panel-w); the pieces list is the same
-               #model-list renderModelList() fills, so it updates live. -->
-          <section id="plate-panel" class="vp-plate-panel" aria-label="Plate and pieces">
-            <!-- + plate: the next bed, up to six (app-beds.js, docs/BEDS.md). Top-right corner of the card. -->
-            <button id="btn-add-plate" class="vp-plate-add" type="button" title="Add a plate (up to six)">+ plate</button>
-            <div id="menu-plate" class="vp-plate-sec">
-              <p class="vp-plate-head" title="Plate size, bed grid and snap">Plate</p>
-                <select id="plate-select">
-                  <option value="a1mini">A1 Mini 180</option>
-                  <option value="a1">A1 / X1C 256</option>
-                  <option value="p1s">P1S 256</option>
-                  <option value="prusa">Prusa 250 × 210</option>
-                  <option value="ender">Ender 220</option>
-                  <option value="custom">Custom…</option>
-                </select>
-                <div id="custom-size" class="custom-size hidden">
-                  <label>W <input type="number" id="custom-w" value="180" min="50" max="500"></label>
-                  <label>D <input type="number" id="custom-d" value="180" min="50" max="500"></label>
-                  <label>H <input type="number" id="custom-h" value="180" min="20" max="900"
-                                title="Build height. The plate picker has never carried one; the build-volume warning needs it."></label>
-                </div>
-                <div class="plate-info hidden-quiet">
-                  <span id="plate-dims">180 × 180 mm</span>
-                  <span id="plate-area">32,400 mm²</span>
-                </div>
-                <div class="plate-grid-controls">
-                  <label class="hint" for="plate-grid-show">Bed grid (10 mm)</label>
-                  <select id="plate-grid-show" title="A flat reference grid fixed to the plate. It is drawn only - it never takes a click.">
-                    <option value="auto">Auto - while positioning</option>
-                    <option value="on" selected>Always on</option>
-                    <option value="off">Off</option>
-                  </select>
-                  <label class="plate-grid-snap-row" for="chk-plate-grid-snap"
-                         title="A soft pull toward the nearest grid intersection while you drag. It assists, it does not lock - drag away from a line at any time.">
-                    <input type="checkbox" id="chk-plate-grid-snap"> Snap to grid
-                  </label>
-                </div>
-                <p id="build-volume-warning" class="build-warning" hidden></p>
-            </div>
-            <div id="menu-pieces" class="vp-plate-sec">
-              <p class="vp-plate-head" title="The pieces on the plate, and Clone">Pieces</p>
-              <div id="model-list" class="model-list"></div>
-              <div class="edit-row" style="margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap;">
-                <label for="clone-count">Clone</label>
-                <input id="clone-count" type="number" min="1" max="20" value="1" style="width:4rem;" />
-                <button id="btn-clone" class="btn btn-secondary" type="button" disabled>Clone piece</button>
-              </div>
-            </div>
-          </section>
-          <!-- The column: make/edit (Scale .. Subtract) under Import, surface
-               (Shape .. Sculpt), and at the bottom Slice, G-scope and Check & repair
-               over the view row (X-ray, Eye, Frame). Shell v3: Add is new; Bend, Lift,
-               Measure & check and Plate went - their contents are in the cards. -->
-          <div class="vp-shell-col">
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-scale">
             <summary class="vp-bar-btn" title="Read the piece's shape and size, then lengthen, shorten or scale it">Scale</summary>
             <div class="vp-menu-body vp-top-body" id="scale-card">
@@ -912,8 +1337,12 @@
           <!-- Cut: the card is the switch - open it and the cutter is live,
                close it and the blade is gone (app-cut.js, cutWireCards). -->
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-cut">
-            <summary class="vp-bar-btn" title="Cut the selected piece: click it to drop a square blade, slide or angle it, then Cut">Cut</summary>
+            <summary class="vp-bar-btn" title="Cut the selected piece: click it to drop a square blade, slide or angle it, then Cut. Its switch swaps to Crop">Cut / Crop</summary>
             <div class="vp-menu-body vp-top-body" id="edit-card">
+              <div class="cutcrop-toggle" role="radiogroup" aria-label="Cut or Crop">
+                <button id="btn-cut-mode-cut" type="button" class="cutcrop-opt is-on" data-cutcrop="cut" role="radio" aria-checked="true" title="Cut: a blade through the piece">Cut</button>
+                <button id="btn-cut-mode-crop" type="button" class="cutcrop-opt" data-cutcrop="crop" role="radio" aria-checked="false" title="Crop: copy what a shape holds out of the piece as a new piece">Crop</button>
+              </div>
               <p id="cutter-status" class="hint">Click a piece to drop a square blade on it.</p>
               <p id="edit-size" class="hint hidden-quiet">—</p>
               <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
@@ -1097,6 +1526,8 @@
               </div>
             </div>
           </details>
+          <!-- CROP shares the Cut slab: its own slab is hidden, and the Cut | Crop switch at the top of
+               either card swaps one card for the other at the same spot (app-cut-crop-toggle.js). -->
           <!-- Crop: copy what a shape holds out of the selected piece as a new, solid
                piece (nso_crop.js, app-crop-card.js, docs/CROP.md). Pick a shape, drag
                it to size, press CROP. The shape is sized by its handles in the viewport
@@ -1104,9 +1535,13 @@
                Detach flange inside it: its button opens its panel in the card and a
                second press folds it away. Opening the card arms the
                same piece selection Cut uses, with no blade. -->
-          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-crop">
+          <details class="vp-menu vp-top-menu vp-shell-menu vp-cutcrop-twin" id="menu-crop">
             <summary class="vp-bar-btn" title="Crop: copy what a shape holds out of the selected piece as a new solid piece (the original is not touched), or Lift features off it">Crop</summary>
             <div class="vp-menu-body vp-top-body" id="crop-card">
+              <div class="cutcrop-toggle" role="radiogroup" aria-label="Cut or Crop">
+                <button id="btn-crop-mode-cut" type="button" class="cutcrop-opt" data-cutcrop="cut" role="radio" aria-checked="false" title="Cut: a blade through the piece">Cut</button>
+                <button id="btn-crop-mode-crop" type="button" class="cutcrop-opt is-on" data-cutcrop="crop" role="radio" aria-checked="true" title="Crop: copy what a shape holds out of the piece as a new piece">Crop</button>
+              </div>
               <div class="edit-row crop-shape-row" id="crop-shape-row" role="group" aria-label="Shape">
               <button id="btn-crop-shape-box" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Box: drag its faces to size it, its body to move it (Shift: up and down)">Box</button>
@@ -1114,6 +1549,8 @@
                       title="Cylinder, on any axis: slide its ends, drag its side for the diameter. Pull an end round past 45 degrees and the axis follows">Cylinder</button>
               <button id="btn-crop-shape-sphere" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Sphere: drag its handle for the diameter, its body to move it">Sphere</button>
+              <button id="btn-crop-shape-piece" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Cookie-Cutter: click another piece on the plate - it is the cutter, and the copy is where the two overlap, like a cookie cutter pressed through dough. Neither piece is changed">Cookie-Cutter</button>
               <button id="btn-crop-shape-outline" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Outline: click a piece for its footprint seen from above (Shift-click a triangle for its rim), then drag the outer and inner offsets and the two heights">Outline</button>
               <button id="btn-crop-shape-wall" class="btn btn-secondary" type="button" aria-pressed="false"
@@ -1169,6 +1606,92 @@
                         title="Detach: find the flange on this piece and take it off. The piece is capped flush with its own neck wall, with nothing left of the flange and no gap to bridge. The flange lands beside it as its own closed piece. One Undo puts both back. Reattach (in Connect) seats it somewhere else.">Detach flange</button>
               </div>
               <div class="vp-row vp-row-full"><p id="detach-readout" class="carve-readout">&mdash;</p></div>
+              </div>
+            </div>
+            </div>
+          </details>
+          <!-- PUNCH: its own card (was in Subtract), right under Cut / Crop. The card is the switch:
+               opening it arms Punch, shutting it (or Cancel, or Escape) puts Punch away (app-punch.js). -->
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-punch" data-sec="punch">
+            <summary class="vp-bar-btn" title="Punch round holes. Open the card, then click a face: a hole straight through it (or to a depth), normal to the face - one, a grid, or a circle of them, drawn live. Drag the first hole's ring for its diameter and the hole (or the cross at the click) to move it on the face; a grid's far-corner hole is its pitch, a radial hole its radius. The arrows nudge it 1 mm (Shift 0.1). A hole that would leave less than two nozzle widths of wall is refused in words. PUNCH cuts them all in one boolean, one Undo; the card stays armed for the next face. Escape or shutting the card stops.">Punch</summary>
+            <div class="vp-menu-body vp-finish">
+            <!-- PUNCH (app-punch.js, nso_punch.js; docs/PUNCH.md): arm it, click a face - a
+                 round hole straight through it or to a depth, normal to the face, alone,
+                 in a grid or on a circle. A live ghost of every hole; the first hole's
+                 ring is its diameter, the anchor drags across the face, the grid's far
+                 corner is its pitch, a radial hole its radius. PUNCH is one boolean and
+                 one Undo; the card stays armed for the next face. -->
+            <div class="vp-bend-panel punch-card" id="punch-card" hidden>
+              <label class="vp-bend-field" title="The hole's diameter, across its flats: a pin this size goes in. Drag the first hole's ring to change it. With a Thread chosen this is the thread's own (and read-only).">&Oslash;
+                <input type="number" id="inp-punch-dia" value="3.0" min="0.8" max="100" step="0.1" aria-label="Hole diameter, mm"><span>mm</span></label>
+              <label class="vp-bend-field" title="Thread: cut the hole as a tapped thread instead of a plain Ø. The hole is the thread's own (M6 = a Ø6 bolt thread + the 0.2 mm fit a side, so the bolt Gen+ > Fasteners makes turns in it; G and NPT are pipe threads, NPT tapered). A blind one is at least two pitches deep; a pitch finer than the nozzle resolves says so. docs/THREADS.md.">Thread
+                <select id="sel-punch-thread" class="vp-select" aria-label="Thread of the hole">
+                  <option value="" selected>None (plain hole)</option>
+                  <optgroup label="Metric (ISO coarse)">
+                    <option>M2</option><option>M2.5</option><option>M3</option><option>M4</option><option>M5</option><option>M6</option><option>M8</option><option>M10</option>
+                    <option>M12</option><option>M14</option><option>M16</option><option>M18</option><option>M20</option><option>M24</option><option>M30</option>
+                  </optgroup>
+                  <optgroup label="Metric (fine)">
+                    <option>M8x1</option><option>M10x1.25</option><option>M10x1</option><option>M12x1.5</option><option>M12x1.25</option><option>M14x1.5</option><option>M16x1.5</option>
+                    <option>M18x1.5</option><option>M20x1.5</option><option>M24x2</option><option>M30x2</option>
+                  </optgroup>
+                  <optgroup label="Pipe, parallel (G / BSP)">
+                    <option>G1/8</option><option>G1/4</option><option>G3/8</option><option>G1/2</option><option>G3/4</option><option>G1</option><option>G1-1/4</option><option>G1-1/2</option><option>G2</option>
+                  </optgroup>
+                  <optgroup label="Pipe, tapered (NPT)">
+                    <option>NPT1/8</option><option>NPT1/4</option><option>NPT3/8</option><option>NPT1/2</option><option>NPT3/4</option><option>NPT1</option><option>NPT1-1/4</option><option>NPT1-1/2</option><option>NPT2</option>
+                  </optgroup>
+                </select></label>
+              <label class="vp-check" id="punch-thread-left-row" hidden title="A left-hand thread. Right-hand is the usual one.">
+                <input type="checkbox" id="chk-punch-thread-left"> Left-hand
+              </label>
+              <label class="vp-bend-field" title="Through: until the hole leaves the piece for good. mm: that deep below the face.">Depth
+                <select id="sel-punch-depth" class="vp-select" aria-label="Hole depth">
+                  <option value="through" selected>Through</option>
+                  <option value="mm">mm</option>
+                </select></label>
+              <label class="vp-bend-field" id="punch-depth-mm-row" hidden title="How deep, below the face.">Deep
+                <input type="number" id="inp-punch-depth" value="3" min="0.1" step="0.1" aria-label="Hole depth, mm"><span>mm</span></label>
+              <div class="punch-seg" id="punch-pattern-row" role="group" aria-label="Pattern">
+                <button class="btn btn-secondary" type="button" data-pattern="none" aria-pressed="true" title="One hole, at the click">None</button>
+                <button class="btn btn-secondary" type="button" data-pattern="grid" aria-pressed="false" title="Rows by columns, laid in the face's own plane: columns along its longest edge">Grid</button>
+                <button class="btn btn-secondary" type="button" data-pattern="radial" aria-pressed="false" title="Holes on a circle about the click, the first along the face's longest edge">Radial</button>
+              </div>
+              <div id="punch-grid-rows" class="te-rows" hidden>
+                <label class="vp-bend-field" title="Rows, across the face's longest edge.">Rows
+                  <input type="number" id="inp-punch-rows" value="2" min="1" max="200" step="1" aria-label="Grid rows"><span></span></label>
+                <label class="vp-bend-field" title="Columns, along the face's longest edge.">Cols
+                  <input type="number" id="inp-punch-cols" value="3" min="1" max="200" step="1" aria-label="Grid columns"><span></span></label>
+                <div class="vp-bend-field punch-pitch-field" title="Centre to centre. Drag the far-corner hole to change it. &times; gives the columns and the rows a pitch each.">
+                  <label for="inp-punch-pitch" id="punch-pitch-label">Pitch</label>
+                  <input type="number" id="inp-punch-pitch" value="8" min="0.1" step="0.1" aria-label="Grid pitch, mm">
+                  <button id="btn-punch-pitch-xy" class="btn btn-secondary punch-xy" type="button" aria-pressed="false" title="Separate X and Y pitch">&times;</button>
+                </div>
+                <label class="vp-bend-field" id="punch-pitch-y-row" hidden title="The rows' pitch, centre to centre.">Pitch Y
+                  <input type="number" id="inp-punch-pitch-y" value="8" min="0.1" step="0.1" aria-label="Grid row pitch, mm"><span>mm</span></label>
+                <div class="punch-seg" id="punch-anchor-row" role="group" aria-label="Anchor">
+                  <button class="btn btn-secondary" type="button" data-anchor="corner" aria-pressed="true" title="The click is the grid's first hole">Corner</button>
+                  <button class="btn btn-secondary" type="button" data-anchor="centre" aria-pressed="false" title="The click is the grid's middle">Centre</button>
+                </div>
+                <label class="vp-check" title="Every other row shifted half a pitch: a hex mesh. With one Pitch the rows close up to Pitch × 0.866, so every hole is one pitch from its six neighbours - more open area than a square grid at the same wall. A filter sheet's usual pattern.">
+                  <input type="checkbox" id="chk-punch-stagger"> Stagger (hex)
+                </label>
+                <label class="vp-check" title="Holes that would come within two nozzle widths of the face's edge are left out instead of refusing the punch: a grid bigger than the face is trimmed to its outline.">
+                  <input type="checkbox" id="chk-punch-trim"> Trim at edge
+                </label>
+                <button id="btn-punch-fill" class="btn btn-secondary" type="button" title="Rows and columns enough to cover the whole clicked face at this pitch, centred on the click, Trim at edge on: a perforated sheet in one press. Up to 10,000 holes a punch - a bigger face wants a bigger pitch, or a second punch.">Fill face</button>
+              </div>
+              <div id="punch-radial-rows" class="te-rows" hidden>
+                <label class="vp-bend-field" title="How many holes on the circle.">Count
+                  <input type="number" id="inp-punch-count" value="6" min="1" max="200" step="1" aria-label="Holes on the circle"><span></span></label>
+                <label class="vp-bend-field" title="The circle's radius, to the holes' centres. Drag any hole to change it.">Radius
+                  <input type="number" id="inp-punch-radius" value="10" min="0.1" step="0.1" aria-label="Circle radius, mm"><span>mm</span></label>
+              </div>
+              <p id="punch-readout" class="bend-readout">&mdash;</p>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-punch-go" class="btn btn-secondary" type="button" disabled
+                        title="Cut every hole the ghost shows, in one boolean. One Undo puts the piece back.">PUNCH</button>
+                <button id="btn-punch-cancel" class="btn btn-secondary" type="button" title="Put Punch away; the piece is unchanged.">Cancel</button>
               </div>
             </div>
             </div>
@@ -1269,560 +1792,12 @@
               </div>
             </div>
           </details>
-          <!-- ASSEMBLE: one card for putting one piece on another (docs/ASSEMBLE-EDITOR.md).
-               It is the Join, Seat and Align cards merged. On top, Open editor: the pieces
-               alone on a clear stage, click the face to attach, click where it goes, and a
-               ghost shows the result before anything on the plate moves (app-asm-editor.js).
-               Under it, the three cards as they were, id for id, each a section of this one:
-               Join by slots (docs/JOIN-TRIPLE.md), Seat and Align. Opening the column
-               starts the Join session the three sections work in (app-join.js,
-               joinWireCard); shutting it is Cancel. -->
-          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-assemble">
-            <summary class="vp-bar-btn" title="Put one piece on another: the editor (click two faces, see a ghost, weld), or Join, Seat and Align by hand">Assemble</summary>
-            <div class="vp-menu-body vp-top-body">
-              <div class="asm-card" id="asm-card">
-                <button id="btn-asm-open" class="btn btn-primary" type="button"
-                        title="Open the assembly editor: the plate's pieces alone, spread apart, on a stage you can turn. Click the face to attach, click where it goes on the other piece, and a ghost shows it there. Set its place on the face, a turn and a gap, then Weld into one or Place. Nothing on the plate moves until then; one Undo takes it back.">Open editor</button>
-                <p class="asm-hint">Click the face to attach, click where it goes. A ghost shows it before anything moves.</p>
-                <button id="btn-asm-interlock" class="btn btn-secondary" type="button" data-asm-mode="lock"
-                        title="Open the editor on its Interlock tab: a tongue, a round pin or a snap tab on a face, sized by typed caliper values, placed by dragging it or by typing its distance from the face's edges. With another piece seated on that face (Place it there in the editor first), the matching socket is cut in that piece. One Undo.">Interlocks &amp; pins</button>
-                <p class="asm-hint">A key on one piece, its socket in the piece seated on it. Typed sizes, dragged or typed into place.</p>
-                <details class="vp-sec asm-sec" id="asm-sec-join">
-                  <summary class="vp-sec-head" title="Join two pieces, or three in one go: pick A, B and C, set a gap at each junction, JOIN">Join by slots</summary>
-                  <div class="vp-sec-body">
-                  <div class="joins-card" id="joins-card">
-                    <label class="join-orient" for="join-horizontal"
-                           title="Vertical stack: each piece is centred over the one before it and seated down onto it. Horizontal sequence: each piece keeps its place along the run and is centred on the cross axis, then seated sideways against the one before it.">
-                      <span class="join-orient-word join-orient-v">Vertical</span>
-                      <input type="checkbox" id="join-horizontal" class="join-switch" role="switch" aria-label="Horizontal sequence (off: vertical stack)">
-                      <span class="join-orient-word join-orient-h">Horizontal</span>
-                    </label>
-                    <button type="button" class="join-slot" id="join-slot-a" data-slot="a"><span class="join-badge join-badge-a">A</span><span class="join-slot-name" id="join-name-a">Pick piece A</span></button>
-                    <div class="join-gap-row" id="join-gap-ab-row">
-                      <label class="join-gap-check" title="Off: no gap - A-B is seated touching (0). On: A-B is seated at the slider's gap."><input type="checkbox" id="join-gap-ab-on"> gap</label>
-                      <input type="range" id="join-gap-ab" min="-0.25" max="0.05" step="0.01" value="-0.18" disabled title="Gap at the A-B junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = B overlaps into A." aria-label="A to B junction gap in mm" />
-                      <output id="join-gap-ab-value" for="join-gap-ab" title="The gap the A-B junction will be seated at">-0.18 mm</output>
-                    </div>
-                    <button type="button" class="join-slot" id="join-slot-b" data-slot="b"><span class="join-badge join-badge-b">B</span><span class="join-slot-name" id="join-name-b">Pick piece B</span></button>
-                    <div class="join-gap-row" id="join-gap-bc-row">
-                      <label class="join-gap-check" title="Off: no gap - B-C is seated touching (0). On: B-C is seated at the slider's gap. Live once C is picked."><input type="checkbox" id="join-gap-bc-on" disabled> gap</label>
-                      <input type="range" id="join-gap-bc" min="-0.25" max="0.05" step="0.01" value="-0.18" disabled title="Gap at the B-C junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = C overlaps into B." aria-label="B to C junction gap in mm" />
-                      <output id="join-gap-bc-value" for="join-gap-bc" title="The gap the B-C junction will be seated at">-0.18 mm</output>
-                    </div>
-                    <button type="button" class="join-slot" id="join-slot-c" data-slot="c"><span class="join-badge join-badge-c">C</span><span class="join-slot-name" id="join-name-c">Pick piece C (optional)</span></button>
-                    <div class="join-actions">
-                      <button id="btn-join" class="btn btn-primary" type="button" disabled title="Two pieces, A-B gap off: Complete Join - B welded into A as one piece. Otherwise each junction is Center lock then Seat (support) at its own gap. One Undo takes it all back.">JOIN</button>
-                      <button id="btn-join-clear" class="btn btn-ghost" type="button" title="Clear the slots">Cancel</button>
-                    </div>
-                    <p class="join-readout" id="join-readout" aria-live="polite">Pick A and B</p>
-                  </div>
-                  </div>
-                </details>
-                <details class="vp-sec asm-sec" id="asm-sec-seat">
-                  <summary class="vp-sec-head" title="Seat B on A: support gap, Seat here, washer, flush, port, surface grid">Seat</summary>
-                  <div class="vp-sec-body">
-                      <div class="seat-support">
-                        <button id="btn-seat-support" class="btn btn-secondary" type="button" title="Seat B's mating face at the slider's gap off A's skin (or off the skin tips of a skinned face). B is seated as it lies: a tilt or lean already on it stays, and its current underside is what lands on A's face - Tip or Tilt it first to seat a different face. Negative = air gap, easy release is -0.15 to -0.20. Positive = B overlaps into A. 0 = touching.">Seat (support)</button>
-                        <div class="seat-support-row">
-                          <input type="range" id="seat-gap" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Seat gap in mm, 0.01 steps. -0.25 (air) to +0.05 (overlap); default -0.18, mid easy-release. Arrow keys step 0.01." aria-label="Seat gap in mm" />
-                          <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
-                        </div>
-                        <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
-                        <label class="vp-check" for="chk-oversize-washer"
-                               title="Oversized washer: for a deliberately close-contact washer or shim WIDER than the piece it sits on. Seat (support) then places B at the typed gap below through the measured-clearance solve instead of the corner-ray fit - which refuses an overhanging piece with 'corner N missed hull along punch axis' - and reports the true minimum distance, the overhang and that verdict on the status line instead of refusing. Off: Seat (support) is exactly the seat it has always been.">
-                          <input type="checkbox" id="chk-oversize-washer"> Oversized washer
-                        </label>
-                        <div class="seat-support-row oversize-row">
-                          <label for="oversize-gap" title="The gap Seat (support) places at while Oversized washer is on, in mm, coupon sign convention: negative = air gap, 0 = touching, positive = the washer overlaps into the target. Typed, not the slider, so a deliberate squeeze past the slider's +0.05 can be asked for at all.">Gap</label>
-                          <input type="number" id="oversize-gap" min="-5" max="5" step="0.01" value="0"
-                                 aria-label="Oversized washer gap in mm" />
-                          <span class="oversize-unit">mm</span>
-                        </div>
-                      </div>
-                      <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Flush plug seat: bury B in A with its outer face 0.01 mm proud of A's skin, then Subtract. Ignores the gap slider.">Seat flush</button>
-                      <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
-                      <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
-                  </div>
-                </details>
-                <details class="vp-sec asm-sec" id="asm-sec-align">
-                  <summary class="vp-sec-head" title="Line B up on A: edges, centres, Center lock">Align</summary>
-                  <div class="vp-sec-body">
-                      <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
-                      <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
-                      <button id="btn-join-cz" class="btn btn-secondary" type="button">Center Z</button>
-                      <div class="edit-row">
-                        <button id="btn-center-lock" class="btn btn-secondary" type="button"
-                                title="Slide B in XZ until its centre sits on the target point on A. Rough placement - Seat / Align still do the fine work.">Center lock</button>
-                        <button id="btn-center-lock-pick" class="btn btn-secondary" type="button"
-                                title="Click a point on A to lock onto instead of A's own centre. Right-click this button to drop a stored target.">Pick target</button>
-                      </div>
-                      <select id="center-lock-ref" title="Which point on each piece Center lock reads, seen top-down">
-                        <option value="bbox">Lock on bounding-box centre</option>
-                        <option value="centroid">Lock on centroid</option>
-                      </select>
-                  </div>
-                </details>
-              </div>
-            </div>
-          </details>
-          <!-- SUPPORTS: one card on the main page (app-supports-card.js,
-               docs/SUPPORTS-CARD.md), a verb with a state. Opening it detects
-               at once on the selected piece: every hanging area is outlined on
-               it and the card says how many, at what angle, on which piece -
-               the angle is editable right here. Click an outline to leave that
-               area out (or put it back); Shift-click the piece to add a spot.
-               GENERATE builds; the card is locked while it does and one bar
-               under the readout fills with the build ("Planning 142 / 377 -
-               38 %", then "Building ...", then "Welding - 14 s"; Escape
-               cancels), and a build ends as BUILT or as "Could not build: ...".
-               Once built it reads
-               the result (held / unsupported / unreachable, a row for each
-               area that needs a look) and offers REGENERATE, REMOVE ALL and
-               REMOVE. G-scope's support row stays for layer-view work; both
-               call the same planner.
-               With two or more pieces on the plate the card also offers
-               "Generate for plate" (#sup-plate): every piece is lit, the readout
-               counts pieces and hanging areas, and GENERATE builds the supports of
-               all of them in one go - one bar ("Piece 2 of 6 ..."), one Undo. -->
-          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">
-            <summary class="vp-bar-btn" title="Everything a print is set by - the printer, the slice, the supports - and the one button that slices the plate">Print</summary>
-            <!-- THE PRINT CARD (docs/PRINT-CARD.md): the one place the plate's printer, slice and supports settings live. Slice builds the supports
-                 (when Supports is ticked) and slices the plate; Preview opens that slice in G-scope; Export saves it. Its ids are the Supports card's
-                 and the Slice section's own (sup-*, slice-set-*): app-supports-card.js and app-print.js drive them as before. -->
-            <div class="vp-menu-body vp-top-body sup-card print-card slice-card" id="supports-card" data-state="pick">
-              <span id="slice-card" hidden></span>
-              <p id="sup-count" class="bend-readout sup-count">Click a piece to see where it needs holding.</p>
-              <div id="sup-progress" class="sup-progress" role="progressbar" aria-label="Building supports" aria-valuemin="0" aria-valuemax="100" hidden><div class="sup-progress-fill"></div></div>
-              <!-- SAVED SETTINGS (app-supports-card.js PRESETS): every lever of this card under a name, kept in this browser; Export / Import in Tree planner -->
-              <div class="sup-preset-row" role="group" aria-label="Saved settings">
-                <select id="sup-preset" class="vp-select" autocomplete="off"
-                        title="Saved settings: every lever of this card - angle, style, Tree settings, Advanced, the interface and raft rows - under a name. Pick one to put its values back; nothing rebuilds until Generate.">
-                  <option value="">Settings: not saved</option>
-                </select>
-                <button id="sup-preset-save" class="sup-seg" type="button" title="Save the card's settings as they stand under a name (a name already there is replaced). Kept in this browser.">Save</button>
-                <button id="sup-preset-delete" class="sup-seg" type="button" disabled title="Take the picked saved settings away.">Delete</button>
-              </div>
-              <label class="vp-bend-field print-printer" for="print-printer">Printer
-                <select id="print-printer" class="vp-select" autocomplete="off"
-                        title="The plate's printer and size: the same choice as the Plate panel's. The settings below start at this printer's profile."></select></label>
-              <p id="slice-profile" class="bend-readout slice-profile" title="The printer profile the plate is sliced for.">&nbsp;</p>
-              <div class="sup-go-row">
-                <button id="btn-sup-all" class="btn btn-primary sup-go" type="button" disabled
-                        title="Slice the plate for its printer. With Supports ticked the supports are built first - again when a setting, a piece or its tips changed - and the plate is sliced with them; unticked, the plate's supports come off and the pieces are sliced alone. One Undo puts the plate back.">Slice</button>
-                <button id="btn-sup-slice-cancel" class="btn btn-secondary" type="button" hidden
-                        title="Stop: the build and the slice it ends with. Nothing is added.">Cancel</button>
-                <button id="btn-slice-cancel" class="btn btn-secondary" type="button" hidden
-                        title="Stop slicing. Nothing is kept.">Cancel</button>
-              </div>
-              <div class="sup-go-row sup-slice-row print-two">
-                <button id="btn-sup-slice" class="btn btn-secondary" type="button"
-                        title="Open the plate's slice in G-scope. If the plate or a setting changed since the last Slice, it slices first.">Preview</button>
-                <button id="btn-slice-export" class="btn btn-secondary" type="button" disabled
-                        title="Download the sliced plate as a Bambu .gcode.3mf, named after the file its pieces were opened from: open it in Bambu Studio and print it without slicing it again.">Export</button>
-                <button id="btn-slice-saveas" class="btn btn-secondary" type="button" disabled style="grid-column: 1 / -1;"
-                        title="Save the sliced plate under a name you pick. Chrome and Edge open the save dialog, so the folder is yours to pick too; Safari and Firefox ask for the name and put the file in Downloads.">Save as&hellip;</button>
-              </div>
-              <div id="slice-progress" class="sup-progress is-indeterminate" role="progressbar" aria-label="Slicing" hidden><div class="sup-progress-fill"></div></div>
-              <p id="slice-stage" class="bend-readout" hidden></p>
-              <p id="sup-slice-line" class="hint sup-slice-line" role="status" hidden></p>
-              <p id="slice-readout" class="bend-readout slice-readout" role="status">Press Slice to slice the plate.</p>
-              <ul id="sup-rows" class="sup-rows" hidden aria-label="Areas that need a look"></ul>
-              <details class="vp-sec print-sec" id="print-sec-printer">
-                <summary class="vp-sec-head" title="The printer profile's nozzle, the filament and its temperatures. An empty temperature is the filament's own.">Printer and filament</summary>
-                <div class="vp-sec-body">
-                  <label class="vp-bend-field" for="slice-set-nozzle">Nozzle
-                    <select class="vp-select" id="slice-set-nozzle" title="The printer profile's nozzle. A 0.6 nozzle needs its own profile (start and end G-code), which this printer does not have yet." autocomplete="off">
-                        <option value="0.4" selected>0.4</option>
-                        <option value="0.6" disabled>0.6</option>
-                      </select></label>
-                  <label class="vp-bend-field" for="slice-set-filament">Filament
-                    <select class="vp-select" id="slice-set-filament" title="The filament the plate prints with. Profile is the printer profile's own (PLA). Another filament brings its own temperatures, max flow, retraction, fan and start G-code, and the file names it so the printer knows what is loaded." autocomplete="off">
-                        <option value="profile" selected>Profile (PLA)</option>
-                        <option value="cr-tpu">Creality CR-TPU 95A</option>
-                      </select></label>
-                  <label class="vp-bend-field" for="slice-set-nozzle-temp">Nozzle temp
-                    <input type="number" id="slice-set-nozzle-temp" min="170" max="300" step="5" placeholder="auto" inputmode="numeric"
-                             title="Nozzle temperature after the first layer, °C. Empty: the filament's own. With a temp step, this is the temperature the steps start from." autocomplete="off"><span>&deg;C</span></label>
-                  <label class="vp-bend-field" for="slice-set-first-temp">First layer temp
-                    <input type="number" id="slice-set-first-temp" min="170" max="300" step="5" placeholder="auto" inputmode="numeric"
-                             title="Nozzle temperature of the first layer, °C. Empty: the filament's own." autocomplete="off"><span>&deg;C</span></label>
-                  <label class="vp-bend-field" for="slice-set-bed-temp">Bed temp
-                    <input type="number" id="slice-set-bed-temp" min="0" max="110" step="5" placeholder="auto" inputmode="numeric"
-                             title="Bed temperature, °C. Empty: the filament's own for this plate." autocomplete="off"><span>&deg;C</span></label>
-                  <label class="vp-bend-field" for="slice-set-max-flow">Max flow
-                    <input type="number" id="slice-set-max-flow" min="0.5" max="40" step="0.2" placeholder="auto" inputmode="decimal"
-                             title="The most filament the hotend is asked to melt, mm³ a second. Every speed is held under it (and the start's purge line follows it). Empty: the filament's own." autocomplete="off"><span>mm&sup3;/s</span></label>
-                  <label class="vp-bend-field" for="slice-set-flow-ratio">Flow ratio
-                    <input type="number" id="slice-set-flow-ratio" min="0.8" max="1.2" step="0.01" placeholder="auto" inputmode="decimal"
-                             title="How much of the computed filament is extruded (1 = all of it). A little under 1 thins every line: less ooze, fewer blobs and strings. Empty: the filament's own." autocomplete="off"></label>
-                  <label class="vp-bend-field" for="slice-set-retract-len">Retraction length
-                    <input type="number" id="slice-set-retract-len" min="0" max="3" step="0.1" placeholder="auto" inputmode="decimal"
-                             title="How far the filament is pulled back before a travel, mm. Longer pulls more pressure off the nozzle (fewer strings); too long on a soft filament lets it buckle or jam. Empty: the filament's own." autocomplete="off"><span>mm</span></label>
-                  <label class="vp-bend-field" for="slice-set-retract-speed">Retraction speed
-                    <input type="number" id="slice-set-retract-speed" min="5" max="80" step="5" placeholder="auto" inputmode="numeric"
-                             title="How fast the filament is pulled back and pushed forward again, mm/s. A soft filament stretches when pulled fast, so slower can retract more of it. Empty: the filament's own." autocomplete="off"><span>mm/s</span></label>
-                  <label class="vp-bend-field" for="slice-set-retract-before">Retract before wipe
-                    <input type="number" id="slice-set-retract-before" min="0" max="100" step="10" placeholder="auto" inputmode="numeric"
-                             title="How much of the retraction is pulled standing still at the end of a line, before the nozzle wipes and leaves. 0: all of it during the wipe, as Bambu's profiles do. 100: all of it first, so the nozzle leaves with the pressure off - for a soft filament that strings. Empty: the filament's own." autocomplete="off"><span>%</span></label>
-                  <label class="vp-bend-field" for="slice-set-zhop">Z hop
-                    <input type="number" id="slice-set-zhop" min="0" max="2" step="0.1" placeholder="auto" inputmode="decimal"
-                             title="How far the nozzle lifts for a travel after retracting, mm. 0: no lift - the nozzle stays on the surface and wipes its ooze off there, at the risk of dragging on the part. Empty: the filament's own." autocomplete="off"><span>mm</span></label>
-                  <label class="vp-bend-field" for="slice-set-temp-step">Temp step
-                    <input type="number" id="slice-set-temp-step" value="0" min="-25" max="25" step="1" inputmode="numeric"
-                             title="Change the nozzle temperature by this much at every band of height: -5 with temp 240 prints 240, 235, 230 ... up the model (a temperature tower from any model). 0: off. The change is made without stopping, at the layer change." autocomplete="off"><span>&deg;C</span></label>
-                  <label class="vp-bend-field" for="slice-set-temp-band">Temp step every
-                    <input type="number" id="slice-set-temp-band" value="10" min="1" max="100" step="1" inputmode="decimal"
-                             title="The height of one temperature band, mm, counted from the plate." autocomplete="off"><span>mm</span></label>
-                  <p class="slice-settings-note" id="slice-filament-note" hidden></p>
-                </div>
-              </details>
-              <details class="vp-sec print-sec" id="print-sec-quality">
-                <summary class="vp-sec-head" title="Layer height, the wall generator (Classic or Arachne), and how a bridge is printed. The first layer stays the profile's.">Quality</summary>
-                <div class="vp-sec-body">
-                  <label class="vp-bend-field" for="slice-set-layer">Layer height
-                    <input type="number" id="slice-set-layer" value="0.2" min="0.05" max="0.3" step="0.05" title="Layer height, mm. The first layer stays the profile's." autocomplete="off"><span>mm</span></label>
-                  <label class="vp-bend-field" for="slice-set-wall-gen">Wall generator
-                    <select class="vp-select" id="slice-set-wall-gen" title="How the walls are laid. Classic: every wall one width, a fixed spacing apart - a part that is not a whole number of walls thick gets a gap down its middle, and a feature thinner than a wall prints nothing. Arachne: the walls' count and width fitted to the part's thickness, so thin ribs, fins and text are filled wall to wall. The supports always slice Classic." autocomplete="off">
-                      <option value="classic" selected>Classic</option>
-                      <option value="arachne">Arachne</option>
-                    </select></label>
-                  <div class="slice-arachne-rows" id="slice-arachne-rows" hidden>
-                    <label class="vp-bend-field" for="slice-set-wall-angle">Wall transitioning threshold angle
-                      <input type="number" id="slice-set-wall-angle" value="10" min="1" max="59" step="1" inputmode="numeric"
-                             title="Where a part widens like a wedge more steeply than this, no wall is put in its middle to fill the gap between the walls either side. Higher fills steeper wedges." autocomplete="off"><span>&deg;</span></label>
-                    <label class="vp-bend-field" for="slice-set-wall-filter">Wall transitioning filter margin
-                      <input type="number" id="slice-set-wall-filter" value="25" min="0" max="100" step="5" inputmode="numeric"
-                             title="A wall's width changes only when the room for it moves by more than this, % of the nozzle - so a wall does not flicker between widths along a part whose thickness wobbles." autocomplete="off"><span>%</span></label>
-                    <label class="vp-bend-field" for="slice-set-wall-translen">Wall transition length
-                      <input type="number" id="slice-set-wall-translen" value="100" min="1" max="500" step="10" inputmode="numeric"
-                             title="How far along a wall its width follows the room around it, % of the nozzle: longer makes smoother, slower changes of width." autocomplete="off"><span>%</span></label>
-                    <label class="vp-bend-field" for="slice-set-wall-dist">Wall distribution count
-                      <input type="number" id="slice-set-wall-dist" value="1" min="1" max="10" step="1" inputmode="numeric"
-                             title="How many walls each side, counted from the middle, share a thin part's leftover width. 1: only the innermost walls change width, the outer wall keeps its own." autocomplete="off"></label>
-                    <label class="vp-bend-field" for="slice-set-min-wall">Minimum wall width
-                      <input type="number" id="slice-set-min-wall" value="85" min="5" max="100" step="5" inputmode="numeric"
-                             title="The narrowest wall laid, % of the nozzle. A feature thinner than this (and no thinner than the minimum feature size) is printed this wide." autocomplete="off"><span>%</span></label>
-                    <label class="vp-bend-field" for="slice-set-min-feature">Minimum feature size
-                      <input type="number" id="slice-set-min-feature" value="25" min="0" max="100" step="5" inputmode="numeric"
-                             title="A feature thinner than this, % of the nozzle, is not printed at all." autocomplete="off"><span>%</span></label>
-                  </div>
-                  <label class="vp-bend-field" for="slice-set-bridge-speed">Bridge speed
-                    <input type="number" id="slice-set-bridge-speed" min="1" max="300" step="1" placeholder="auto" inputmode="decimal"
-                             title="How fast a bridge (a line laid over air) is printed, mm/s. A bridge never prints faster than the filament's max flow allows, whatever is set here. Slower is not always better: on CR-TPU, 12 mm/s left the strands hanging in curls where 25 mm/s did not." autocomplete="off"><span>mm/s</span></label>
-                  <label class="vp-bend-field" for="slice-set-bridge-flow">Bridge flow
-                    <input type="number" id="slice-set-bridge-flow" min="0.5" max="1.5" step="0.05" placeholder="auto" inputmode="decimal"
-                             title="How much plastic a bridge line gets (1 = a strand the nozzle's width). A little under 1 makes a thinner strand that pulls tight instead of drooping." autocomplete="off"></label>
-                  <label class="vp-bend-field" for="slice-set-hang-speed">Hanging wall speed
-                    <input type="number" id="slice-set-hang-speed" min="1" max="300" step="1" placeholder="auto" inputmode="decimal"
-                             title="How fast a wall that hangs over open air from end to end is printed, mm/s - the edge of a roof over a window, found automatically the way overhangs are. Empty: the filament's own, else the bridge's speed, as Studio prints it (on CR-TPU, 10 made the lip no better and the bridges worse). Never faster than the bridge speed; walls that only partly hang keep the profile's overhang speeds." autocomplete="off"><span>mm/s</span></label>
-                  <label class="vp-bend-field" for="slice-set-bridge-temp">Bridge temp
-                    <input type="number" id="slice-set-bridge-temp" min="0" max="300" step="5" placeholder="off" inputmode="numeric"
-                             title="A nozzle temperature for bridges over open air, °C. Before a layer with such a bridge the nozzle waits at the printer's purge position for this temperature, primes and wipes; that layer and the one over it print whole at it; then the same wait brings the layer's own temperature back. One change in and one out for each stretch of bridge layers. A filament can bring its own (CR-TPU: 215 on the A1 mini); empty is the filament's, 0 turns it off. A1 mini only so far." autocomplete="off"><span>&deg;C</span></label>
-                  <label class="vp-bend-field" for="slice-set-bridge-temp-from">Bridge temp from layer
-                    <input type="number" id="slice-set-bridge-temp-from" min="2" max="100000" step="1" placeholder="bridges only" inputmode="numeric"
-                             title="A layer number, as the preview counts them (the first layer is 1): from it to the top every layer prints at the bridge temperature - one change at the park going in, none coming out. For a part whose walls want it hotter and whose roof wants it cooler: on CR-TPU, 235 for the walls and 215 from the layer after the cone's tip. Empty: only the bridges' own stretches. Needs a Bridge temp." autocomplete="off"></label>
-                  <p class="slice-settings-note" id="slice-bridge-note" hidden></p>
-                </div>
-              </details>
-              <details class="vp-sec print-sec" id="print-sec-strength">
-                <summary class="vp-sec-head" title="Walls, the sparse infill and the pattern of the surfaces.">Strength</summary>
-                <div class="vp-sec-body">
-                  <label class="vp-bend-field" for="slice-set-walls">Wall loops
-                    <input type="number" id="slice-set-walls" value="2" min="1" max="10" step="1" autocomplete="off"></label>
-                  <label class="vp-bend-field" for="slice-set-density">Sparse infill density
-                    <input type="number" id="slice-set-density" value="15" min="0" max="100" step="5" autocomplete="off"><span>%</span></label>
-                  <label class="vp-bend-field" for="slice-set-pattern">Sparse infill pattern
-                    <select class="vp-select" id="slice-set-pattern" title="Sparse infill pattern" autocomplete="off">
-                      <option value="grid" selected>grid</option>
-                      <option value="zigzag" title="Bambu Studio's Rectilinear (zig-zag in its profile): lines at 45 and 135 degrees, turning with every layer, joined at their ends">rectilinear</option>
-                      <option value="lines">lines</option>
-                      <option value="concentric" title="Rings that follow the walls, a spacing over the density apart">concentric</option>
-                      <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle of the part outward, the same on every layer">archimedean chords</option>
-                      <option value="3dhoneycomb" title="3D honeycomb: wavy lines whose waves and direction change with height, so the cells close over each other">3D honeycomb</option>
-                      <option value="gyroid" title="Gyroid: each layer the cut through one smooth surface, wavy lines that turn from X to Y with height">gyroid</option>
-                      <option value="honeycomb" title="Honeycomb: regular hexagons, drawn as zigzags along one of their three edge directions a layer">honeycomb</option>
-                      <option value="cubic" title="Cubic: three families of straight lines that slide with height - cubes standing on a corner">cubic</option>
-                      <option value="adaptivecubic" title="Adaptive cubic: the cubic's lines at 0, 60 and 120 degrees, wider apart, about the part's own middle (every cell the finest: Bambu's coarser cells deep inside a large part are not done)">adaptive cubic</option>
-                      <option value="lightning" title="Lightning: only what holds the top up - lines under every roof, shorter with every layer down, none below (combs where Bambu draws trees)">lightning</option>
-                    </select></label>
-                  <label class="vp-bend-field" for="slice-set-surface">Surface pattern
-                    <select class="vp-select" id="slice-set-surface" title="The pattern of the top and bottom surfaces and the solid infill" autocomplete="off">
-                        <option value="zigzag" selected title="Lines at 45 and 135 degrees, turning with every layer (Bambu's Rectilinear; its Monotonic is the same lines in another order)">rectilinear</option>
-                        <option value="concentric" title="Rings that follow the walls, from the middle outward">concentric</option>
-                        <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward">archimedean chords</option>
-                        <option value="hilbertcurve" title="Hilbert curve: one square space-filling line, a spacing apart, at 45 degrees">hilbert curve</option>
-                        <option value="octagramspiral" title="Octagram spiral: eight-pointed stars, one inside the next, drawn as one line from the middle outward">octagram spiral</option>
-                      </select></label>
-                </div>
-              </details>
-              <details class="vp-sec print-sec" id="print-sec-supports" open>
-                <summary class="vp-sec-head" title="Whether the plate is sliced with supports, and everything they are built and laid by.">Supports</summary>
-                <div class="vp-sec-body">
-                  <label class="vp-check print-on" for="sup-on" title="On: Slice builds the supports first (again, when a setting, the piece or its tips changed) and slices the plate with them. Off: Slice takes the plate's supports off and slices the pieces alone. One Undo puts them back.">
-                    <input type="checkbox" id="sup-on" checked autocomplete="off"> Supports</label>
-                  <div id="print-sup-body">
-                  <div class="sup-modes" role="group" aria-label="Where the supports start">
-                    <button id="sup-mode-auto" class="sup-seg is-on" type="button" aria-pressed="true"
-                            title="The planner finds every hanging area and holds all of it. Nothing to place.">Auto</button>
-                    <button id="sup-mode-assisted" class="sup-seg" type="button" aria-pressed="false"
-                            title="The detected spots show as points on the piece: click one to turn it off, or on. Circles on the plate say where the supports may land.">Assisted</button>
-                    <button id="sup-mode-custom" class="sup-seg" type="button" aria-pressed="false"
-                            title="No detected spots: click the underside of the piece to place a tip, click a tip to take it away. Circles on the plate say where the supports may land.">Custom</button>
-                  </div>
-                  <div id="sup-tools" class="sup-tools" role="group" aria-label="What the pointer does" hidden>
-                    <button id="sup-tool-tips" class="sup-seg is-on" type="button" aria-pressed="true"
-                            title="Work on the piece: the spots or tips. The view orbits as usual.">Tips</button>
-                    <button id="sup-tool-circles" class="sup-seg" type="button" aria-pressed="false"
-                            title="Start drawing landing circles on the plate; press again (or Esc) to stop and orbit. Orbit to a good view first.">Circles</button>
-                    <button id="sup-tool-erase" class="sup-seg" type="button" aria-pressed="false" disabled
-                            title="After a Generate: hover a built member to light it and what it holds up; click to remove it and plan again. Press again (or Esc) to stop.">Erase</button>
-                  </div>
-                  <div id="sup-paint-row" class="sup-tools sup-paint-row" role="group" aria-label="Paint where supports are missing" hidden>
-                    <button id="sup-paint" class="sup-seg" type="button" aria-pressed="false" disabled
-                            title="Drag a brush over the piece where the supports do not reach: each stroke asks for tips right under it and lays the raft up to the surface, to the brush's edge, stopping at the gap. One Undo each. Press again (or Esc) to orbit.">Paint</button>
-                    <label class="sup-brush" for="sup-brush" title="The brush's diameter, mm.">
-                      <input type="number" id="sup-brush" value="4" min="0.8" max="20" step="0.5" aria-label="Brush diameter, mm" autocomplete="off"><span>mm</span></label>
-                    <button id="sup-paint-clear" class="sup-seg" type="button" disabled
-                            title="Take all the paint off this piece. One Undo puts it back.">Clear paint</button>
-                  </div>
-                  <div id="sup-blocker-row" class="sup-tools sup-blocker-row" role="group" aria-label="Supports blockers">
-                    <button id="sup-blocker-add" class="sup-seg" type="button"
-                            title="Put a ghost box on the plate: no support is made inside it. Drag the box to move it (Shift: up and down), drag a handle on a face to stretch it, add as many as you like - boxes that overlap are one larger area. Click a box to pick it; Delete takes the picked one away.">Supports Blocker</button>
-                    <button id="sup-blocker-delete" class="sup-seg" type="button" disabled
-                            title="Take the picked blocker away. One Undo puts it back.">Delete</button>
-                    <button id="sup-blocker-clear" class="sup-seg" type="button" disabled
-                            title="Take every blocker off the plate. One Undo puts them back.">Clear</button>
-                  </div>
-                  <p id="sup-blocker-read" class="hint sup-blocker-read" hidden></p>
-                  <label class="vp-bend-field" for="sup-angle">Angle
-                    <input type="number" id="sup-angle" value="30" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
-                           title="Faces within this many degrees of horizontal get support. Bambu Studio's threshold means the same thing, and its default is 30. A smaller angle finds only the flatter undersides; a larger one reaches steeper faces too. The outlines follow as you type." autocomplete="off"><span id="sup-angle-note" class="sup-angle-note">35&deg; &middot; Bambu 30&deg;</span></label>
-                  <label class="vp-bend-field" for="sup-style">Type
-                    <select id="sup-style" class="vp-select" title="Straight strut: one post per spot. Tree: branches that join on the way down (Bambu's tree). Gecko Hands: the tree with a hand at every spot." autocomplete="off">
-                      <option value="strut">Straight strut</option>
-                      <option value="tree" selected>Tree</option>
-                      <option value="gecko-hand">Gecko Hands</option>
-                    </select></label>
-                  <label class="vp-bend-field" for="sup-size">Size
-                    <input type="number" id="sup-size" value="1.2" min="0.4" max="6" step="0.1" aria-label="Strut side, mm"
-                           title="The cross-section side of the struts, trunks and branches. Never below the nozzle's wall floor - the planner raises it if asked for less." autocomplete="off"><span>mm</span></label>
-                  <label class="vp-check" for="sup-rest" title="Off: every support stands on the plate, and a spot with no clear way down is left unreachable. On: such a spot may be held from a part below it.">
-                    <input type="checkbox" id="sup-rest" autocomplete="off"> May rest on the part</label>
-                  <label class="vp-check" for="sup-small" title="On: the small steps - an edge no slicer calls an overhang, which a thin horn off the tree catches - get no horn, and the part holds them as it prints. Every other spot keeps its branch and interface.">
-                    <input type="checkbox" id="sup-small" autocomplete="off"> Exclude small overhangs</label>
-                  <label class="vp-check" for="sup-one" hidden style="display:none" title="On (Auto, Tree): the way Bambu's tree slim grows - a tip every 5 mm, a sheet between them, one trunk to a cluster of tips. Off: a tip on every spot of the 3 mm grid and as many trunks as the grid needs.">
-                    <input type="checkbox" id="sup-one" checked autocomplete="off"> One trunk per cluster</label>
-                  <label class="vp-bend-field" for="slice-set-iface-angle">Interface angle
-                    <select id="slice-set-iface-angle" class="vp-select" title="How the support's transition and interface layers turn under the part (the column rule). Profile (Bambu): Bambu's own rule off the profile - the first layer at support_angle + 90, the top square to the bridge at bridge_angle, one turn a layer down (a Dense support prints with the reference's 20 / 45: 110, then 45 / 135). Square to bridge: the top interface layer crosses the part's bridge lines at 90 degrees, one turn a layer down (parallel lines weld, crossed ones release). 3.6 (Studio 2.9): Bambu Studio 02.09's own - the first layer at 90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports laid at 3.6 (the owner's P1S print released clean). Crosshatch: the old 45 / 135. A testing ground: Generate slices with it." autocomplete="off">
-                      <option value="profile">Profile (Bambu)</option>
-                      <option value="bridge">Square to bridge</option>
-                      <option value="studio36" selected>3.6&deg; (Studio 2.9)</option>
-                      <option value="crosshatch">Crosshatch 45/135</option>
-                    </select></label>
-                  <details class="vp-sec sup-tree-sec" id="sup-tree-sec">
-                    <summary class="vp-sec-head" title="Bambu's own Tree settings, by its names and with its defaults: Generate builds the tree with them (the column interface rule).">Tree settings</summary>
-                    <div class="vp-sec-body">
-                      <label class="vp-bend-field" for="sup-tree-distance">Branch distance
-                        <input type="number" id="sup-tree-distance" value="5" min="1" max="20" step="0.5" autocomplete="off" aria-label="Branch distance, mm"
-                               title="How far apart the branch tips stand under an overhang (Bambu's tree_support_branch_distance). Default 5."><span>mm</span></label>
-                      <label class="vp-bend-field" for="sup-tree-diameter">Branch diameter
-                        <input type="number" id="sup-tree-diameter" value="2" min="0.5" max="10" step="0.1" autocomplete="off" aria-label="Branch diameter, mm"
-                               title="A branch's diameter at its top; it widens from here going down (Bambu's tree_support_branch_diameter). Default 2."><span>mm</span></label>
-                      <label class="vp-bend-field" for="sup-tree-angle">Branch angle
-                        <input type="number" id="sup-tree-angle" value="45" min="10" max="60" step="1" autocomplete="off" aria-label="Branch angle, degrees"
-                               title="The most a branch leans off straight down (Bambu's tree_support_branch_angle). Default 45."><span>&deg;</span></label>
-                      <label class="vp-bend-field" for="sup-tree-dangle">Branch diameter angle
-                        <input type="number" id="sup-tree-dangle" value="5" min="0" max="15" step="0.5" autocomplete="off" aria-label="Branch diameter angle, degrees"
-                               title="How fast a branch and the trunk widen going down, measured along the branches from the farthest tip: 5 widens the diameter about 0.17 mm a mm (Bambu's tree_support_branch_diameter_angle). Default 5."><span>&deg;</span></label>
-                      <label class="vp-bend-field" for="sup-tree-tip">Tip diameter
-                        <input type="number" id="sup-tree-tip" value="0.8" min="0.3" max="3" step="0.1" autocomplete="off" aria-label="Tip diameter, mm"
-                               title="A branch's diameter at the tip, where it meets the interface (Bambu's tree_support_tip_diameter). Default 0.8."><span>mm</span></label>
-                    </div>
-                  </details>
-                  <details class="vp-sec sup-bambu-sec" id="sup-bambu-sec">
-                    <summary class="vp-sec-head" title="Bambu Studio's Advanced support settings, by its names and in its order. Each row starts at what this slicer does today (its tooltip names Bambu's own default where that differs); Save keeps them with the rest of the card.">Advanced</summary>
-                    <div class="vp-sec-body">
-                      <label class="vp-bend-field" for="slice-set-sup-density">Initial layer density
-                        <input type="number" id="slice-set-sup-density" value="100" min="10" max="100" step="5" autocomplete="off" aria-label="Initial layer density"
-                               title="How densely a support's first layer is filled (Bambu's raft_first_layer_density, its default 90). 100: solid, as this slicer has always laid it."><span>%</span></label>
-                      <label class="vp-bend-field" for="slice-set-sup-expand">Initial layer expansion
-                        <input type="number" id="slice-set-sup-expand" value="-1" min="-1" max="10" step="0.1" autocomplete="off" aria-label="Initial layer expansion"
-                               title="How far the first-layer pad under a trunk reaches past its foot (Bambu's raft_first_layer_expansion). -1: automatic - 0.6 mm. Generate builds the pad."><span>mm</span></label>
-                      <label class="vp-bend-field" for="slice-set-sup-walls">Support wall loops
-                        <input type="number" id="slice-set-sup-walls" value="-1" min="-1" max="5" step="1" autocomplete="off" aria-label="Support wall loops"
-                               title="Walls round every piece of the tree (Bambu's tree_support_wall_count). -1 (or 0): automatic - one."></label>
-                      <label class="vp-bend-field" for="slice-set-sup-topz">Top Z distance
-                        <input type="number" id="slice-set-sup-topz" value="0.18" min="0" max="2" step="0.01" autocomplete="off" aria-label="Top Z distance"
-                               title="The gap between the support's top and the part over it (Bambu's support_top_z_distance, its default 0.2). 0.18 is this slicer's own. Larger releases easier and sags more."><span>mm</span></label>
-                      <label class="vp-bend-field" for="slice-set-sup-bottomz">Bottom Z distance
-                        <input type="number" id="slice-set-sup-bottomz" value="0.2" min="0" max="2" step="0.05" autocomplete="off" aria-label="Bottom Z distance"
-                               title="With May rest on the part: the gap between a support that stands on the part and the face under it (Bambu's support_bottom_z_distance). Generate builds the foot; the slicer holds its layers to it."><span>mm</span></label>
-                      <label class="vp-bend-field" for="slice-set-sup-base">Base pattern
-                        <select id="slice-set-sup-base" class="vp-select" autocomplete="off" title="What fills the tree (Bambu's support_base_pattern). Default: walls, and a line across each branch ring just under the interface. Rectilinear: lines through the whole tree, one way. Rectilinear grid: both ways. Hollow: walls alone.">
-                          <option value="default" selected>Default</option>
-                          <option value="rectilinear">Rectilinear</option>
-                          <option value="rectilinear-grid">Rectilinear grid</option>
-                          <option value="hollow">Hollow</option>
-                        </select></label>
-                      <label class="vp-bend-field" for="slice-set-sup-base-spacing">Base pattern spacing
-                        <input type="number" id="slice-set-sup-base-spacing" value="2.5" min="0.5" max="20" step="0.1" autocomplete="off" aria-label="Base pattern spacing"
-                               title="How far apart the base pattern's lines lie (Bambu's support_base_pattern_spacing)."><span>mm</span></label>
-                      <label class="vp-bend-field" for="slice-set-sup-angle">Pattern angle
-                        <input type="number" id="slice-set-sup-angle" value="0" min="0" max="180" step="1" autocomplete="off" aria-label="Pattern angle"
-                               title="The direction of the base pattern's lines, and - with Interface angle on Profile - of the interface's first layer, a quarter turn on (Bambu's support_angle)."><span>&deg;</span></label>
-                      <label class="vp-bend-field" for="sup-interface">Top interface layers
-                        <select id="sup-interface" class="vp-select" title="How many interface layers lie under the part (Bambu's support_interface_top_layers). Under them the slicer lays 2 transition layers, then the tree. 0: no interface - the transition meets the part." autocomplete="off">
-                          <option value="0">0</option>
-                          <option value="1">1</option>
-                          <option value="2">2</option>
-                          <option value="3" selected>3</option>
-                        </select></label>
-                      <label class="vp-bend-field" for="slice-set-sup-iface-pattern">Interface pattern
-                        <select id="slice-set-sup-iface-pattern" class="vp-select" autocomplete="off" title="How the interface layers are laid (Bambu's support_interface_pattern). Default: the Interface angle rule below. Rectilinear: every layer one way. Rectilinear Interlaced: a quarter turn a layer. Grid: both ways on every layer. Concentric: rings in from the edge.">
-                          <option value="default" selected>Default</option>
-                          <option value="rectilinear">Rectilinear</option>
-                          <option value="concentric">Concentric</option>
-                          <option value="rectilinear_interlaced">Rectilinear Interlaced</option>
-                          <option value="grid">Grid</option>
-                        </select></label>
-                      <label class="vp-bend-field" for="slice-set-sup-iface-spacing">Top interface spacing
-                        <input type="number" id="slice-set-sup-iface-spacing" value="0.5" min="0" max="5" step="0.05" autocomplete="off" aria-label="Top interface spacing"
-                               title="The gap between the interface's lines (Bambu's support_interface_spacing). 0.5 releases easily; 0.1 is nearly solid."><span>mm</span></label>
-                      <label class="vp-bend-field" for="slice-set-sup-expansion">Normal Support expansion
-                        <input type="number" id="slice-set-sup-expansion" value="0" min="-2" max="5" step="0.1" autocomplete="off" aria-label="Normal Support expansion"
-                               title="How much further past an overhang's edge the interface reaches (Bambu's support_expansion, which widens its normal supports; here the tree's interface). Negative: less far."><span>mm</span></label>
-                      <label class="vp-bend-field" for="slice-set-sup-xy">Support/object xy distance
-                        <input type="number" id="slice-set-sup-xy" value="0.35" min="0" max="3" step="0.05" autocomplete="off" aria-label="Support/object xy distance"
-                               title="How far the support stays from the part beside it (Bambu's support_object_xy_distance). The tree is planned a tenth further off and the slicer cuts to this."><span>mm</span></label>
-                      <label class="vp-check" for="slice-set-sup-zover" title="On: under an overhang the support comes in to 0.2 mm of the wall beside it and the top Z distance decides how close it stands - a slope is held right up to its foot. Off: the xy distance everywhere (Bambu's top_z_overrides_xy_distance).">
-                        <input type="checkbox" id="slice-set-sup-zover" autocomplete="off"> Z overrides X/Y</label>
-                      <label class="vp-bend-field" for="slice-set-sup-first-gap">Support/object first layer gap
-                        <input type="number" id="slice-set-sup-first-gap" value="0.2" min="0" max="3" step="0.05" autocomplete="off" aria-label="Support/object first layer gap"
-                               title="How far a support's first layer stays from the part's first layer (Bambu's support_object_first_layer_gap)."><span>mm</span></label>
-                      <label class="vp-bend-field" for="slice-set-sup-bridge">Max bridge length
-                        <input type="number" id="slice-set-sup-bridge" value="5" min="0" max="100" step="0.5" autocomplete="off" aria-label="Max bridge length"
-                               title="A span this long or shorter between two holds is a bridge and gets no support (Bambu's max_bridge_length). 0: every bridge is supported. 5 is this detector's own. The outlines follow."><span>mm</span></label>
-                      <label class="vp-check" for="slice-set-sup-indep" title="On: the support is cut on layers of its own, as thick as the nozzle allows (0.28), meeting the part's at every interface. Off: on the part's layers (Bambu's independent_support_layer_height).">
-                        <input type="checkbox" id="slice-set-sup-indep" checked autocomplete="off"> Independent support layer height</label>
-                    </div>
-                  </details>
-                  <details class="vp-sec sup-adv-sec" id="sup-adv-sec">
-                    <summary class="vp-sec-head" title="The tree planner's own numbers (nso_support_flow.js), each with its default. Nothing rebuilds as you type; Generate builds with them. Save keeps them with the rest of the card.">Tree planner</summary>
-                    <div class="vp-sec-body">
-                      <label class="vp-bend-field" for="sup-adv-cover">Tip spacing
-                        <input type="number" id="sup-adv-cover" value="0.44" min="0.2" max="1.2" step="0.02" autocomplete="off" aria-label="Tip spacing, a share of the branch distance"
-                               title="How far a spot may lie from its tip, as a share of the Branch distance: 0.44 x 5 mm stands a tip about every 3 - 4 mm. Larger: fewer tips, more for the interface to span. Default 0.44."><span>x</span></label>
-                      <label class="vp-bend-field" for="sup-adv-tipdrop">Tip column
-                        <input type="number" id="sup-adv-tipdrop" value="2.8" min="0.8" max="8" step="0.1" autocomplete="off" aria-label="Tip column, mm"
-                               title="How far a tip stands straight under its spot, on its own, before it may lean and join others. Shorter: branches join higher (less material, wider bodies under the interface). Default 2.8."><span>mm</span></label>
-                      <label class="vp-bend-field" for="sup-adv-gather">Gather
-                        <input type="number" id="sup-adv-gather" value="0.25" min="0" max="1" step="0.05" autocomplete="off" aria-label="Gather, 0 to 1"
-                               title="How much a branch heads for the middle of everything it can still reach, rather than its nearest neighbour. 0: neighbours pair up where they stand (more trunks). 1: the whole canopy draws to one point (long leaning branches). Default 0.25."></label>
-                      <label class="vp-bend-field" for="sup-adv-reach">Join reach
-                        <input type="number" id="sup-adv-reach" value="0.95" min="0.2" max="1.5" step="0.05" autocomplete="off" aria-label="Join reach"
-                               title="Two branches go for one another when they can meet within this share of the height they have left. Smaller: fewer long leans, more trunks. Default 0.95."><span>x</span></label>
-                      <label class="vp-bend-field" for="sup-adv-floor">Straight foot
-                        <input type="number" id="sup-adv-floor" value="2.4" min="0.5" max="10" step="0.1" autocomplete="off" aria-label="Straight foot, mm"
-                               title="Over the plate a trunk stands straight this high: nothing leans or joins lower. Default 2.4."><span>mm</span></label>
-                      <label class="vp-bend-field" for="sup-adv-flare">Flare height
-                        <input type="number" id="sup-adv-flare" value="2" min="0" max="6" step="0.1" autocomplete="off" aria-label="Flare height, mm"
-                               title="A trunk widens to its foot over this height above the plate. 0: no flare. Default 2."><span>mm</span></label>
-                      <label class="vp-bend-field" for="sup-adv-flaretan">Flare slope
-                        <input type="number" id="sup-adv-flaretan" value="0.45" min="0" max="1.5" step="0.05" autocomplete="off" aria-label="Flare slope, mm a mm"
-                               title="How much wider a side the flare makes the trunk for every mm of its height: 0.45 x 2 mm is 0.9 mm a side at the plate. Default 0.45."></label>
-                      <div class="sup-tune-row">
-                        <span id="sup-adv-note" class="sup-tune-note"></span>
-                        <button id="sup-adv-defaults" class="btn btn-secondary" type="button" title="Put every Advanced number back to its default. Nothing rebuilds; Generate does.">Defaults</button>
-                      </div>
-                      <div class="sup-tune-row">
-                        <button id="sup-preset-export" class="btn btn-secondary" type="button" title="Save every saved setting of this browser as one file (nso-supports-settings.json): a backup, or to carry them to another browser.">Export saved</button>
-                        <button id="sup-preset-import" class="btn btn-secondary" type="button" title="Read a file Export saved wrote: its settings are added to this browser's (one of the same name is replaced).">Import</button>
-                        <input type="file" id="sup-preset-file" accept=".json,application/json" hidden>
-                      </div>
-                    </div>
-                  </details>
-                  <details class="vp-sec sup-tune" id="sup-tune" hidden>
-                    <summary class="vp-sec-head" id="sup-tune-head" title="Custom only: the numbers the planner builds its trees by. Nothing rebuilds as you type; Regenerate builds with them.">Tune<span id="sup-tune-count" class="sup-tune-count"></span></summary>
-                    <div class="vp-sec-body">
-                      <label class="vp-bend-field" for="sup-knob-tip">Trunk top
-                        <input type="number" id="sup-knob-tip" value="2" min="0" step="0.1" aria-label="Trunk top diameter, mm"
-                               title="How thick a trunk is at its top, in mm. The trunk widens from here on its way down. Default 2." autocomplete="off"><span>mm</span></label>
-                      <label class="vp-bend-field" for="sup-knob-growth">Trunk growth
-                        <input type="number" id="sup-knob-growth" value="5.5" min="0" step="0.5" aria-label="Trunk growth, degrees"
-                               title="How fast a trunk widens going down: the angle of its side off vertical, in degrees. 0 is a straight trunk. Default 5.5." autocomplete="off"><span>&deg;</span></label>
-                      <label class="vp-bend-field" for="sup-knob-lean">Lean limit
-                        <input type="number" id="sup-knob-lean" value="30" min="0" step="1" aria-label="Lean limit, degrees"
-                               title="The most a branch may lean off straight down, in degrees. Smaller: more, straighter trunks. Default 30." autocomplete="off"><span>&deg;</span></label>
-                      <label class="vp-bend-field" for="sup-knob-node">Node spacing
-                        <input type="number" id="sup-knob-node" value="5" min="0" step="0.5" aria-label="Node spacing, mm"
-                               title="How far apart the points are where branches may join, in mm. Default 5." autocomplete="off"><span>mm</span></label>
-                      <div class="sup-tune-row">
-                        <span id="sup-tune-note" class="sup-tune-note"></span>
-                        <button id="sup-tune-defaults" class="btn btn-secondary" type="button" disabled
-                                title="Put all four back to the defaults. Nothing rebuilds; Regenerate does.">Defaults</button>
-                      </div>
-                    </div>
-                  </details>
-                  <p id="sup-hint" class="hint sup-hint">Click an outlined area to leave it out, or put it back. Shift-click the piece to add a spot. Click a support to pick it.</p>
-                  </div>
-                </div>
-              </details>
-              <details class="vp-sec print-sec" id="print-sec-adhesion">
-                <summary class="vp-sec-head" title="The brim and the raft. They are the plate's, with supports or without.">Adhesion</summary>
-                <div class="vp-sec-body">
-                  <label class="vp-bend-field" for="slice-set-brim">Brim
-                    <select class="vp-select" id="slice-set-brim" title="A brim round the first layer, 5 mm, 0.1 mm off the wall (Bambu's auto_brim: a part that is tall for its foot gets one). It stays off a support's pad." autocomplete="off">
-                        <option value="auto" selected>auto</option>
-                        <option value="outer">every part</option>
-                        <option value="none">off</option>
-                      </select></label>
-                  <label class="vp-bend-field" for="slice-set-raft">Raft
-                    <input type="number" id="slice-set-raft" value="0" min="0" max="30" step="1" aria-label="Raft layers"
-                           title="Raft layers under everything on the plate - its own system between the plate and the first layer of every part and support, with or without a support style (Bambu's raft_layers): the top half (rounded up) Support interface, the rest Support. 0: no raft (and the brim as set); with a raft there is no brim. Generate slices with it." autocomplete="off"><span>layers</span></label>
-                  <label class="vp-bend-field" for="slice-set-raft-gap">Raft contact
-                    <input type="number" id="slice-set-raft-gap" value="0.1" min="0" max="1" step="0.05" aria-label="Raft contact Z distance, mm"
-                           title="Raft contact Z distance, mm: the gap between the raft's top and the first layer on it (Bambu's raft_contact_distance, 0.1)." autocomplete="off"><span>mm</span></label>
-                </div>
-              </details>
-              <p class="slice-settings-note" id="slice-settings-note">Each row starts at the printer profile's value. They take effect on the next Slice, and the exported file records them.</p>
-              <button id="slice-settings-reset" type="button" class="btn btn-secondary"
-                      title="Every row back to the printer profile's value, the filament included. The saved setting shown is let go.">Profile values</button>
-            </div>
-          </details>
-          <!-- ADD: what builds material onto a piece - Fill / Densify, Foam, Thicken,
-               Extend, Bridge - out of the old Shape card, unchanged; and Close. -->
+          <!-- ADD: what builds material onto a piece - Thicken, Extend, Step / Boss, Bridge -
+               out of the old Shape card, unchanged; and Close. Fill / Densify, Foam, GUN and
+               Patch moved to Fill & fix. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-add" data-sec="add">
-            <summary class="vp-bar-btn" title="Fill / Densify, Foam, Thicken out and in, Extend, Step / Boss, Bridge, Close, Patch">Add</summary>
+            <summary class="vp-bar-btn" title="Thicken out and in, Extend, Step / Boss, Bridge, Close">Add</summary>
             <div class="vp-menu-body vp-finish">
-            <div class="vp-row vp-row-triple">
-              <button id="btn-fill" class="btn btn-secondary" type="button"
-                      title="Fill a hollow piece's interior cavity solid - the inverse of Hollow. Drops the shells that bound enclosed cavities and touches nothing else, so the outer surface comes back exactly as it was. A captive separate solid is not a cavity and is never removed.">Fill / Densify</button>
-              <button id="btn-foam" class="btn btn-secondary" type="button" aria-pressed="false"
-                      title="Spray foam into a sealed hollow and watch it fill from the bottom up. The piece turns to a ghost, the hollow shows dark and the foam orange. Hold the mouse on the piece to spray, let go to pause; the Level slider sets it directly. Set turns the foam into solid mesh, bonded into the piece; Cancel leaves everything as it was. Only the hollow's own walls change. See docs/FOAM.md.">Foam</button>
-              <button id="btn-foam-gun" class="btn btn-secondary" type="button" aria-pressed="false"
-                      title="Foam gun: a box appears on the selected piece - drag its handles to place and size it. Aim at the piece inside the box and hold the mouse: the box's buried space fills from the bottom while you hold, and letting go sets it, as one Undo. Spray again to add more. Escape or Cancel takes the box away. See docs/FOAM.md.">GUN</button>
-            </div>
-            <div id="foam-gun-panel" class="foam-panel" hidden>
-              <p id="foam-gun-readout" class="cut-readout foam-readout">—</p>
-              <div class="vp-row">
-                <button id="btn-foam-gun-cancel" class="btn btn-secondary" type="button" title="Take the box away. Sprays already set stay set; Undo takes them back one at a time.">Cancel</button>
-              </div>
-            </div>
-            <div id="foam-panel" class="foam-panel" hidden>
-              <p class="hint">Hold the mouse on the piece to spray. Let go to pause.</p>
-              <div id="foam-hollows" class="foam-hollows"></div>
-              <div class="vp-row foam-level-row">
-                <label for="inp-foam-level">Level</label>
-                <input type="range" id="inp-foam-level" min="0" max="1" step="0.01" value="0" aria-label="Foam level, mm above the hollow's floor">
-                <span id="foam-level-read" class="foam-level-read">—</span>
-              </div>
-              <p id="foam-readout" class="cut-readout foam-readout">—</p>
-              <div class="vp-row vp-row-triple">
-                <button id="btn-foam-all" class="btn btn-secondary" type="button" title="Raise the foam to the top of the hollow.">Fill it all</button>
-                <button id="btn-foam-set" class="btn btn-secondary" type="button" title="Turn the foam into solid mesh, bonded into the piece. One Undo puts it back.">Set</button>
-                <button id="btn-foam-cancel" class="btn btn-secondary" type="button" title="Put Foam away and leave the piece exactly as it was.">Cancel</button>
-              </div>
-            </div>
             <div class="vp-row vp-row-thicken">
               <button id="btn-thicken-out" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Grow the OUTSIDE of the piece by the mm on the slider. The result shows live on the piece as a ghost - the wall growing out - and Set bakes exactly that. Click a face first and only that wall thickens; no face picked is the whole piece. Cancel drops it and leaves the piece alone.">Thicken out</button>
@@ -1899,21 +1874,13 @@
                 <button id="btn-close-cancel" class="btn btn-secondary" type="button" title="Put Close away and leave the piece exactly as it was.">Cancel</button>
               </div>
             </div>
-            <!-- PATCH (app-patch.js, nso_patch.js, docs/PATCH.md): arm it, hover a hole to
-                 outline it, click to fill it with a surface that continues the curvature
-                 round it. One Undo per click. The Findings card's PATCH is the same fill. -->
-            <div class="vp-row vp-row-full vp-row-patch">
-              <button id="btn-patch" class="btn btn-secondary btn-patch" type="button" aria-pressed="false"
-                      title="Fill an open hole with a surface that continues the curvature round it: a smooth fit through the rim's neighbours, welded at the rim - no lip, no flat facet. A hole whose rim is flat gets the flat cap. Arm it, hover a hole to outline it, click to fill it. One Undo per click. Click Patch again, or press Escape, to stop.">Patch</button>
-            </div>
-            <p id="patch-readout" class="bend-readout patch-readout" hidden></p>
             </div>
           </details>
-          <!-- SUBTRACT: what takes material away - Subtract, Extract bit, Punch, Hollow
-               (from Shape). Carve lives in Sculpt, as its own arm beside Brush. Lift, with
+          <!-- SUBTRACT: what takes material away - Subtract, Extract bit, Hollow
+               (from Shape). Punch is its own card, under Cut / Crop. Carve lives in Sculpt, as its own arm beside Brush. Lift, with
                Detach flange, moved to the Crop card. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-bit">
-            <summary class="vp-bar-btn" title="Subtract B from A, Extract bit, Punch, Hollow, Split to parts">Subtract</summary>
+            <summary class="vp-bar-btn" title="Subtract B from A, Extract bit, Hollow, Split to parts">Subtract</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-full">
               <button id="btn-subtract" class="btn btn-secondary btn-subtract" type="button" aria-pressed="false"
@@ -1932,89 +1899,6 @@
             </div>
             <div class="vp-row vp-row-full">
               <button id="btn-extract-make" class="btn btn-secondary" type="button" hidden title="Bake the previewed bit into a piece beside its source. One Undo.">Make bit</button>
-            </div>
-            <!-- PUNCH (app-punch.js, nso_punch.js; docs/PUNCH.md): arm it, click a face - a
-                 round hole straight through it or to a depth, normal to the face, alone,
-                 in a grid or on a circle. A live ghost of every hole; the first hole's
-                 ring is its diameter, the anchor drags across the face, the grid's far
-                 corner is its pitch, a radial hole its radius. PUNCH is one boolean and
-                 one Undo; the card stays armed for the next face. -->
-            <div class="vp-row vp-row-full">
-              <button id="btn-punch" class="btn btn-secondary btn-punch" type="button" aria-pressed="false" aria-expanded="false" aria-controls="punch-card"
-                      title="Punch round holes. Arm it, then click a face: a hole straight through it (or to a depth), normal to the face - one, a grid, or a circle of them, drawn live. Drag the first hole's ring for its diameter and the hole (or the cross at the click) to move it on the face; a grid's far-corner hole is its pitch, a radial hole its radius. The arrows nudge it 1 mm (Shift 0.1). A hole that would leave less than two nozzle widths of wall is refused in words. PUNCH cuts them all in one boolean, one Undo; the card stays armed for the next face. Escape stops.">Punch</button>
-            </div>
-            <div class="vp-bend-panel punch-card" id="punch-card" hidden>
-              <label class="vp-bend-field" title="The hole's diameter, across its flats: a pin this size goes in. Drag the first hole's ring to change it. With a Thread chosen this is the thread's own (and read-only).">&Oslash;
-                <input type="number" id="inp-punch-dia" value="3.0" min="0.8" max="100" step="0.1" aria-label="Hole diameter, mm"><span>mm</span></label>
-              <label class="vp-bend-field" title="Thread: cut the hole as a tapped thread instead of a plain Ø. The hole is the thread's own (M6 = a Ø6 bolt thread + the 0.2 mm fit a side, so the bolt Gen+ > Fasteners makes turns in it; G and NPT are pipe threads, NPT tapered). A blind one is at least two pitches deep; a pitch finer than the nozzle resolves says so. docs/THREADS.md.">Thread
-                <select id="sel-punch-thread" class="vp-select" aria-label="Thread of the hole">
-                  <option value="" selected>None (plain hole)</option>
-                  <optgroup label="Metric (ISO coarse)">
-                    <option>M2</option><option>M2.5</option><option>M3</option><option>M4</option><option>M5</option><option>M6</option><option>M8</option><option>M10</option>
-                    <option>M12</option><option>M14</option><option>M16</option><option>M18</option><option>M20</option><option>M24</option><option>M30</option>
-                  </optgroup>
-                  <optgroup label="Metric (fine)">
-                    <option>M8x1</option><option>M10x1.25</option><option>M10x1</option><option>M12x1.5</option><option>M12x1.25</option><option>M14x1.5</option><option>M16x1.5</option>
-                    <option>M18x1.5</option><option>M20x1.5</option><option>M24x2</option><option>M30x2</option>
-                  </optgroup>
-                  <optgroup label="Pipe, parallel (G / BSP)">
-                    <option>G1/8</option><option>G1/4</option><option>G3/8</option><option>G1/2</option><option>G3/4</option><option>G1</option><option>G1-1/4</option><option>G1-1/2</option><option>G2</option>
-                  </optgroup>
-                  <optgroup label="Pipe, tapered (NPT)">
-                    <option>NPT1/8</option><option>NPT1/4</option><option>NPT3/8</option><option>NPT1/2</option><option>NPT3/4</option><option>NPT1</option><option>NPT1-1/4</option><option>NPT1-1/2</option><option>NPT2</option>
-                  </optgroup>
-                </select></label>
-              <label class="vp-check" id="punch-thread-left-row" hidden title="A left-hand thread. Right-hand is the usual one.">
-                <input type="checkbox" id="chk-punch-thread-left"> Left-hand
-              </label>
-              <label class="vp-bend-field" title="Through: until the hole leaves the piece for good. mm: that deep below the face.">Depth
-                <select id="sel-punch-depth" class="vp-select" aria-label="Hole depth">
-                  <option value="through" selected>Through</option>
-                  <option value="mm">mm</option>
-                </select></label>
-              <label class="vp-bend-field" id="punch-depth-mm-row" hidden title="How deep, below the face.">Deep
-                <input type="number" id="inp-punch-depth" value="3" min="0.1" step="0.1" aria-label="Hole depth, mm"><span>mm</span></label>
-              <div class="punch-seg" id="punch-pattern-row" role="group" aria-label="Pattern">
-                <button class="btn btn-secondary" type="button" data-pattern="none" aria-pressed="true" title="One hole, at the click">None</button>
-                <button class="btn btn-secondary" type="button" data-pattern="grid" aria-pressed="false" title="Rows by columns, laid in the face's own plane: columns along its longest edge">Grid</button>
-                <button class="btn btn-secondary" type="button" data-pattern="radial" aria-pressed="false" title="Holes on a circle about the click, the first along the face's longest edge">Radial</button>
-              </div>
-              <div id="punch-grid-rows" class="te-rows" hidden>
-                <label class="vp-bend-field" title="Rows, across the face's longest edge.">Rows
-                  <input type="number" id="inp-punch-rows" value="2" min="1" max="200" step="1" aria-label="Grid rows"><span></span></label>
-                <label class="vp-bend-field" title="Columns, along the face's longest edge.">Cols
-                  <input type="number" id="inp-punch-cols" value="3" min="1" max="200" step="1" aria-label="Grid columns"><span></span></label>
-                <div class="vp-bend-field punch-pitch-field" title="Centre to centre. Drag the far-corner hole to change it. &times; gives the columns and the rows a pitch each.">
-                  <label for="inp-punch-pitch" id="punch-pitch-label">Pitch</label>
-                  <input type="number" id="inp-punch-pitch" value="8" min="0.1" step="0.1" aria-label="Grid pitch, mm">
-                  <button id="btn-punch-pitch-xy" class="btn btn-secondary punch-xy" type="button" aria-pressed="false" title="Separate X and Y pitch">&times;</button>
-                </div>
-                <label class="vp-bend-field" id="punch-pitch-y-row" hidden title="The rows' pitch, centre to centre.">Pitch Y
-                  <input type="number" id="inp-punch-pitch-y" value="8" min="0.1" step="0.1" aria-label="Grid row pitch, mm"><span>mm</span></label>
-                <div class="punch-seg" id="punch-anchor-row" role="group" aria-label="Anchor">
-                  <button class="btn btn-secondary" type="button" data-anchor="corner" aria-pressed="true" title="The click is the grid's first hole">Corner</button>
-                  <button class="btn btn-secondary" type="button" data-anchor="centre" aria-pressed="false" title="The click is the grid's middle">Centre</button>
-                </div>
-                <label class="vp-check" title="Every other row shifted half a pitch: a hex mesh. With one Pitch the rows close up to Pitch × 0.866, so every hole is one pitch from its six neighbours - more open area than a square grid at the same wall. A filter sheet's usual pattern.">
-                  <input type="checkbox" id="chk-punch-stagger"> Stagger (hex)
-                </label>
-                <label class="vp-check" title="Holes that would come within two nozzle widths of the face's edge are left out instead of refusing the punch: a grid bigger than the face is trimmed to its outline.">
-                  <input type="checkbox" id="chk-punch-trim"> Trim at edge
-                </label>
-                <button id="btn-punch-fill" class="btn btn-secondary" type="button" title="Rows and columns enough to cover the whole clicked face at this pitch, centred on the click, Trim at edge on: a perforated sheet in one press. Up to 10,000 holes a punch - a bigger face wants a bigger pitch, or a second punch.">Fill face</button>
-              </div>
-              <div id="punch-radial-rows" class="te-rows" hidden>
-                <label class="vp-bend-field" title="How many holes on the circle.">Count
-                  <input type="number" id="inp-punch-count" value="6" min="1" max="200" step="1" aria-label="Holes on the circle"><span></span></label>
-                <label class="vp-bend-field" title="The circle's radius, to the holes' centres. Drag any hole to change it.">Radius
-                  <input type="number" id="inp-punch-radius" value="10" min="0.1" step="0.1" aria-label="Circle radius, mm"><span>mm</span></label>
-              </div>
-              <p id="punch-readout" class="bend-readout">&mdash;</p>
-              <div class="vp-row vp-row-pair">
-                <button id="btn-punch-go" class="btn btn-secondary" type="button" disabled
-                        title="Cut every hole the ghost shows, in one boolean. One Undo puts the piece back.">PUNCH</button>
-                <button id="btn-punch-cancel" class="btn btn-secondary" type="button" title="Put Punch away; the piece is unchanged.">Cancel</button>
-              </div>
             </div>
             <!-- HOLLOW (app-hollow.js, nso_hollow.js; docs/HOLLOW.md): the wall in the box
                  is the number Hollow cuts to. The slider beside it is the same number: as it
@@ -2321,39 +2205,6 @@
             </div>
             </div>
           </details>
-          <!-- WEAVE (app-weave.js, nso_weave.js, nso_cdt.js; docs/WEAVE.md): draw a lasso round part of a piece's surface. The loop is
-               drawn flat on the screen but cuts like a cylinder along the view: it takes the surface that faces you inside it, curved
-               or grooved as it is, out along the piece's own triangles. A fresh, evenly woven patch of that same surface - cloned, not
-               flattened - goes in its place, rim corner for corner, and work on it (an engraving) is bridged. Works through X-ray:
-               the plate, its rim corners and the new weave are drawn over the wireframe. -->
-          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-weave" data-sec="weave">
-            <summary class="vp-bar-btn" title="Draw a lasso round part of a piece's surface: it is cut out along its own triangles and a fresh, even weave of the same surface - curved or grooved as it was - goes in its place, rim corner for corner. Removes engraved text, or re-meshes a patch of a scan">Weave</summary>
-            <div class="vp-menu-body vp-finish">
-            <div class="vp-bend-panel weave-card" id="weave-card">
-              <div class="punch-seg" id="weave-size-row" role="group" aria-label="Adjust the cut">
-                <button id="btn-weave-grow" class="btn btn-secondary" type="button" title="Cut one ring of triangles wider all round, so the edge falls on clean surface.">Grow</button>
-                <button id="btn-weave-shrink" class="btn btn-secondary" type="button" title="Cut one ring of triangles narrower all round.">Shrink</button>
-                <button id="btn-weave-clear" class="btn btn-secondary" type="button" title="Let go of the cut (Escape does too).">Clear</button>
-              </div>
-              <div class="punch-seg" id="weave-fit-row" role="group" aria-label="The new surface">
-                <button id="btn-weave-smooth" class="btn btn-secondary" type="button" aria-pressed="true" title="Smooth: the new patch is the surface the old one was on, with the work on it bridged - an engraving, a boss, a gouge are gone, the face's curve carried across. Work the lasso's edge crosses stays as it is: draw wider to take it.">Smooth</button>
-                <button id="btn-weave-follow" class="btn btn-secondary" type="button" aria-pressed="false" title="Follow: the new patch is the old one's own surface exactly, only re-woven - nothing is bridged.">Follow</button>
-              </div>
-              <label class="vp-bend-field" title="The new patch's triangle size, mm. Blank: the old patch's own median edge, so the weave resembles the mesh round it.">Pitch
-                <input type="number" id="inp-weave-pitch" value="" placeholder="auto" min="0.02" max="5" step="0.01" aria-label="Triangle size, mm"><span>mm</span></label>
-              <p id="weave-readout" class="bend-readout">&mdash;</p>
-              <div class="vp-row vp-row-pair">
-                <button id="btn-weave-go" class="btn btn-secondary" type="button" disabled
-                        title="Weave a fresh patch to fit the hole the cut leaves (drawn green, over the wireframe if X-ray is on). Nothing is changed yet.">WEAVE</button>
-                <button id="btn-weave-attach" class="btn btn-secondary" type="button" disabled
-                        title="Put the woven patch in place of the old one, rim to rim. One Undo puts the piece back.">REATTACH</button>
-              </div>
-              <div class="vp-row">
-                <button id="btn-weave-cancel" class="btn btn-secondary" type="button" title="Close Weave; the piece is unchanged.">Cancel</button>
-              </div>
-            </div>
-            </div>
-          </details>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-paint" data-sec="paint">
             <summary class="vp-bar-btn" title="Paint faces selected or excluded, delete or extract what is painted">Paint</summary>
             <div class="vp-menu-body vp-finish">
@@ -2617,6 +2468,102 @@
             <div class="vp-row vp-row-full"><p id="carve-readout" class="carve-readout">&mdash;</p></div>
             </div>
           </details>
+          <!-- ASSEMBLE: one card for putting one piece on another (docs/ASSEMBLE-EDITOR.md).
+               It is the Join, Seat and Align cards merged. On top, Open editor: the pieces
+               alone on a clear stage, click the face to attach, click where it goes, and a
+               ghost shows the result before anything on the plate moves (app-asm-editor.js).
+               Under it, the three cards as they were, id for id, each a section of this one:
+               Join by slots (docs/JOIN-TRIPLE.md), Seat and Align. Opening the column
+               starts the Join session the three sections work in (app-join.js,
+               joinWireCard); shutting it is Cancel. -->
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-assemble">
+            <summary class="vp-bar-btn" title="Put one piece on another: the editor (click two faces, see a ghost, weld), or Join, Seat and Align by hand">Assemble</summary>
+            <div class="vp-menu-body vp-top-body">
+              <div class="asm-card" id="asm-card">
+                <button id="btn-asm-open" class="btn btn-primary" type="button"
+                        title="Open the assembly editor: the plate's pieces alone, spread apart, on a stage you can turn. Click the face to attach, click where it goes on the other piece, and a ghost shows it there. Set its place on the face, a turn and a gap, then Weld into one or Place. Nothing on the plate moves until then; one Undo takes it back.">Open editor</button>
+                <p class="asm-hint">Click the face to attach, click where it goes. A ghost shows it before anything moves.</p>
+                <button id="btn-asm-interlock" class="btn btn-secondary" type="button" data-asm-mode="lock"
+                        title="Open the editor on its Interlock tab: a tongue, a round pin or a snap tab on a face, sized by typed caliper values, placed by dragging it or by typing its distance from the face's edges. With another piece seated on that face (Place it there in the editor first), the matching socket is cut in that piece. One Undo.">Interlocks &amp; pins</button>
+                <p class="asm-hint">A key on one piece, its socket in the piece seated on it. Typed sizes, dragged or typed into place.</p>
+                <details class="vp-sec asm-sec" id="asm-sec-join">
+                  <summary class="vp-sec-head" title="Join two pieces, or three in one go: pick A, B and C, set a gap at each junction, JOIN">Join by slots</summary>
+                  <div class="vp-sec-body">
+                  <div class="joins-card" id="joins-card">
+                    <label class="join-orient" for="join-horizontal"
+                           title="Vertical stack: each piece is centred over the one before it and seated down onto it. Horizontal sequence: each piece keeps its place along the run and is centred on the cross axis, then seated sideways against the one before it.">
+                      <span class="join-orient-word join-orient-v">Vertical</span>
+                      <input type="checkbox" id="join-horizontal" class="join-switch" role="switch" aria-label="Horizontal sequence (off: vertical stack)">
+                      <span class="join-orient-word join-orient-h">Horizontal</span>
+                    </label>
+                    <button type="button" class="join-slot" id="join-slot-a" data-slot="a"><span class="join-badge join-badge-a">A</span><span class="join-slot-name" id="join-name-a">Pick piece A</span></button>
+                    <div class="join-gap-row" id="join-gap-ab-row">
+                      <label class="join-gap-check" title="Off: no gap - A-B is seated touching (0). On: A-B is seated at the slider's gap."><input type="checkbox" id="join-gap-ab-on"> gap</label>
+                      <input type="range" id="join-gap-ab" min="-0.25" max="0.05" step="0.01" value="-0.18" disabled title="Gap at the A-B junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = B overlaps into A." aria-label="A to B junction gap in mm" />
+                      <output id="join-gap-ab-value" for="join-gap-ab" title="The gap the A-B junction will be seated at">-0.18 mm</output>
+                    </div>
+                    <button type="button" class="join-slot" id="join-slot-b" data-slot="b"><span class="join-badge join-badge-b">B</span><span class="join-slot-name" id="join-name-b">Pick piece B</span></button>
+                    <div class="join-gap-row" id="join-gap-bc-row">
+                      <label class="join-gap-check" title="Off: no gap - B-C is seated touching (0). On: B-C is seated at the slider's gap. Live once C is picked."><input type="checkbox" id="join-gap-bc-on" disabled> gap</label>
+                      <input type="range" id="join-gap-bc" min="-0.25" max="0.05" step="0.01" value="-0.18" disabled title="Gap at the B-C junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = C overlaps into B." aria-label="B to C junction gap in mm" />
+                      <output id="join-gap-bc-value" for="join-gap-bc" title="The gap the B-C junction will be seated at">-0.18 mm</output>
+                    </div>
+                    <button type="button" class="join-slot" id="join-slot-c" data-slot="c"><span class="join-badge join-badge-c">C</span><span class="join-slot-name" id="join-name-c">Pick piece C (optional)</span></button>
+                    <div class="join-actions">
+                      <button id="btn-join" class="btn btn-primary" type="button" disabled title="Two pieces, A-B gap off: Complete Join - B welded into A as one piece. Otherwise each junction is Center lock then Seat (support) at its own gap. One Undo takes it all back.">JOIN</button>
+                      <button id="btn-join-clear" class="btn btn-ghost" type="button" title="Clear the slots">Cancel</button>
+                    </div>
+                    <p class="join-readout" id="join-readout" aria-live="polite">Pick A and B</p>
+                  </div>
+                  </div>
+                </details>
+                <details class="vp-sec asm-sec" id="asm-sec-seat">
+                  <summary class="vp-sec-head" title="Seat B on A: support gap, Seat here, washer, flush, port, surface grid">Seat</summary>
+                  <div class="vp-sec-body">
+                      <div class="seat-support">
+                        <button id="btn-seat-support" class="btn btn-secondary" type="button" title="Seat B's mating face at the slider's gap off A's skin (or off the skin tips of a skinned face). B is seated as it lies: a tilt or lean already on it stays, and its current underside is what lands on A's face - Tip or Tilt it first to seat a different face. Negative = air gap, easy release is -0.15 to -0.20. Positive = B overlaps into A. 0 = touching.">Seat (support)</button>
+                        <div class="seat-support-row">
+                          <input type="range" id="seat-gap" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Seat gap in mm, 0.01 steps. -0.25 (air) to +0.05 (overlap); default -0.18, mid easy-release. Arrow keys step 0.01." aria-label="Seat gap in mm" />
+                          <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
+                        </div>
+                        <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
+                        <label class="vp-check" for="chk-oversize-washer"
+                               title="Oversized washer: for a deliberately close-contact washer or shim WIDER than the piece it sits on. Seat (support) then places B at the typed gap below through the measured-clearance solve instead of the corner-ray fit - which refuses an overhanging piece with 'corner N missed hull along punch axis' - and reports the true minimum distance, the overhang and that verdict on the status line instead of refusing. Off: Seat (support) is exactly the seat it has always been.">
+                          <input type="checkbox" id="chk-oversize-washer"> Oversized washer
+                        </label>
+                        <div class="seat-support-row oversize-row">
+                          <label for="oversize-gap" title="The gap Seat (support) places at while Oversized washer is on, in mm, coupon sign convention: negative = air gap, 0 = touching, positive = the washer overlaps into the target. Typed, not the slider, so a deliberate squeeze past the slider's +0.05 can be asked for at all.">Gap</label>
+                          <input type="number" id="oversize-gap" min="-5" max="5" step="0.01" value="0"
+                                 aria-label="Oversized washer gap in mm" />
+                          <span class="oversize-unit">mm</span>
+                        </div>
+                      </div>
+                      <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Flush plug seat: bury B in A with its outer face 0.01 mm proud of A's skin, then Subtract. Ignores the gap slider.">Seat flush</button>
+                      <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
+                      <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
+                  </div>
+                </details>
+                <details class="vp-sec asm-sec" id="asm-sec-align">
+                  <summary class="vp-sec-head" title="Line B up on A: edges, centres, Center lock">Align</summary>
+                  <div class="vp-sec-body">
+                      <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
+                      <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
+                      <button id="btn-join-cz" class="btn btn-secondary" type="button">Center Z</button>
+                      <div class="edit-row">
+                        <button id="btn-center-lock" class="btn btn-secondary" type="button"
+                                title="Slide B in XZ until its centre sits on the target point on A. Rough placement - Seat / Align still do the fine work.">Center lock</button>
+                        <button id="btn-center-lock-pick" class="btn btn-secondary" type="button"
+                                title="Click a point on A to lock onto instead of A's own centre. Right-click this button to drop a stored target.">Pick target</button>
+                      </div>
+                      <select id="center-lock-ref" title="Which point on each piece Center lock reads, seen top-down">
+                        <option value="bbox">Lock on bounding-box centre</option>
+                        <option value="centroid">Lock on centroid</option>
+                      </select>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </details>
           <!-- SLICE moved into the supports card (its last section, #sup-slice-sec): Generate slices the plate. -->
           <!-- G-scope: the ONE G-code / microscope tool. It lays an inspector
                OVER whatever is on the plate, the way X-ray acts on what is
@@ -2629,8 +2576,85 @@
                   aria-label="G-scope"
                   title="G-scope: put the plate under the lens, or open an STL, a 3MF or a sliced .gcode.3mf. Colour per part or per slicer feature, a capture box, a layer-range slider, Normal or Slice view - then export what you isolated, or drag it onto the second plate.">G-scope</button>
           <input type="file" id="ms-input" accept=".stl,.3mf" class="hidden-quiet" />
+          <!-- FILL & FIX: what fills a hollow or mends a surface - Fill / Densify, Foam, GUN (out of Add),
+               Patch (out of Add), and Weave (its own card before, a section here; opening it arms the lasso). -->
+          <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-fillfix" data-sec="fillfix">
+            <summary class="vp-bar-btn" title="Fill / Densify, Foam, Foam gun, Patch, Weave">Fill &amp; fix</summary>
+            <div class="vp-menu-body vp-finish">
+            <div class="vp-row vp-row-triple">
+              <button id="btn-fill" class="btn btn-secondary" type="button"
+                      title="Fill a hollow piece's interior cavity solid - the inverse of Hollow. Drops the shells that bound enclosed cavities and touches nothing else, so the outer surface comes back exactly as it was. A captive separate solid is not a cavity and is never removed.">Fill / Densify</button>
+              <button id="btn-foam" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Spray foam into a sealed hollow and watch it fill from the bottom up. The piece turns to a ghost, the hollow shows dark and the foam orange. Hold the mouse on the piece to spray, let go to pause; the Level slider sets it directly. Set turns the foam into solid mesh, bonded into the piece; Cancel leaves everything as it was. Only the hollow's own walls change. See docs/FOAM.md.">Foam</button>
+              <button id="btn-foam-gun" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Foam gun: a box appears on the selected piece - drag its handles to place and size it. Aim at the piece inside the box and hold the mouse: the box's buried space fills from the bottom while you hold, and letting go sets it, as one Undo. Spray again to add more. Escape or Cancel takes the box away. See docs/FOAM.md.">GUN</button>
+            </div>
+            <div id="foam-gun-panel" class="foam-panel" hidden>
+              <p id="foam-gun-readout" class="cut-readout foam-readout">—</p>
+              <div class="vp-row">
+                <button id="btn-foam-gun-cancel" class="btn btn-secondary" type="button" title="Take the box away. Sprays already set stay set; Undo takes them back one at a time.">Cancel</button>
+              </div>
+            </div>
+            <div id="foam-panel" class="foam-panel" hidden>
+              <p class="hint">Hold the mouse on the piece to spray. Let go to pause.</p>
+              <div id="foam-hollows" class="foam-hollows"></div>
+              <div class="vp-row foam-level-row">
+                <label for="inp-foam-level">Level</label>
+                <input type="range" id="inp-foam-level" min="0" max="1" step="0.01" value="0" aria-label="Foam level, mm above the hollow's floor">
+                <span id="foam-level-read" class="foam-level-read">—</span>
+              </div>
+              <p id="foam-readout" class="cut-readout foam-readout">—</p>
+              <div class="vp-row vp-row-triple">
+                <button id="btn-foam-all" class="btn btn-secondary" type="button" title="Raise the foam to the top of the hollow.">Fill it all</button>
+                <button id="btn-foam-set" class="btn btn-secondary" type="button" title="Turn the foam into solid mesh, bonded into the piece. One Undo puts it back.">Set</button>
+                <button id="btn-foam-cancel" class="btn btn-secondary" type="button" title="Put Foam away and leave the piece exactly as it was.">Cancel</button>
+              </div>
+            </div>
+            <!-- PATCH (app-patch.js, nso_patch.js, docs/PATCH.md): arm it, hover a hole to
+                 outline it, click to fill it with a surface that continues the curvature
+                 round it. One Undo per click. The Findings card's PATCH is the same fill. -->
+            <div class="vp-row vp-row-full vp-row-patch">
+              <button id="btn-patch" class="btn btn-secondary btn-patch" type="button" aria-pressed="false"
+                      title="Fill an open hole with a surface that continues the curvature round it: a smooth fit through the rim's neighbours, welded at the rim - no lip, no flat facet. A hole whose rim is flat gets the flat cap. Arm it, hover a hole to outline it, click to fill it. One Undo per click. Click Patch again, or press Escape, to stop.">Patch</button>
+            </div>
+            <p id="patch-readout" class="bend-readout patch-readout" hidden></p>
+          <!-- WEAVE (app-weave.js, nso_weave.js, nso_cdt.js; docs/WEAVE.md): draw a lasso round part of a piece's surface. The loop is
+               drawn flat on the screen but cuts like a cylinder along the view: it takes the surface that faces you inside it, curved
+               or grooved as it is, out along the piece's own triangles. A fresh, evenly woven patch of that same surface - cloned, not
+               flattened - goes in its place, rim corner for corner, and work on it (an engraving) is bridged. Works through X-ray:
+               the plate, its rim corners and the new weave are drawn over the wireframe. -->
+            <details class="vp-menu vp-sub-menu vp-weave-menu" id="menu-weave">
+            <summary class="vp-bar-btn" title="Draw a lasso round part of a piece's surface: it is cut out along its own triangles and a fresh, even weave of the same surface - curved or grooved as it was - goes in its place, rim corner for corner. Removes engraved text, or re-meshes a patch of a scan">Weave</summary>
+            <div class="vp-menu-body">
+            <div class="vp-bend-panel weave-card" id="weave-card">
+              <div class="punch-seg" id="weave-size-row" role="group" aria-label="Adjust the cut">
+                <button id="btn-weave-grow" class="btn btn-secondary" type="button" title="Cut one ring of triangles wider all round, so the edge falls on clean surface.">Grow</button>
+                <button id="btn-weave-shrink" class="btn btn-secondary" type="button" title="Cut one ring of triangles narrower all round.">Shrink</button>
+                <button id="btn-weave-clear" class="btn btn-secondary" type="button" title="Let go of the cut (Escape does too).">Clear</button>
+              </div>
+              <div class="punch-seg" id="weave-fit-row" role="group" aria-label="The new surface">
+                <button id="btn-weave-smooth" class="btn btn-secondary" type="button" aria-pressed="true" title="Smooth: the new patch is the surface the old one was on, with the work on it bridged - an engraving, a boss, a gouge are gone, the face's curve carried across. Work the lasso's edge crosses stays as it is: draw wider to take it.">Smooth</button>
+                <button id="btn-weave-follow" class="btn btn-secondary" type="button" aria-pressed="false" title="Follow: the new patch is the old one's own surface exactly, only re-woven - nothing is bridged.">Follow</button>
+              </div>
+              <label class="vp-bend-field" title="The new patch's triangle size, mm. Blank: the old patch's own median edge, so the weave resembles the mesh round it.">Pitch
+                <input type="number" id="inp-weave-pitch" value="" placeholder="auto" min="0.02" max="5" step="0.01" aria-label="Triangle size, mm"><span>mm</span></label>
+              <p id="weave-readout" class="bend-readout">&mdash;</p>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-weave-go" class="btn btn-secondary" type="button" disabled
+                        title="Weave a fresh patch to fit the hole the cut leaves (drawn green, over the wireframe if X-ray is on). Nothing is changed yet.">WEAVE</button>
+                <button id="btn-weave-attach" class="btn btn-secondary" type="button" disabled
+                        title="Put the woven patch in place of the old one, rim to rim. One Undo puts the piece back.">REATTACH</button>
+              </div>
+              <div class="vp-row vp-row-full">
+                <button id="btn-weave-cancel" class="btn btn-secondary" type="button" title="Close Weave; the piece is unchanged.">Cancel</button>
+              </div>
+            </div>
+            </div>
+          </details>
+            </div>
+          </details>
           <!-- CHECK & REPAIR: on its own, pinned over the view row. -->
-          <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-repair" data-sec="repair">
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-repair" data-sec="repair">
             <summary class="vp-bar-btn" title="Check piece, Cap open faces, Seal, Non-solid, Solidify">Check &amp; repair</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-full">
@@ -3231,7 +3255,9 @@
   <script src="app-crop.js?v=eaac717b"></script>
   <!-- The Crop card: a shape dragged to size, CROP (docs/CROP.md). After app-crop.js
        and app-cut.js, whose updateCutterUI it follows. -->
-  <script src="app-crop-card.js?v=36bdd3e8"></script>
+  <script src="app-crop-card.js?v=ca98581d"></script>
+  <!-- Cut / Crop: one slab, a switch at the top of either card (after both cards are wired). -->
+  <script src="app-cut-crop-toggle.js?v=de4c3369"></script>
   <script src="app-fatten.js?v=9b21c866"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
@@ -3304,7 +3330,7 @@
   <!-- Punch: round holes through a face, alone, in a grid or on a circle. The
        geometry (nso_punch.js) before its card (app-punch.js). docs/PUNCH.md. -->
   <script src="nso_punch.js?v=bf1772f3"></script>
-  <script src="app-punch.js?v=11167ace"></script>
+  <script src="app-punch.js?v=ee603956"></script>
   <!-- Text: type a word, stamp it into a face. The geometry (nso_text.js, which reads
        nso_punch.js's surface probe) before its card (app-text.js). docs/TEXT.md. -->
   <script src="nso_text.js?v=25b852c2"></script>
@@ -3314,7 +3340,7 @@
        (nso_cdt.js) and the engine (nso_weave.js, which needs it) before the card (app-weave.js). docs/WEAVE.md. -->
   <script src="nso_cdt.js?v=6d15bbab"></script>
   <script src="nso_weave.js?v=49184f5f"></script>
-  <script src="app-weave.js?v=e3aaaa92"></script>
+  <script src="app-weave.js?v=7aa97a2a"></script>
   <!-- Wrap: one feature laid over a face on a lattice (nso_surftex.js needs nso_cdt.js and nso_weave.js above it; the presets and the card after). docs/SURFTEX.md. -->
   <script src="nso_surftex.js?v=2491a6d9"></script>
   <script src="nso_surftex_presets.js?v=2b935033"></script>

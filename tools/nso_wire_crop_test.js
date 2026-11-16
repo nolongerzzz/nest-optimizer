@@ -15,7 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { withApp, loadSTL, selectModel, statusOf, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, selectModel, statusOf, toggleCrop, ROOT } = require('./nso_app_harness');
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -71,7 +71,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 2. select the simple test piece (60 x 12 x 8); Box stands on it at half size ===');
   const id = await loadSTL(page, writeSTL(path.join(TMP, 'bar60.stl'), bar(60, 12, 8)));
   await selectModel(page, id);
-  await page.click('#menu-crop > summary');
+  await toggleCrop(page);
   await page.evaluate(i => selectPlaced(state.placed.findIndex(p => p.sourceId === i)), id);
   await page.evaluate(() => {      // an oblique view, close, so the handles are a hand's width apart
     state.camera.position.set(40, 36, 52); state.controls.target.set(0, 4, 0); state.camera.lookAt(0, 4, 0); state.controls.update();

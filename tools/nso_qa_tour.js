@@ -108,7 +108,9 @@ const MENU = { 'Import': 'menu-import', 'Measure': 'menu-measure', 'Move': 'menu
   'Align': 'menu-assemble', 'Gen+': 'menu-gen', 'Export': 'menu-export', 'Scale': 'menu-scale', 'Cut': 'menu-cut', 'Crop': 'menu-crop',
   'Connect': 'menu-connect', 'Draw': 'menu-connect', 'Join': 'menu-assemble', 'Seat': 'menu-assemble', 'Supports': 'menu-supports', 'Add': 'menu-add',
   'Subtract': 'menu-bit', 'Shape': 'menu-shape', 'Paint': 'menu-paint', 'Surface & edges': 'menu-surface', 'Sculpt': 'menu-sculpt',
-  'Check & repair': 'menu-repair' };
+  'Check & repair': 'menu-repair',
+  // the card regroup (2026-11-16)
+  'Generate': 'menu-gen', 'Print': 'menu-supports', 'Punch': 'menu-punch', 'Fill & fix': 'menu-fillfix' };
 function V(sec, card, id, label, o) {
   const it = Object.assign({ sec, card, id, label, setup: 'one', menu: MENU[card] || null }, o || {});
   PLAN.push(it);
@@ -270,11 +272,11 @@ function buildPlan() {
   V(COL, 'Supports', 'btn-sup-remove', 'Remove (click a support)', { pre: async x => { await x.click('btn-sup-all'); await x.wait(800); }, run: arm('btn-sup-remove', [0, 1]) });
   V(COL, 'Supports', 'btn-sup-none', 'Remove all', { pre: async x => { await x.click('btn-sup-all'); await x.wait(800); }, run: press(['btn-sup-none']) });
   const hollowed = async x => { await x.click('btn-hollow'); await x.wait(1200); };
-  V(COL, 'Add', 'btn-fill', 'Fill / Densify (after Hollow)', { pre: hollowed, run: press(['btn-fill']) });
-  V(COL, 'Add', 'btn-foam', 'Foam (after Hollow; hold the mouse on the piece)', { pre: hollowed, run: async x => { await x.click('btn-foam'); await x.wait(300); const p = x.pt(0, 0); if (p) await x.hold(p, 1500); else x.note('no point on the piece'); } });
-  V(COL, 'Add', 'btn-foam-all', 'Foam: Fill it all', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-all']) });
-  V(COL, 'Add', 'btn-foam-set', 'Foam: Fill it all, Set', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-all'); await x.wait(500); }, run: press(['btn-foam-set']) });
-  V(COL, 'Add', 'btn-foam-cancel', 'Foam: Cancel', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-cancel']) });
+  V(COL, 'Fill & fix', 'btn-fill', 'Fill / Densify (after Hollow)', { pre: hollowed, run: press(['btn-fill']) });
+  V(COL, 'Fill & fix', 'btn-foam', 'Foam (after Hollow; hold the mouse on the piece)', { pre: hollowed, run: async x => { await x.click('btn-foam'); await x.wait(300); const p = x.pt(0, 0); if (p) await x.hold(p, 1500); else x.note('no point on the piece'); } });
+  V(COL, 'Fill & fix', 'btn-foam-all', 'Foam: Fill it all', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-all']) });
+  V(COL, 'Fill & fix', 'btn-foam-set', 'Foam: Fill it all, Set', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-all'); await x.wait(500); }, run: press(['btn-foam-set']) });
+  V(COL, 'Fill & fix', 'btn-foam-cancel', 'Foam: Cancel', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-cancel']) });
   V(COL, 'Add', 'btn-thicken-out', 'Thicken out (arms the live ghost, then Set)', { run: press(['btn-thicken-out', 'btn-thicken-set']) });
   V(COL, 'Add', 'btn-thicken-in', 'Thicken in (arms the live ghost, then Set)', { run: press(['btn-thicken-in', 'btn-thicken-set']) });
   V(COL, 'Add', 'btn-thicken-cancel', 'Thicken: arm, then Cancel', { run: press(['btn-thicken-out', 'btn-thicken-cancel']) });
@@ -283,7 +285,7 @@ function buildPlan() {
   V(COL, 'Add', 'btn-bridge-go', 'Bridge: two points, Set', { setup: 'two', run: async x => { await x.click('btn-bridge'); await x.pick(0, 0); await x.wait(200); await x.pick(1, 0); await x.wait(300); await x.click('btn-bridge-go'); } });
   V(COL, 'Add', 'btn-bridge-cancel', 'Bridge: Cancel', { setup: 'two', run: async x => { await x.click('btn-bridge'); await x.pick(0, 0); await x.wait(200); await x.click('btn-bridge-cancel'); } });
   V(COL, 'Add', 'btn-close-go', 'Close: click the rim, Set', { run: arm('btn-close', [0, 1], ['btn-close-go']) });
-  V(COL, 'Add', 'btn-patch', 'Patch (click a hole)', { run: arm('btn-patch', [0, 1]) });
+  V(COL, 'Fill & fix', 'btn-patch', 'Patch (click a hole)', { run: arm('btn-patch', [0, 1]) });
   V(COL, 'Subtract', 'btn-subtract', 'Subtract B from A', Object.assign({ run: press(['btn-subtract']) }, two));
   V(COL, 'Subtract', 'btn-extract-bit', 'Extract bit', Object.assign({ run: press(['btn-extract-bit']) }, two));
   V(COL, 'Sculpt', 'btn-carve', 'Carve (click a face)', { run: arm('btn-carve', [0]) });
@@ -840,7 +842,9 @@ async function worker(key, items) {
           const e = await G('edit', () => page.evaluate(() => state.editId));
           if (e == null) X.note('a click on the piece did not select it');
         }
-        if (it.menu) { await G('card', () => LARGE ? page.evaluate(m => document.querySelector('#' + m + ' > summary').click(), it.menu) : page.click('#' + it.menu + ' > summary', { timeout: TMO })).catch(() => X.note('card would not open')); await sleep(150); }
+        // Crop has no slab: the Cut / Crop slab, then the switch's Crop (2026-11-16)
+        const openBy = it.menu === 'menu-crop' ? ['#menu-cut > summary', '#btn-cut-mode-crop'] : ['#' + it.menu + ' > summary'];
+        if (it.menu) { await G('card', async () => { for (const sel of openBy) await (LARGE ? page.evaluate(q => document.querySelector(q).click(), sel) : page.click(sel, { timeout: TMO })); }).catch(() => X.note('card would not open')); await sleep(150); }
         if (it.pre) await it.pre(X);
         if (process.env.QA_TRACE) process.stderr.write(JSON.stringify({ placed: await page.evaluate(() => state.placed.map(p => [p.sourceId, p.name])), hits: X.H && X.H.map(a => a.length), join: await page.evaluate(() => ({ sess: state.joinSession, edit: state.editId, partner: state.joinPartnerId, armed: state.joinArmed })) }) + '\n');
         tp('pre done'); const fp0 = await X.fp(); tp('fp0');

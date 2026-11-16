@@ -23,7 +23,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { withApp, ROOT } = require('./nso_app_harness');
+const { withApp, toggleCrop, ROOT } = require('./nso_app_harness');
 const L = require('./nso_big_mesh_lib');
 
 const argv = process.argv.slice(2);
@@ -86,7 +86,7 @@ const secs = ms => (ms / 1000).toFixed(1) + ' s';
 
     /* ---- the card, the box across the wall, the plan ---------------- */
     console.log('\n=== Crop: Box across the vase\'s wall ===');
-    await page.click('#menu-crop > summary');
+    await toggleCrop(page);
     await page.waitForTimeout(300);
     await page.evaluate(() => NSO_CropCard.pick('box'));
     await page.waitForFunction(() => { const S = NSO_CropCard.state(); return !!S.plan && !S.timer && NSO_BoolBusy.active() === 0; }, null, { timeout: 600000, polling: 200 });

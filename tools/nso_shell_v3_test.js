@@ -4,6 +4,9 @@
    UI only - a regrouping. Every control keeps its id, handler, tooltip and
    behaviour; only where it opens from changed.
 
+   (The card regroup of 2026-11-16 changed the order below: the ROW and GROUPS
+   lists further down are the current ticket.)
+
    The top row, left to right: Import, Measure, Move, Rotate, Tip, Align,
    Gen+, Lock position, Lock plate, then at the right Undo, Remove, Export,
    and the Plate & pieces panel glued to the top-right corner. Under Remove
@@ -53,10 +56,15 @@ const check = (name, cond, detail) => {
 };
 
 /* ---------------------------------------------------------------- the ticket */
+/* The card regroup (2026-11-16): Print (the supports card) ends the row's left group;
+   Generate (was Gen+) heads the column; Crop shares the Cut / Crop slab (no slab of its
+   own - the switch at the top of the card opens it); Punch is its own card; Assemble
+   follows Sculpt; Fill & fix (Fill / Densify, Foam, GUN, Patch, Weave) sits between
+   G-scope and Check & repair. */
 const ROW = [
   ['menu-import', 'IMPORT'], ['menu-measure', 'MEASURE'], ['menu-move', 'MOVE'], ['menu-rotate', 'ROTATE'],
-  ['menu-tip', 'TIP'], ['menu-gen', 'GEN+'],
-  ['btn-lock-pos', 'LOCK POSITION'], ['btn-plate-lock', 'LOCK PLATE']
+  ['menu-tip', 'TIP'],
+  ['btn-lock-pos', 'LOCK POSITION'], ['btn-plate-lock', 'LOCK PLATE'], ['menu-supports', 'PRINT']
 ];
 const RIGHT = [['btn-undo', 'UNDO'], ['btn-delete-placed', 'REMOVE'], ['menu-export', 'EXPORT']];
 // Second row, right-aligned under the buttons: [what, label, under what].
@@ -65,12 +73,12 @@ const PANEL = 'plate-panel';
 const PANEL_HOLDS = ['plate-select', 'custom-w', 'custom-d', 'custom-h', 'plate-grid-show', 'chk-plate-grid-snap',
                      'model-list', 'clone-count', 'btn-clone'];
 const GROUPS = [
-  [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'],
-   ['menu-connect', 'DRAW'], ['menu-assemble', 'ASSEMBLE'], ['menu-supports', 'SUPPORTS'], ['menu-add', 'ADD'],
-   ['menu-bit', 'SUBTRACT']],
-  [['menu-shape', 'SHAPE'], ['menu-text', 'TEXT'], ['menu-weave', 'WEAVE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT']],
+  [['menu-gen', 'GENERATE'], ['menu-scale', 'SCALE'], ['menu-cut', 'CUT / CROP'], ['menu-punch', 'PUNCH'],
+   ['menu-connect', 'DRAW'], ['menu-add', 'ADD'], ['menu-bit', 'SUBTRACT']],
+  [['menu-shape', 'SHAPE'], ['menu-text', 'TEXT'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT'],
+   ['menu-assemble', 'ASSEMBLE']],
   [['btn-microscope', 'G-SCOPE']],
-  [['menu-repair', 'CHECK & REPAIR']],
+  [['menu-fillfix', 'FILL & FIX'], ['menu-repair', 'CHECK & REPAIR']],
   [['btn-xray', 'X-RAY'], ['btn-watch', 'EYE'], ['btn-frame-view', '◎']]
 ];
 /* The view group's faces are icons; X and the eye are named by their
@@ -96,10 +104,12 @@ const HOLDS = {
                'menu-photo', 'btn-photoset-pick', 'btn-photoset-report', 'btn-photoset-clear'],
   'menu-export': ['export-format', 'btn-export-model', 'btn-library-save', 'btn-export-stl', 'btn-delete-model'],
   'menu-scale': ['scale-card', 'scale-factor', 'scale-target', 'btn-scale-fit'],
-  'menu-cut': ['edit-card', 'cut-miter-dial', 'cut-slider', 'cut-mm', 'btn-cut'],
-  // CROP: the Shape row (Box, Cylinder, Sphere, Outline, Wall, Lasso), one readout, CROP, Cancel - then Lift, whose panel holds Strip and Detach flange (Reattach is in Connect)
-  'menu-crop': ['crop-card', 'crop-shape-row', 'btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
-                'btn-crop-shape-outline', 'btn-crop-shape-wall', 'btn-crop-shape-lasso', 'crop-readout', 'btn-crop', 'btn-crop-cancel',
+  // CUT / CROP: the Cut | Crop switch at the top, then the cutter
+  'menu-cut': ['edit-card', 'btn-cut-mode-cut', 'btn-cut-mode-crop', 'cut-miter-dial', 'cut-slider', 'cut-mm', 'btn-cut'],
+  // CROP (opened by the switch, not a slab): the switch, the Shape row (Box, Cylinder, Sphere, Cookie-Cutter, Outline, Wall, Lasso),
+  // one readout, CROP, Cancel - then Lift, whose panel holds Strip and Detach flange (Reattach is in Connect)
+  'menu-crop': ['crop-card', 'btn-crop-mode-cut', 'btn-crop-mode-crop', 'crop-shape-row', 'btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
+                'btn-crop-shape-piece', 'btn-crop-shape-outline', 'btn-crop-shape-wall', 'btn-crop-shape-lasso', 'crop-readout', 'btn-crop', 'btn-crop-cancel',
                 'btn-lift', 'lift-panel', 'btn-detach'],
   // CONNECT: the builder, and Reattach as its last row (it moved here from the Crop card)
   'menu-connect': ['connect-panel', 'btn-reattach'],
@@ -116,9 +126,15 @@ const HOLDS = {
                     'btn-slice-go', 'btn-slice-cancel', 'slice-readout', 'btn-slice-export'],
   // SHAPE: Smooth · Bend · Reducer · Roll · Neck (Tube edge's three verbs)
   'menu-shape': ['btn-smooth', 'btn-bend', 'btn-tube-edge', 'bend-panel', 'te-panel', 'sel-te-verb'],
-  // ADD: Fill/Densify · Foam · Thicken out · Thicken in (a live ghost: the slider, Set, Cancel in its panel) · Extend · Bridge
-  'menu-add': ['btn-fill', 'btn-foam', 'foam-panel', 'btn-thicken-out', 'btn-thicken-in', 'thicken-panel',
+  // ADD: Thicken out · Thicken in (a live ghost: the slider, Set, Cancel in its panel) · Extend · Bridge
+  'menu-add': ['btn-thicken-out', 'btn-thicken-in', 'thicken-panel',
                'btn-extend', 'inp-extend-mm', 'btn-bridge', 'bridge-panel'],
+  // PUNCH: the card is the switch - open it and Punch is armed
+  'menu-punch': ['punch-card', 'inp-punch-dia', 'sel-punch-depth', 'punch-pattern-row', 'punch-readout', 'btn-punch-go', 'btn-punch-cancel'],
+  // FILL & FIX: Fill / Densify · Foam · GUN (and their panels) · Patch · Weave (a section: the lasso arms when it opens)
+  'menu-fillfix': ['btn-fill', 'btn-foam', 'btn-foam-gun', 'foam-gun-panel', 'foam-panel', 'btn-patch', 'patch-readout',
+                   'menu-weave', 'weave-card', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear', 'btn-weave-smooth', 'btn-weave-follow',
+                   'inp-weave-pitch', 'weave-readout', 'btn-weave-go', 'btn-weave-attach', 'btn-weave-cancel'],
   // SUBTRACT: Subtract B from A · Extract bit · Hollow · Hollow to safe min (Carve is in Sculpt; Lift, with Detach flange, is in Crop)
   'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-hollow', 'inp-hollow-mm',
                'btn-hollow-safe'],
@@ -126,9 +142,6 @@ const HOLDS = {
   'menu-text': ['text-card', 'inp-text', 'sel-text-font', 'btn-text-bold', 'btn-text-italic', 'btn-text-font-file', 'inp-text-size',
                 'inp-text-depth', 'inp-text-angle', 'chk-text-mirror', 'text-readout', 'btn-text-go', 'btn-text-cancel',
                 'btn-text-mode-stamp', 'btn-text-mode-remove', 'chk-text-word', 'inp-text-reach', 'btn-text-remove'],
-  // WEAVE: the card is the menu - Grow / Shrink / Clear, Smooth / Follow, Pitch, the readout, WEAVE, REATTACH, Cancel (the lasso is the pointer)
-  'menu-weave': ['weave-card', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear',
-                 'btn-weave-smooth', 'btn-weave-follow', 'inp-weave-pitch', 'weave-readout', 'btn-weave-go', 'btn-weave-attach', 'btn-weave-cancel'],
   'menu-paint': ['btn-mask-select', 'btn-mask-paint', 'btn-mask-clear', 'btn-mask-delete', 'sel-mask-delete', 'btn-extract-sel'],
   // SURFACE & EDGES: Soften (R, Full wrap, the Soften card: four style tiles, Radius, readout, Cancel) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture · Wrap (a sub-menu: one feature laid over a face)
   'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'soften-shelf', 'btn-mirror', 'inp-mirror-plane',
@@ -145,11 +158,10 @@ const HOLDS = {
 const SUBTRACT_SECTIONS = [
   [null, 'SUBTRACT B FROM A', ['btn-subtract']],
   [null, 'EXTRACT BIT', ['btn-extract-bit']],
-  [null, 'PUNCH', ['btn-punch', 'punch-card']],
   [null, 'HOLLOW', ['btn-hollow', 'inp-hollow-mm', 'inp-hollow-slider', 'btn-hollow-safe']],
   [null, 'SPLIT TO PARTS', ['btn-split-parts']]
 ];
-const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-repair'];
+const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-fillfix', 'menu-repair'];
 /* Tube edge's verbs are Reducer, Roll, Neck. (Soften's four styles are tiles now: SOFTEN_STYLES.) */
 /* Soften's styles, in the shelf's order: Round, Corners, Corners+edges, Bevel. */
 const SOFTEN_STYLES = ['fillet', 'corners', 'cornersedges', 'chamfer'];
@@ -262,7 +274,9 @@ const OWN_STATE = {
   'btn-stock-attach': 'the Connect card open (it is in that card, under Set / Cancel)',
   // #194: the Supports card is a verb with a state - Remove all once it has
   // built, Remove once a built support is picked
-  'btn-sup-none': 'Supports card BUILT', 'btn-sup-remove': 'Supports card BUILT, a support picked'
+  'btn-sup-none': 'Supports card BUILT', 'btn-sup-remove': 'Supports card BUILT, a support picked',
+  // Crop's own slab is hidden: it shares the Cut / Crop slab, and the switch at the top of the card opens it (2026-11-16)
+  'menu-crop': 'shares the Cut / Crop slab'
 };
 /* File inputs are never on screen: their button opens them. */
 const FILE_INPUT_VIA = { 'file-input': 'btn-load-stl', 'photoset-input': 'btn-photoset-pick', 'relief-file': 'btn-relief-pick',
@@ -270,6 +284,15 @@ const FILE_INPUT_VIA = { 'file-input': 'btn-load-stl', 'photoset-input': 'btn-ph
 
 /* ------------------------------------------------------------------ helpers */
 const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9+&◎\- ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/* Crop has no slab: it is opened the way a person opens it - the Cut / Crop slab, then the
+   switch's Crop at the top of the card. */
+async function openCropByHand(page) {
+  const a = await clickFace(page, '#menu-cut > summary');
+  if (!a.ok) return a;
+  await page.waitForTimeout(80);
+  return clickFace(page, '#btn-cut-mode-crop');
+}
 
 async function shutAll(page) {
   await page.evaluate(() => {
@@ -398,8 +421,8 @@ withApp(async (page, logs) => {
       row.every(b => b.inRow && Math.abs(b.y - top) < 0.5) && row.every((b, i) => i === 0 || b.x > row[i - 1].r - 0.5),
       row.map(b => b.id.replace(/^(menu|btn)-/, '') + '@' + Math.round(b.x)).join(' '));
     const undo = geo['btn-undo'], lockPlate = geo['btn-plate-lock'], exp = geo['menu-export'], pan = geo._panel;
-    check('Undo, Remove and Export sit at the right of the row, apart from Lock plate',
-      undo.x - lockPlate.r > 6 && pan && exp.r < pan.x,
+    check('Undo, Remove and Export sit at the right of the row, apart from Lock plate and Print',
+      undo.x - geo['menu-supports'].r > 6 && geo['menu-supports'].x > lockPlate.r && pan && exp.r < pan.x,
       'lock plate ends ' + Math.round(lockPlate.r) + ', undo at ' + Math.round(undo.x) + ', export ends ' + Math.round(exp.r));
     const under = UNDER.map(([id, , over]) => {
       const u = geo[id], o = geo[over];
@@ -422,33 +445,35 @@ withApp(async (page, logs) => {
     const imp = geo['menu-import'];
     const col = GROUPS.map(g => g.map(([id]) => Object.assign({ id }, geo[id])));
     const first = col[0][0];
-    check('the column starts under Import with Scale, at its x', Math.abs(first.x - imp.x) < 0.5 && first.y > imp.b &&
-      first.y - imp.b < 8 && first.id === 'menu-scale',
+    check('the column starts under Import with Generate, at its x', Math.abs(first.x - imp.x) < 0.5 && first.y > imp.b &&
+      first.y - imp.b < 8 && first.id === 'menu-gen',
       'import ' + Math.round(imp.x) + ',' + Math.round(imp.b) + ' ' + first.id + ' ' + Math.round(first.x) + ',' + Math.round(first.y));
     const stacked = col.slice(0, 4).every(g => g.every(b => b.inCol && Math.abs(b.x - imp.x) < 0.5 && Math.abs(b.w - imp.w) < 0.5));
     check('groups 1-4 are one stack under Import, Import\'s width', stacked,
       col.slice(0, 4).map(g => g.map(b => Math.round(b.x) + '/' + Math.round(b.w)).join(' ')).join(' | '));
     const pitches = [];
-    col.slice(0, 3).forEach(g => g.forEach((b, i) => { if (i) pitches.push(+(b.y - g[i - 1].y).toFixed(2)); }));
+    col.slice(0, 4).forEach(g => g.forEach((b, i) => { if (i) pitches.push(+(b.y - g[i - 1].y).toFixed(2)); }));
     check('a 36 px pitch inside each group', pitches.every(p => Math.abs(p - 36) < 0.5), pitches.join(' '));
     const gap12 = +(col[1][0].y - col[0][col[0].length - 1].b).toFixed(2);
     check('a 12 px gap between the make/edit and surface groups', Math.abs(gap12 - 12) < 0.5, String(gap12));
-    const view = col[4], repair = col[3][0], stack = col[2], lastAbove = col[1][col[1].length - 1];
+    // repair: the bottom group's top (Fill & fix); repairEnd: its foot (Check & repair, right under it)
+    const view = col[4], repair = col[3][0], repairEnd = col[3][col[3].length - 1], stack = col[2], lastAbove = col[1][col[1].length - 1];
     check('the view group (X, eye, ◎) is one row pinned to the bottom of the column',
       view.every(b => b.inCol && Math.abs(b.b - (geo._vp.bottom - 8)) < 0.5 && Math.abs(b.y - view[0].y) < 0.5) &&
       Math.abs(view[0].x - imp.x) < 0.5 && Math.abs(view[2].r - imp.r) < 0.5,
       view.map(b => b.id + '@' + Math.round(b.x) + ',' + Math.round(b.y) + '/' + Math.round(b.w)).join(' ') + '; viewport bottom ' + geo._vp.bottom);
-    check('the bottom stack is G-scope alone (Slice is the supports card\'s last section), pinned under Sculpt, and Check & repair follows it a group gap lower',
+    check('the bottom stack is G-scope alone (Slice is the supports card\'s last section), pinned under Assemble, and Fill & fix follows it a group gap lower',
       stack.length === 1 && stack[0].id === 'btn-microscope' &&
       Math.abs(repair.y - stack[0].b - 12) < 0.5 && stack[0].y - lastAbove.b >= 12 - 0.5,
-      'sculpt ends ' + Math.round(lastAbove.b) + ', ' + stack.map(b => b.id + ' ' + Math.round(b.y) + '..' + Math.round(b.b)).join(', ') + ', check & repair ' + Math.round(repair.y));
-    check('Check & repair is on its own, directly above the view row (a group gap), well below Sculpt',
-      Math.abs(view[0].y - repair.b - 12) < 0.5 && repair.y - lastAbove.b >= 12 - 0.5,
-      'sculpt ends ' + Math.round(lastAbove.b) + ', check & repair ' + Math.round(repair.y) + '..' + Math.round(repair.b) +
+      'assemble ends ' + Math.round(lastAbove.b) + ', ' + stack.map(b => b.id + ' ' + Math.round(b.y) + '..' + Math.round(b.b)).join(', ') + ', fill & fix ' + Math.round(repair.y));
+    check('Fill & fix with Check & repair right under it, directly above the view row (a group gap), well below Assemble',
+      col[3].map(b => b.id).join() === 'menu-fillfix,menu-repair' &&
+      Math.abs(view[0].y - repairEnd.b - 12) < 0.5 && repair.y - lastAbove.b >= 12 - 0.5,
+      'assemble ends ' + Math.round(lastAbove.b) + ', fill & fix ' + Math.round(repair.y) + ', check & repair ..' + Math.round(repairEnd.b) +
       ', view row at ' + Math.round(view[0].y));
     const colBottom = Math.max(...view.map(b => b.b));
     check('the column fits inside the viewport at 1280 x 800',
-      colBottom <= geo._vp.bottom && first.y >= geo._vp.top && lastAbove.b < repair.y,
+      colBottom <= geo._vp.bottom && first.y >= geo._vp.top && lastAbove.b < repair.y && lastAbove.b < stack[0].y,
       'column ' + Math.round(first.y - geo._vp.top) + '..' + Math.round(colBottom - geo._vp.top) + ' px of a ' + geo._vp.h + ' px viewport');
     /* No page header: the viewport is the window - it starts at 0 and is all
        800 px (it was 739, under a 61 px header) - and the row and the pinned
@@ -511,8 +536,21 @@ withApp(async (page, logs) => {
     }
     check('every drop-down opens on a click and holds the controls the ticket gives it', holdFails.length === 0,
       holdFails.join('; ') || DROPDOWNS.length + ' drop-downs');
-    check('Shape, Add, Subtract, Surface & edges and Check & repair hold them in the ticket\'s order', orderFails.length === 0,
+    check('Shape, Add, Subtract, Surface & edges, Fill & fix and Check & repair hold them in the ticket\'s order', orderFails.length === 0,
       orderFails.join(', ') || ORDERED.join(', '));
+    // CROP: no slab; the switch at the top of the Cut / Crop card opens it, at the same spot, holding what the ticket gives it.
+    await shutAll(page);
+    const oc = await openCropByHand(page);
+    await page.waitForTimeout(150);
+    const cr = await page.evaluate((holds) => {
+      const d = document.getElementById('menu-crop'), body = d.querySelector(':scope > .vp-menu-body'), b = body.getBoundingClientRect();
+      return { open: d.open, cutOpen: document.getElementById('menu-cut').open, x: b.left, y: b.top,
+               missing: holds.filter(i => { const e = document.getElementById(i); return !e || !body.contains(e); }) };
+    }, HOLDS['menu-crop']);
+    check('CROP opens from the Cut / Crop card\'s switch, in place of Cut, at the one spot, holding the ticket\'s controls',
+      oc.ok && cr.open && !cr.cutOpen && Math.abs(cr.x - vp.left - 134) < 0.5 && Math.abs(cr.y - vp.top - 52) < 0.5 && cr.missing.length === 0,
+      JSON.stringify(Object.assign({ click: oc.why || 'ok' }, cr)));
+    await shutAll(page);
     const opts = await page.evaluate((o) => Object.entries(o).filter(([id, want]) => {
       const got = [...document.getElementById(id).options].map(x => x.value).sort().join();
       return got !== want.slice().sort().join();
@@ -720,7 +758,7 @@ withApp(async (page, logs) => {
     check('...and every control the card had is still on it', secs.missing.length === 0, JSON.stringify(secs.missing));
     check('...and Lift, with Detach flange, is not on it', await page.evaluate(() => !document.querySelector('#menu-bit #btn-lift, #menu-bit #btn-detach, #menu-bit #lift-panel')));
     await shutAll(page);
-    await clickFace(page, '#menu-crop > summary');
+    await openCropByHand(page);
     await page.waitForTimeout(150);
     c = await clickFace(page, '#btn-lift');
     await page.waitForTimeout(300);
@@ -818,7 +856,7 @@ withApp(async (page, logs) => {
       for (const d of chain) {
         // A card the one before it opened by itself (Join's column shows the Join card) is already there: a click would shut it.
         const there = await page.evaluate((d) => document.querySelector(d).open, d);
-        const r = there ? { ok: true } : await clickFace(page, d + ' > summary');
+        const r = there ? { ok: true } : d === '#menu-crop' ? await openCropByHand(page) : await clickFace(page, d + ' > summary');
         const open = await page.evaluate((d) => document.querySelector(d).open, d);
         if (!r.ok || !open) { ok = false; list.forEach(c => unreachable.push(c.id + ' (at ' + d + ': ' + (r.why || 'did not open') + ')')); break; }
       }

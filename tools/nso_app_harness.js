@@ -255,8 +255,19 @@ async function closeTopMenus(page) {
   });
 }
 
+/* Crop has no slab of its own (2026-11-16): it shares the column's Cut / Crop slab with
+   Cut, and the Cut | Crop switch at the top of the Cut card opens it. This is the click
+   a person makes to open the Crop card when it is shut, and to shut it when it is open
+   (the slab, pressed while Crop is open, shuts the card). */
+async function toggleCrop(page) {
+  const open = await page.evaluate(() => !!document.getElementById('menu-crop').open);
+  if (open) return page.click('#menu-cut > summary');
+  if (!(await page.evaluate(() => !!document.getElementById('menu-cut').open))) await page.click('#menu-cut > summary');
+  return page.click('#btn-cut-mode-crop');
+}
+
 module.exports = { withApp, loadSTL, selectModel, statusOf, openFinishMenu, openFinishSections,
-                   openMenuFor, closeTopMenus, ROOT };
+                   openMenuFor, closeTopMenus, toggleCrop, ROOT };
 
 if (require.main === module) {
   withApp(async (page, logs) => {

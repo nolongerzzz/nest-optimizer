@@ -388,7 +388,7 @@ const ROSTER = [
   // handles take a press only on a hole or its ring - never on bare plate.
   { name: 'Punch', file: () => fx('box_hull_80x40x20-2.stl'),
     arm: async page => {
-      await page.click('#btn-punch');
+      await page.click('#menu-punch > summary');
       await page.waitForFunction(() => nsoPunchState().open, null, { timeout: 5000 });
     },
     verb: async (page, id) => {

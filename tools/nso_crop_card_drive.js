@@ -45,7 +45,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { withApp, loadSTL, selectModel, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, selectModel, toggleCrop, ROOT } = require('./nso_app_harness');
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
@@ -168,9 +168,9 @@ const snap = (page, id) => page.evaluate(i => {
                reattachHere: !!c.querySelector('#btn-reattach'), reattachIn: !!document.querySelector('#menu-connect #btn-reattach'),
                readoutId: !!document.getElementById('crop-readout'), hit: NSO_CropCard.HIT_PX };
     });
-    check('the Shape row is Box, Cylinder, Sphere, Outline, Wall, Lasso', dom.row.join(',') === 'Box,Cylinder,Sphere,Outline,Wall,Lasso', dom.row.join(','));
-    check('the buttons outside Lift are the six shapes, CROP and Cancel, and no others', dom.btns.join(',') ===
-      'btn-crop-shape-box,btn-crop-shape-cylinder,btn-crop-shape-sphere,btn-crop-shape-outline,btn-crop-shape-wall,btn-crop-shape-lasso,btn-crop,btn-crop-cancel', dom.btns.join(','));
+    check('the Shape row is Box, Cylinder, Sphere, Cookie-Cutter, Outline, Wall, Lasso', dom.row.join(',') === 'Box,Cylinder,Sphere,Cookie-Cutter,Outline,Wall,Lasso', dom.row.join(','));
+    check('the buttons outside Lift are the Cut | Crop switch, the seven shapes, CROP and Cancel, and no others', dom.btns.join(',') ===
+      'btn-crop-mode-cut,btn-crop-mode-crop,btn-crop-shape-box,btn-crop-shape-cylinder,btn-crop-shape-sphere,btn-crop-shape-piece,btn-crop-shape-outline,btn-crop-shape-wall,btn-crop-shape-lasso,btn-crop,btn-crop-cancel', dom.btns.join(','));
     check('no field, checkbox or list outside Lift, and one readout line', dom.inputs === 0 && dom.readouts === 1 && dom.readoutId, dom.inputs + ' inputs, ' + dom.readouts + ' lines');
     check('Lift is a button of the card with its panel folded away; Strip and Detach flange are in the panel; none of it is in Subtract',
       dom.lift.btn && dom.lift.panelIn && dom.lift.panelHidden && dom.lift.detachInPanel && dom.lift.stripInPanel && dom.lift.notInSubtract, JSON.stringify(dom.lift));
@@ -188,7 +188,7 @@ const snap = (page, id) => page.evaluate(i => {
       tp.mesh.updateMatrixWorld(true);
     }, [hid, tid]);
     await selectModel(page, hid);
-    await page.click('#menu-crop > summary');
+    await toggleCrop(page);
     await page.evaluate(h => { selectPlaced(state.placed.findIndex(q => q.sourceId === h)); }, hid);
     await frame(page, [26, 22, 30], [0, 4, 0]);
     let ro = await readout(page);
@@ -722,13 +722,13 @@ const snap = (page, id) => page.evaluate(i => {
     check('Cancel does the same', (await cardState(page)).shape === null && !(await page.evaluate(() => !!state.scene.getObjectByName('cropCardShape'))));
     await page.click('#btn-crop-shape-box');
     await settled(page);
-    await page.click('#menu-crop > summary');
+    await toggleCrop(page);
     check('closing the card puts the shape away too', (await cardState(page)).shape === null && !(await page.evaluate(() => !!state.scene.getObjectByName('cropCardShape'))));
 
     /* ================================================================= 6b */
     console.log('\n=== 6b. MOVE: with the card open, a piece moves unless a shape or Lift is up ===');
     {
-      await page.click('#menu-crop > summary');
+      await toggleCrop(page);
       await page.waitForFunction(() => state.cutterOpen && state.cutTool === 'crop', null, { timeout: 10000 });
       await reselect(page, hid);
       await frame(page, [26, 22, 30], [0, 4, 0]);
@@ -757,12 +757,12 @@ const snap = (page, id) => page.evaluate(i => {
       check('Lift folded away and nothing picked: it moves again', moved(m3, m4), JSON.stringify(m4.map(f2)));
       check('the card is still open for Crop all the while', await page.evaluate(() => state.cutterOpen && state.cutTool === 'crop' && document.getElementById('menu-crop').open));
       await page.evaluate(([h, x, z]) => { const p = state.placed.find(q => q.sourceId === h); applyPlacedXZ(p, x, z); }, [hid, home[0], home[1]]);
-      await page.click('#menu-crop > summary');
+      await toggleCrop(page);
     }
 
     /* ================================================================= 7 */
     console.log('\n=== 7. LASSO ===');
-    await page.click('#menu-crop > summary');
+    await toggleCrop(page);
     await reselect(page, hid);
     await frame(page, [26, 22, 30], [0, 4, 0]);
     await page.click('#btn-crop-shape-lasso');
@@ -918,7 +918,7 @@ const snap = (page, id) => page.evaluate(i => {
     await page.click('#btn-crop-cancel');
     await page.click('#btn-lift');
     check('closing the Crop card folds Lift away with it', await (async () => {
-      await page.click('#menu-crop > summary');
+      await toggleCrop(page);
       await page.waitForFunction(() => !NSO_LIFT_PLATE.isArmed(), null, { timeout: 5000 }).catch(() => {});
       return page.evaluate(() => !NSO_LIFT_PLATE.isArmed() && document.getElementById('lift-panel').hidden);
     })());

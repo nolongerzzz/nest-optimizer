@@ -15,8 +15,12 @@ All are in `npm test`.
 
 ## The card
 
+Crop has no slab of its own: it shares the column's **Cut / Crop** slab with Cut, and a
+Cut | Crop switch at the top of either card swaps one for the other at the same spot
+(`app-cut-crop-toggle.js`; docs/handoff/card-regroup.md).
+
 Crop is one tool: **pick a shape, drag it to size, press CROP.** The card is a
-**Shape** row (Box, Cylinder, Sphere, Outline, Wall, Lasso), **one readout line**, **CROP**
+**Shape** row (Box, Cylinder, Sphere, Cookie-Cutter, Outline, Wall, Lasso), **one readout line**, **CROP**
 and **Cancel**, and under them **Lift** (below). Nothing else - no field to type a size
 into, no checkbox, no axis button. `page:manifest` fails if a control finds its way back in.
 
@@ -30,6 +34,7 @@ handle and no shape is the orbit's.
 | Box | centred, each side half the piece's | one on each face. It drags along the face's normal and the opposite face stays put |
 | Cylinder | vertical, Ø half the narrower footprint, half the height | an end on each end (slide along the axis, the far end stays), one on the side (Ø). Pull an end round past 45° of the axis and the axis turns to follow it: the axis is whichever of x, y, z the pointer last followed on the screen |
 | Sphere | Ø half the piece's smallest side | one on the surface (Ø) |
+| Cookie-Cutter | nothing yet: click another piece to be the cutter (the piece being cropped is refused in words) | none (it is the other piece) |
 | Outline | nothing yet: click a piece for its footprint, or **Shift-click** a triangle for its rim loop | `d1` (outer offset) and `d2` (inner offset), dragged along the surface normal at the outline's boundary, and `z1`, `z2`, the two heights |
 | Wall | nothing yet: **click a flat wall** of the piece | `line`: one handle, on the middle of the wall's top edge, dragged out of the wall or into it |
 | Lasso | nothing yet: **drag a loop** round what to copy, on the screen | none: draw again to replace the loop |
@@ -150,7 +155,7 @@ does closing the card.
 |---|---|
 | Crop X / Crop Z, the Box from / to fields, the Box tick | the dragged Box |
 | Circle (Click centre, Ø) | Cylinder (drag the side for Ø, an end for the length; any axis) |
-| Piece region (Pick piece, Grow) | Outline (click the piece for its footprint) and its offsets, or Lasso. A **Piece** shape (another piece as the cutter, the copy where the two overlap) was on the card for a while and has gone: Box, Cylinder, Sphere, Outline and Lasso cover it. The engine keeps the `piece` kind (`crop:engine` 4) |
+| Piece region (Pick piece, Grow) | Outline (click the piece for its footprint) and its offsets, or Lasso. Or **Cookie-Cutter** (the engine's `piece` kind): another piece is the cutter, the copy is where the two overlap. It left the card on 2026-11-07 and came back under this name on 2026-11-16 - it was the card's first intended use |
 | Keep inside / Keep outside | Crop always copies what the shape holds; the original is never cut. To have the original without that part, Subtract the copy from it |
 | the slab crop itself (remove a slab, slide the far part back, seal the joint) | gone from the card. Crop copies; G-scope's Crop on its layer range and Detach's cap still use `NSO_cropRaw` / `NSO_cropSeal` (below) |
 | Move region (Up, Across, Lift, Lock in) | removed from Crop, with `NSO_cropMoveRaw` and the code under it: **CROP, grab the copy (grab-drop), JOIN if a weld is wanted.** `crop:move` and `wire:crop-move` are retired with it; the kernel union they ran is Join's (`csg:node`, `integration`), and every copy is checked by `crop:engine` |

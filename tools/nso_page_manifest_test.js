@@ -224,9 +224,11 @@ function liftPackage(card) {
 
 /* What the card holds: [] when it is exactly the six shapes, CROP, Cancel and one
    readout line, then the Lift package; otherwise a list of what is wrong. */
-const CROP_BUTTONS = ['btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
-                      'btn-crop-shape-outline', 'btn-crop-shape-wall', 'btn-crop-shape-lasso', 'btn-crop', 'btn-crop-cancel'];
-const CROP_SHAPES = ['Box', 'Cylinder', 'Sphere', 'Outline', 'Wall', 'Lasso'];
+/* The Cut | Crop switch first (app-cut-crop-toggle.js; the Cut card has its twin), then the shapes -
+   Cookie-Cutter is the engine's 'piece' shape, back on the card since 2026-11-16. */
+const CROP_BUTTONS = ['btn-crop-mode-cut', 'btn-crop-mode-crop', 'btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
+                      'btn-crop-shape-piece', 'btn-crop-shape-outline', 'btn-crop-shape-wall', 'btn-crop-shape-lasso', 'btn-crop', 'btn-crop-cancel'];
+const CROP_SHAPES = ['Box', 'Cylinder', 'Sphere', 'Cookie-Cutter', 'Outline', 'Wall', 'Lasso'];
 function cropCardProblems(whole, opts) {
   if (whole == null) return ['there is no #crop-card'];
   const bad = [];
@@ -353,9 +355,10 @@ console.log('checker self-test');
     '<div id="lift-panel" class="lift-panel" hidden><button id="btn-lift-strip">Strip</button><div id="lift-strip"><button id="btn-lift-strip-go">Confirm</button>' +
     '<button id="btn-lift-strip-cancel">Cancel</button></div><p id="lift-readout">-</p><div class="detach-tools" id="detach-tools"><button id="btn-detach">Detach flange</button>' +
     '<p id="detach-readout">-</p></div></div>';
-  const good = '<div id="crop-card" class="x"><div id="crop-shape-row">' + CROP_SHAPES.map((n, i) => '<button id="' + CROP_BUTTONS[i] + '">' + n + '</button>').join('') +
+  const good = '<div id="crop-card" class="x"><div class="cutcrop-toggle"><button id="btn-crop-mode-cut">Cut</button><button id="btn-crop-mode-crop">Crop</button></div>' +
+    '<div id="crop-shape-row">' + CROP_SHAPES.map((n, i) => '<button id="' + CROP_BUTTONS[i + 2] + '">' + n + '</button>').join('') +
     '</div><p id="crop-readout">-</p><button id="btn-crop">CROP</button><button id="btn-crop-cancel">Cancel</button>' + LIFT_SAMPLE + '</div><div>after</div>';
-  check('a card that is exactly the six shapes, readout, CROP, Cancel and the Lift package is clean', cropCardProblems(cropCardOf(good)).length === 0, cropCardProblems(cropCardOf(good)).join('; '));
+  check('a card that is exactly the switch, the seven shapes, readout, CROP, Cancel and the Lift package is clean', cropCardProblems(cropCardOf(good)).length === 0, cropCardProblems(cropCardOf(good)).join('; '));
   check('a card without the Lift package is caught', cropCardProblems(cropCardOf(good.replace(LIFT_SAMPLE, ''))).some((p) => /no Lift row/.test(p)));
   check('Detach flange outside the Lift panel is caught', cropCardProblems(cropCardOf(good.replace('<div class="detach-tools" id="detach-tools"><button id="btn-detach">Detach flange</button><p id="detach-readout">-</p></div></div>', '</div><div id="detach-tools"><button id="btn-detach">Detach flange</button><p id="detach-readout">-</p></div>'))).some((p) => /inside the Lift panel|buttons are/.test(p)));
   check('a Lift panel that is not folded away is caught', cropCardProblems(cropCardOf(good.replace('class="lift-panel" hidden', 'class="lift-panel"'))).some((p) => /folded away/.test(p)));

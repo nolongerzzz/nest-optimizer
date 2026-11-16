@@ -242,9 +242,10 @@ withApp(async (page, logs) => {
     ghost: !!(state.connect.ghost && state.connect.ghost.parent), line: !!(state.connect.line && state.connect.line.parent) }));
 
   if (RUN.cards) {
-  console.log('\n=== 1. the drop-down: between Crop and Assemble ===');
+  console.log('\n=== 1. the drop-down: between Punch and Add ===');
   const ui = await page.evaluate(() => {
-    const m = document.getElementById('menu-connect'), crop = document.getElementById('menu-crop'), join = document.getElementById('menu-assemble');
+    /* The card regroup (2026-11-16): Cut / Crop, Punch, Draw, Add down the column. */
+    const m = document.getElementById('menu-connect'), crop = document.getElementById('menu-punch'), join = document.getElementById('menu-add');
     const kids = [...m.parentElement.children];
     return { menu: !!m, between: kids.indexOf(m) === kids.indexOf(crop) + 2 && kids.indexOf(m) + 2 === kids.indexOf(join) ||
                                  (kids.filter(k => k.tagName === 'DETAILS').indexOf(m) === kids.filter(k => k.tagName === 'DETAILS').indexOf(crop) + 1 &&
@@ -252,7 +253,7 @@ withApp(async (page, logs) => {
              title: m.querySelector('summary').textContent.trim(), wired: m.dataset.nsoWired === '1', noGate: !document.getElementById('btn-connect') && !m.querySelector('.vp-menu-body > button'), hidden: document.getElementById('connect-panel').hidden,
              sameLook: document.getElementById('connect-panel').className === document.getElementById('bridge-panel').className };
   });
-  check('#menu-connect is a column drop-down named Draw (Connect is its second step), right after Crop and right before Join', ui.menu && ui.between && ui.title === 'Draw', ui.title);
+  check('#menu-connect is a column drop-down named Draw (Connect is its second step), right after Punch and right before Add', ui.menu && ui.between && ui.title === 'Draw', ui.title);
   check('...it is wired, its card shut, and the card has Bridge\'s look', ui.wired && ui.hidden && ui.sameLook);
   check('...no gate button inside it: #btn-connect is gone and the card is the drop-down\'s body', ui.noGate);
 

@@ -688,6 +688,8 @@ function NSO_punchOpen() {
   if (btn) { btn.setAttribute('aria-pressed', 'true'); btn.setAttribute('aria-expanded', 'true'); btn.classList.add('is-on'); }
   NSO_punchSyncRows();
   NSO_punchPreview();
+  var menu = NSO_punchEl('menu-punch');
+  if (menu && !menu.open) menu.open = true;
   if (typeof setStatus === 'function') setStatus('Punch armed - click a face to place the hole. Escape to stop.');
   NSO_punchTick();
 }
@@ -703,6 +705,8 @@ function NSO_punchClose() {
   if (cv) cv.classList.remove('punch-cur-grab');
   if (B.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(B.raf);
   B.raf = 0;
+  var menu = NSO_punchEl('menu-punch');
+  if (menu && menu.open) menu.open = false;
 }
 
 // Punch's session, for the helper registry (nso-helpers.js): leave-tool and
@@ -825,10 +829,14 @@ if (typeof document !== 'undefined') {
       ev.preventDefault(); ev.stopImmediatePropagation();
     }
     function wire() {
-      var btn = NSO_punchEl('btn-punch');
-      if (!btn || btn.dataset.nsoWired === '1') return;
-      btn.dataset.nsoWired = '1';
-      btn.addEventListener('click', function () { if (NSO_punchUI().open) NSO_punchClose(); else NSO_punchOpen(); });
+      /* The Punch card is the switch: open it and Punch is armed, shut it and Punch is put away. */
+      var menu = NSO_punchEl('menu-punch');
+      if (!menu || menu.dataset.nsoWired === '1') return;
+      menu.dataset.nsoWired = '1';
+      menu.addEventListener('toggle', function () {
+        if (menu.open && !NSO_punchUI().open) NSO_punchOpen();
+        else if (!menu.open && NSO_punchUI().open) NSO_punchClose();
+      });
       var go = NSO_punchEl('btn-punch-go'), cancel = NSO_punchEl('btn-punch-cancel'), fill = NSO_punchEl('btn-punch-fill');
       if (fill) fill.addEventListener('click', function () { NSO_punchFill(); });
       if (go) go.addEventListener('click', function () { NSO_punchGo(); });

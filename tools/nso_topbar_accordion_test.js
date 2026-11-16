@@ -15,10 +15,14 @@ const check = (name, cond, detail) => {
 /* Every top-level drop-down on the page (shell v3): the row, and the column.
    Members held inside one (Gen+'s four, Join's two) are not top-level;
    section 3 covers them. Plate & pieces is pinned open, not a drop-down. */
+/* The card regroup (2026-11-16): Print (menu-supports) is in the row, Generate (menu-gen)
+   heads the column; Crop has no slab (it opens from the Cut / Crop card's switch) and Weave
+   is a section of Fill & fix, so neither is a top-level drop-down here. */
 const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip',
-             'menu-gen', 'menu-export'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-assemble', 'menu-supports', 'menu-add', 'menu-bit',
-             'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
+             'menu-supports', 'menu-export'];
+const COL = ['menu-gen', 'menu-scale', 'menu-cut', 'menu-punch', 'menu-add', 'menu-bit',
+             'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-assemble',
+             'menu-fillfix', 'menu-repair'];
 const ALL = ROW.concat(COL);
 /* ONE EXEMPTION: Measure's card stays open beside another (app-join.js's one-panel
    rule; docked by app-measure.js) so it can be used during a live tool. It is

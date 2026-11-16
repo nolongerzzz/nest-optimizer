@@ -130,7 +130,7 @@ withApp(async (page, logs) => {
   const mid = [(top.lo[0] + top.hi[0]) / 2, (top.lo[1] + top.hi[1]) / 2, top.hi[2]];
 
   console.log('\n=== 1. arm, click a face -> one ghost ===');
-  await page.click('#btn-punch');
+  await page.click('#menu-punch > summary');          // the Punch card is the switch
   await page.waitForFunction(() => nsoPunchState().open, null, { timeout: 5000 });
   await lookDown(page);
   await click(page, await screenOf(page, mid));
@@ -341,10 +341,10 @@ withApp(async (page, logs) => {
   await page.keyboard.press('Escape');
   await frames(page, 2);
   st = await S(page);
-  const pressed = await page.evaluate(() => document.getElementById('btn-punch').getAttribute('aria-pressed'));
-  check('Escape puts Punch away: no card, no ghost', !st.open && st.ghosts === 0 && pressed === 'false' &&
+  const pressed = await page.evaluate(() => document.getElementById('menu-punch').open);
+  check('Escape puts Punch away: no card, no ghost', !st.open && st.ghosts === 0 && pressed === false &&
     await page.evaluate(() => document.getElementById('punch-card').hidden));
-  await page.click('#btn-punch');
+  await page.click('#menu-punch > summary');
   await page.waitForFunction(() => nsoPunchState().open, null, { timeout: 5000 });
   await page.click('#btn-carve');
   await frames(page, 3);

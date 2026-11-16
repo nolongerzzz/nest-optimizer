@@ -300,6 +300,7 @@
     "select:test": {"weight":43200,"note":""},
     "selfint:equiv": {"weight":56100,"note":""},
     "shell:v3": {"weight":77450,"note":""},
+    "cards:regroup": {"weight":34000,"note":"20 s on this box, x1.7"},
     "shells:drive": {"weight":95000,"note":"estimate: 55 s on the cloud box x 1.7 (shells-as-pieces)"},
     "shells:test": {"weight":9000,"note":"estimate: 6 s on the cloud box x 1.7 (shells-as-pieces)"},
     "skin:drive": {"weight":28850,"note":""},

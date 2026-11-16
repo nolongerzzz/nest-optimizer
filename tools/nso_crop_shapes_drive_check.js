@@ -35,7 +35,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, toggleCrop, ROOT } = require('./nso_app_harness');
 const { readSTL, writeSTL } = require('./nso_stl_io.js');
 
 let pass = 0, fail = 0;
@@ -256,7 +256,7 @@ withApp(async (page, logs) => {
   const pid = await loadSTL(page, PLATE60);
   const SRC = await raw(page, pid);
   check('the 60 x 60 x 4 plate came in through Import', SRC.length / 9 === 12);
-  await page.click('#menu-crop > summary');
+  await toggleCrop(page);
   await page.waitForFunction(() => state.cutterOpen && state.cutTool === 'crop', null, { timeout: 10000 });
   await selectPiece(page, pid);
   await lookDown(page, pid, 70);
@@ -366,7 +366,7 @@ withApp(async (page, logs) => {
 
   /* ============================================ 3. the plate and the star */
   console.log('\n=== 3. a 100 mm plate with the star prism laid over it off-centre (Outline takes the star\'s footprint) ===');
-  await page.click('#menu-crop > summary');
+  await toggleCrop(page);
   await page.waitForFunction(() => !state.cutterOpen, null, { timeout: 10000 });
   check('shutting the card takes the shape away with it', await page.evaluate(() => !NSO_CropCard.state().shape && !NSO_CropCard.state().group));
   await page.evaluate(id => {
@@ -387,7 +387,7 @@ withApp(async (page, logs) => {
   const STAR_XZ = await placedXZ(page, sid);
   await selectRow(page, qid);
   await page.waitForFunction(id => state.editId === id, qid);
-  await page.click('#menu-crop > summary');
+  await toggleCrop(page);
   await page.waitForFunction(() => state.cutterOpen && state.cutTool === 'crop', null, { timeout: 10000 });
   await selectPiece(page, qid);
   await lookDown(page, qid, 110);

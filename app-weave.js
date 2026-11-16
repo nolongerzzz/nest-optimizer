@@ -549,6 +549,13 @@ if (typeof document !== 'undefined') {
       if (!menu || menu.dataset.nsoWired === '1') return;
       menu.dataset.nsoWired = '1';
       menu.addEventListener('toggle', function () { if (menu.open) NSO_weaveOpen(); else if (NSO_weaveUI().open) NSO_weaveClose(); });
+      /* Weave is a section of the Fill & fix card: shutting the card (its slab, the one-panel rule,
+         leave-tool) shuts the section with it, and that disarms the lasso. */
+      var card = menu.parentElement && menu.parentElement.closest('details');
+      if (card && typeof MutationObserver === 'function') {
+        new MutationObserver(function () { if (!card.open && menu.open) menu.open = false; })
+          .observe(card, { attributes: true, attributeFilter: ['open'] });
+      }
       function on(id, fn) { var b = NSO_weaveEl(id); if (b) b.addEventListener('click', fn); }
       on('btn-weave-grow', function () { NSO_weaveGrow(1); });
       on('btn-weave-shrink', function () { NSO_weaveGrow(-1); });

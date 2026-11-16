@@ -51,7 +51,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { withApp, loadSTL, statusOf } = require('./nso_app_harness');
+const { withApp, loadSTL, statusOf, toggleCrop } = require('./nso_app_harness');
 const { openJoin } = require('./nso_join_card');
 
 let fails = 0;
@@ -673,7 +673,7 @@ withApp(async (page, logs) => {
     await reload();
     await shutCut();
     const id = await loadSTL(page, stl('bar60c.stl', box(60, 12, 8)));
-    await clickSummary('menu-crop');
+    await toggleCrop(page);     // Crop opens from the Cut / Crop card's switch (2026-11-16); the slab shuts it
     const s = await armed();
     check('opening the Crop card arms Crop, with no blade and Cut shut', s.open && s.tool === 'crop' && !s.blade && !s.card && s.crop,
       JSON.stringify(s));
@@ -694,7 +694,7 @@ withApp(async (page, logs) => {
     const after = await page.evaluate(id => ({ len: state.models.find(m => m.id === id).size.x, names: state.models.map(m => m.name) }), id);
     check('CROP copied it: a new piece "<name> crop 1", the original still 60 long', /^Crop: "bar60c crop 1"/.test(st) && after.names[1] === 'bar60c crop 1' && Math.abs(after.len - lenBefore) < 1e-9 && Math.abs(after.len - 60) < 1e-3,
       st.slice(0, 120));
-    await clickSummary('menu-crop');
+    await toggleCrop(page);     // Crop opens from the Cut / Crop card's switch (2026-11-16); the slab shuts it
     const s2 = await armed();
     check('closing the Crop card disarms it', !s2.open && !s2.crop, JSON.stringify(s2));
   }
