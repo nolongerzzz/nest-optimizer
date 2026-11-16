@@ -127,7 +127,10 @@
                               these are Bambu's own defaults, for a card with no profile. NSO's old numbers (top 0.18, first layer solid, a bridge of
                               5 mm not held) are the Print card's built-in saved setting "NSO classic" */
                            supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0,
-                           supIfacePattern: 'default', supIfaceSpacing: 0.5, supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
+                           supIfacePattern: 'default', supIfaceSpacing: 0.5, supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true,
+                           /* THE WALL GENERATOR (docs/SLICER.md "Arachne"): Classic, or Arachne's variable-width walls with its six levers - Studio's own
+                              names and defaults, the four percentages of the nozzle's diameter */
+                           wallGen: 'classic', wallAngle: 10, wallFilter: 25, wallTransLen: 100, wallDist: 1, minWall: 85, minFeature: 25 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var SUP_BASE_TO_CONFIG = { 'default': 'default', rectilinear: 'rectilinear', 'rectilinear-grid': 'rectilinear-grid', hollow: 'hollow' };
   var SUP_IFACE_TO_CONFIG = { 'default': 'auto', rectilinear: 'rectilinear', concentric: 'concentric', rectilinear_interlaced: 'rectilinear_interlaced', grid: 'grid' };
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
@@ -259,7 +262,12 @@
       supIfaceSpacing: o.supportInterfaceSpacingMm != null ? o.supportInterfaceSpacingMm : D0.supIfaceSpacing,
       supExpansion: numOf(cfgRaw(config, 'support_expansion'), D0.supExpansion), supXy: numOf(cfgRaw(config, 'support_object_xy_distance'), D0.supXy),
       supZOverXy: cfgRaw(config, 'top_z_overrides_xy_distance') === '1', supFirstGap: numOf(cfgRaw(config, 'support_object_first_layer_gap'), D0.supFirstGap),
-      supBridge: numOf(cfgRaw(config, 'max_bridge_length'), D0.supBridge), supIndep: cfgRaw(config, 'independent_support_layer_height') !== '0'
+      supBridge: numOf(cfgRaw(config, 'max_bridge_length'), D0.supBridge), supIndep: cfgRaw(config, 'independent_support_layer_height') !== '0',
+      /* the wall generator and Arachne's levers, the profile's (both real profiles: classic, Studio's defaults for the rest) */
+      wallGen: cfgRaw(config, 'wall_generator') === 'arachne' ? 'arachne' : 'classic',
+      wallAngle: numOf(cfgRaw(config, 'wall_transition_angle'), D0.wallAngle), wallFilter: pctOf(cfgRaw(config, 'wall_transition_filter_deviation'), D0.wallFilter),
+      wallTransLen: pctOf(cfgRaw(config, 'wall_transition_length'), D0.wallTransLen), wallDist: numOf(cfgRaw(config, 'wall_distribution_count'), D0.wallDist),
+      minWall: pctOf(cfgRaw(config, 'min_bead_width'), D0.minWall), minFeature: pctOf(cfgRaw(config, 'min_feature_size'), D0.minFeature)
     };
   }
 
@@ -305,7 +313,14 @@
       supZOverXy: s.supZOverXy === true || s.supZOverXy === 'true' || s.supZOverXy === '1' || s.supZOverXy === 1,
       supFirstGap: r2(n(s.supFirstGap, D.supFirstGap, 0, 3)),
       supBridge: r2(n(s.supBridge, D.supBridge, 0, 100)),
-      supIndep: !(s.supIndep === false || s.supIndep === 'false' || s.supIndep === '0' || s.supIndep === 0)
+      supIndep: !(s.supIndep === false || s.supIndep === 'false' || s.supIndep === '0' || s.supIndep === 0),
+      wallGen: s.wallGen === 'arachne' ? 'arachne' : 'classic',
+      wallAngle: Math.round(n(s.wallAngle, D.wallAngle, 1, 59)),
+      wallFilter: Math.round(n(s.wallFilter, D.wallFilter, 0, 100)),
+      wallTransLen: Math.round(n(s.wallTransLen, D.wallTransLen, 1, 500)),
+      wallDist: Math.round(n(s.wallDist, D.wallDist, 1, 10)),
+      minWall: Math.round(n(s.minWall, D.minWall, 5, 100)),
+      minFeature: Math.round(n(s.minFeature, D.minFeature, 0, 100))
     };
   }
 
@@ -346,6 +361,14 @@
     if (Math.abs(s.supFirstGap - base.supFirstGap) > 1e-6) out.support_object_first_layer_gap = String(s.supFirstGap);
     if (Math.abs(s.supBridge - base.supBridge) > 1e-6) out.max_bridge_length = String(s.supBridge);
     if (s.supIndep !== base.supIndep) out.independent_support_layer_height = s.supIndep ? '1' : '0';
+    /* the wall generator and Arachne's levers, by Studio's keys (a percentage of the nozzle, as Studio writes it) */
+    if (s.wallGen !== base.wallGen) out.wall_generator = s.wallGen;
+    if (s.wallAngle !== base.wallAngle) out.wall_transition_angle = String(s.wallAngle);
+    if (s.wallFilter !== base.wallFilter) out.wall_transition_filter_deviation = s.wallFilter + '%';
+    if (s.wallTransLen !== base.wallTransLen) out.wall_transition_length = s.wallTransLen + '%';
+    if (s.wallDist !== base.wallDist) out.wall_distribution_count = String(s.wallDist);
+    if (s.minWall !== base.minWall) out.min_bead_width = s.minWall + '%';
+    if (s.minFeature !== base.minFeature) out.min_feature_size = s.minFeature + '%';
     /* the filament: its own keys, then the rows that differ from its own values */
     var fk = filamentKeys(config, s.filament);
     Object.keys(fk).forEach(function (k) { if (cfgRaw(config, k) !== fk[k]) out[k] = fk[k]; });
@@ -786,7 +809,17 @@
                  /* Bambu's Advanced support rows, on the Supports card (docs/SUPPORT-ADVANCED.md) */
                  'slice-set-sup-density', 'slice-set-sup-expand', 'slice-set-sup-walls', 'slice-set-sup-topz', 'slice-set-sup-bottomz', 'slice-set-sup-base',
                  'slice-set-sup-base-spacing', 'slice-set-sup-angle', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion',
-                 'slice-set-sup-xy', 'slice-set-sup-zover', 'slice-set-sup-first-gap', 'slice-set-sup-bridge', 'slice-set-sup-indep'];
+                 'slice-set-sup-xy', 'slice-set-sup-zover', 'slice-set-sup-first-gap', 'slice-set-sup-bridge', 'slice-set-sup-indep',
+                 /* the wall generator and Arachne's levers (Quality) */
+                 'slice-set-wall-gen', 'slice-set-wall-angle', 'slice-set-wall-filter', 'slice-set-wall-translen', 'slice-set-wall-dist', 'slice-set-min-wall', 'slice-set-min-feature'];
+  /* the wall generator's rows: the row, and its name in the settings */
+  var WALL_ROWS = [['slice-set-wall-gen', 'wallGen'], ['slice-set-wall-angle', 'wallAngle'], ['slice-set-wall-filter', 'wallFilter'], ['slice-set-wall-translen', 'wallTransLen'],
+                   ['slice-set-wall-dist', 'wallDist'], ['slice-set-min-wall', 'minWall'], ['slice-set-min-feature', 'minFeature']];
+  /** Arachne's six levers show under the generator only when it is Arachne (Classic has none of them). */
+  function wallRows() {
+    var sel = $('slice-set-wall-gen'), box = $('slice-arachne-rows');
+    if (box) box.hidden = !(sel && sel.value === 'arachne');
+  }
   var SUP_ROWS = [['slice-set-sup-density', 'supDensity'], ['slice-set-sup-expand', 'supExpand'], ['slice-set-sup-walls', 'supWalls'], ['slice-set-sup-topz', 'supTopZ'],
                   ['slice-set-sup-bottomz', 'supBottomZ'], ['slice-set-sup-base', 'supBase'], ['slice-set-sup-base-spacing', 'supBaseSpacing'], ['slice-set-sup-angle', 'supAngle'],
                   ['slice-set-sup-iface-pattern', 'supIfacePattern'], ['slice-set-sup-iface-spacing', 'supIfaceSpacing'], ['slice-set-sup-expansion', 'supExpansion'],
@@ -855,7 +888,7 @@
   /** The settings as the card's rows hold them, clamped. */
   function readSettings() {
     var v = function (id) { var el = $(id); return el ? (el.type === 'checkbox' ? !!el.checked : el.value) : undefined; };
-    var sup = {}; SUP_ROWS.forEach(function (r) { sup[r[1]] = v(r[0]); });
+    var sup = {}; SUP_ROWS.concat(WALL_ROWS).forEach(function (r) { sup[r[1]] = v(r[0]); });
     return cleanSettings(Object.assign(sup, {
       nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
       pattern: v('slice-set-pattern'), surface: v('slice-set-surface'), angle: $('slice-set-angle') ? v('slice-set-angle') : v('sup-angle'), brim: v('slice-set-brim'),   /* ONE angle: with no row of its own, the Print card's */
@@ -871,7 +904,8 @@
   /** The rows to these values (the interface row shows the shared choice). */
   function showSettings(st) {
     var set = function (id, val) { var el = $(id); if (!el || val == null) return; if (el.type === 'checkbox') el.checked = !!val; else el.value = String(val); };
-    var full = cleanSettings(st); SUP_ROWS.forEach(function (r) { set(r[0], full[r[1]]); });
+    var full = cleanSettings(st); SUP_ROWS.concat(WALL_ROWS).forEach(function (r) { set(r[0], full[r[1]]); });
+    wallRows();
     set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
     set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-surface', st.surface); set('slice-set-angle', st.angle);
     /* ONE angle: the Print card's Angle starts at the profile's support threshold too (the card reads its areas again at it). The rows are
@@ -1454,6 +1488,7 @@
         if (id !== 'slice-set-iface') S.touched = true;           // the interface is a preference, not a profile value
         if (id === 'slice-set-iface' && typeof root.nsoSetSupportInterfaceRule === 'function') root.nsoSetSupportInterfaceRule(el.value);
         if (id === 'slice-set-filament') showFilamentRows();      // another filament: its own temperatures, max flow, flow ratio and retraction in its rows
+        if (id === 'slice-set-wall-gen') wallRows();              // Arachne: its levers; Classic: none
         filamentNote(); bridgeNote();
         refresh();
       });

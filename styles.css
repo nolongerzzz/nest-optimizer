@@ -4757,6 +4757,10 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .sup-card.print-card > .vp-bend-field { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 22px; }
 .sup-card.print-card .print-sec .vp-bend-field .vp-select, .sup-card.print-card > .vp-bend-field .vp-select { grid-column: 2 / 4; }
 .sup-card.print-card .print-sec .vp-bend-field span { white-space: nowrap; }
+/* Arachne's six levers, under the Wall generator row (shown only for Arachne): laid out as the section's own rows, a little indented */
+.sup-card.print-card .slice-arachne-rows { display: flex; flex-direction: column; gap: 3px; padding-left: 8px; border-left: 2px solid rgba(148, 163, 184, 0.25); }
+.sup-card.print-card .slice-arachne-rows[hidden] { display: none; }
+.sup-card.print-card .slice-arachne-rows > .vp-bend-field { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 22px; }
 .sup-card.print-card #print-sup-body { display: flex; flex-direction: column; gap: 4px; }
 .sup-card.print-card #print-sup-body.is-off { opacity: 0.4; }
 .sup-card.print-card .print-on { font-weight: 600; color: #e8eef6; }

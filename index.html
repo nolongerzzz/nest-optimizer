@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=aa859515" />
+  <link rel="stylesheet" href="styles.css?v=303920e8" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1458,10 +1458,35 @@
                 </div>
               </details>
               <details class="vp-sec print-sec" id="print-sec-quality">
-                <summary class="vp-sec-head" title="Layer height, and how a bridge is printed. The first layer stays the profile's.">Quality</summary>
+                <summary class="vp-sec-head" title="Layer height, the wall generator (Classic or Arachne), and how a bridge is printed. The first layer stays the profile's.">Quality</summary>
                 <div class="vp-sec-body">
                   <label class="vp-bend-field" for="slice-set-layer">Layer height
                     <input type="number" id="slice-set-layer" value="0.2" min="0.05" max="0.3" step="0.05" title="Layer height, mm. The first layer stays the profile's." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-wall-gen">Wall generator
+                    <select class="vp-select" id="slice-set-wall-gen" title="How the walls are laid. Classic: every wall one width, a fixed spacing apart - a part that is not a whole number of walls thick gets a gap down its middle, and a feature thinner than a wall prints nothing. Arachne: the walls' count and width fitted to the part's thickness, so thin ribs, fins and text are filled wall to wall. The supports always slice Classic." autocomplete="off">
+                      <option value="classic" selected>Classic</option>
+                      <option value="arachne">Arachne</option>
+                    </select></label>
+                  <div class="slice-arachne-rows" id="slice-arachne-rows" hidden>
+                    <label class="vp-bend-field" for="slice-set-wall-angle">Wall transitioning threshold angle
+                      <input type="number" id="slice-set-wall-angle" value="10" min="1" max="59" step="1" inputmode="numeric"
+                             title="Where a part widens like a wedge more steeply than this, no wall is put in its middle to fill the gap between the walls either side. Higher fills steeper wedges." autocomplete="off"><span>&deg;</span></label>
+                    <label class="vp-bend-field" for="slice-set-wall-filter">Wall transitioning filter margin
+                      <input type="number" id="slice-set-wall-filter" value="25" min="0" max="100" step="5" inputmode="numeric"
+                             title="A wall's width changes only when the room for it moves by more than this, % of the nozzle - so a wall does not flicker between widths along a part whose thickness wobbles." autocomplete="off"><span>%</span></label>
+                    <label class="vp-bend-field" for="slice-set-wall-translen">Wall transition length
+                      <input type="number" id="slice-set-wall-translen" value="100" min="1" max="500" step="10" inputmode="numeric"
+                             title="How far along a wall its width follows the room around it, % of the nozzle: longer makes smoother, slower changes of width." autocomplete="off"><span>%</span></label>
+                    <label class="vp-bend-field" for="slice-set-wall-dist">Wall distribution count
+                      <input type="number" id="slice-set-wall-dist" value="1" min="1" max="10" step="1" inputmode="numeric"
+                             title="How many walls each side, counted from the middle, share a thin part's leftover width. 1: only the innermost walls change width, the outer wall keeps its own." autocomplete="off"></label>
+                    <label class="vp-bend-field" for="slice-set-min-wall">Minimum wall width
+                      <input type="number" id="slice-set-min-wall" value="85" min="5" max="100" step="5" inputmode="numeric"
+                             title="The narrowest wall laid, % of the nozzle. A feature thinner than this (and no thinner than the minimum feature size) is printed this wide." autocomplete="off"><span>%</span></label>
+                    <label class="vp-bend-field" for="slice-set-min-feature">Minimum feature size
+                      <input type="number" id="slice-set-min-feature" value="25" min="0" max="100" step="5" inputmode="numeric"
+                             title="A feature thinner than this, % of the nozzle, is not printed at all." autocomplete="off"><span>%</span></label>
+                  </div>
                   <label class="vp-bend-field" for="slice-set-bridge-speed">Bridge speed
                     <input type="number" id="slice-set-bridge-speed" min="1" max="300" step="1" placeholder="auto" inputmode="decimal"
                              title="How fast a bridge (a line laid over air) is printed, mm/s. A bridge never prints faster than the filament's max flow allows, whatever is set here. Slower is not always better: on CR-TPU, 12 mm/s left the strands hanging in curls where 25 mm/s did not." autocomplete="off"><span>mm/s</span></label>
@@ -3143,7 +3168,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=b9b063c1"></script>
+  <script src="nso_slicer.js?v=6c851819"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3349,7 +3374,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=f377a5ba"></script>
+  <script src="app-supports-card.js?v=dee33112"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3357,9 +3382,9 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=5315080b"></script>
+  <script src="nso-print-planner.js?v=7ec37886"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=64b44124"></script>
+  <script src="app-print.js?v=8bff7b4a"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

@@ -817,6 +817,75 @@ classic semantics, not Arachne: one fixed width, no variable bead.
 
 ---
 
+### Arachne (`wallGenerator: 'arachne'`, 2026-11-16)
+
+Bambu Studio's second wall generator, picked on the Print card under **Quality → Wall generator**
+(`#slice-set-wall-gen`) or by a profile's `wall_generator = arachne`. Classic stays the default: both real
+profiles say `classic`.
+
+**What it changes.** Classic lays every wall one fixed width, a fixed spacing in. A part whose thickness is
+not a whole number of beads gets a gap down its middle, and a feature thinner than a bead prints nothing
+(or a sliver drawn out and back). Arachne fits the walls to the thickness. The beads' count and width
+vary so a thin rib, fin, neck or wedge is filled wall to wall.
+
+**NSO's own construction, not a port.** Arachne lives in CuraEngine and in Bambu Studio / OrcaSlicer, all
+AGPL, so nothing is taken from them (section 1). `arachneWalls()` is written here from the behaviour and
+from the six settings Studio shows, on top of what this slicer already has: Clipper offsets, `insetDepth`
+and the raster centreline `medialPaths`.
+
+1. **Thick and thin.** The region is opened (eroded, then grown back with mitred corners) by
+   `N × spacing + spacing / 2`, the half-thickness that holds the `N` classic walls and some fill. What
+   survives is the thick part. It gets `perimeters()` exactly, with its walls, top-wall rule and infill
+   region. What the opening took off is thin, and is all walls. A layer with nothing thin is sliced as
+   Classic, byte for byte (`slicer:test`, the box and the cylinder).
+2. **A thin piece.** Its thickness `T` is twice its deepest inset. The beads across it are
+   `n = round((T − fat) / spacing)`, at least one (`fat = w − spacing`, the stadium overlap). The outer
+   ones keep the nominal width. The innermost **Wall distribution count** a side (and a middle bead when
+   `n` is odd) share what is left equally: each is `(T − fat − fixed spacings) / their count + fat` wide.
+   They are laid as insets of the piece, edge to edge. A loop is dropped where its two sides would lie on
+   each other (it is opened by a quarter of its spacing), so where the piece narrows, the count drops and
+   the middle bead takes the room.
+3. **The middle.** What the loops leave is drawn down its centreline, each 0.1 mm step as wide as the room
+   there. The room is measured to the nearest edge and on to the edge across, since the raster centreline
+   can sit half a pixel off the middle. A step bounded by the piece's own outline is that stretch's
+   **Outer wall** and takes no overlap. A step between beads is an **Inner wall** plus `fat`.
+
+| lever (Studio's key) | default | here |
+|---|---|---|
+| Wall transitioning threshold angle (`wall_transition_angle`) | 10° | between loops, a stretch where the room opens faster than a wedge of this angle (read over the transition length) gets no middle bead |
+| Wall transitioning filter margin (`wall_transition_filter_deviation`) | 25 % | a bead's width changes only when the room moves by more than this |
+| Wall transition length (`wall_transition_length`) | 100 % | a bead's width follows the room averaged over this length |
+| Wall distribution count (`wall_distribution_count`) | 1 | the innermost walls a side that share a thin piece's leftover width |
+| Minimum wall width (`min_bead_width`) | 85 % | a narrower bead is printed this wide |
+| Minimum feature size (`min_feature_size`) | 25 % | a thinner feature is not printed |
+
+Each percentage is of the nozzle's diameter, as in Studio; the engine takes them as fractions
+(`minBeadWidth: 0.85`). The planner reads all seven keys (`engineOptions`). The card writes those that
+differ from the profile (`configOverlay`), so the G-code's config block and the project's settings say
+what was sliced. A slice with Arachne also writes `; wall_generator = arachne` in the engine's own
+config block.
+
+**Scope.** A support or a brim keeps the classic generator, with its Detect thin wall pass, because its
+export says `wall_generator = classic`. Detect thin wall has no work under Arachne: thin features are its
+job. Not measured against a real Arachne slice yet. The rules above are stated, and `slicer:test`
+"Arachne" (12 checks) holds them:
+- a strip from 0.05 to 0.6 mm is one bead its own width, nothing under 0.1 mm;
+- a 1.0 mm strip is three beads of 0.362 that sum to the strip;
+- the distribution count;
+- the two minimums;
+- a wedge to a point;
+- the threshold angle on a 28° wedge;
+- a support stays Classic;
+- the width reads back from the G-code.
+
+Known edges:
+- A thin piece's loops run along its cut edge where it meets a thick part, so the walls are two loops side
+  by side, not one continuous wall.
+- A piece's bead count is set by its deepest point; narrower stretches drop loops and are filled by the
+  middle bead.
+
+---
+
 ### The brim (supports-one-trunk, third round)
 
 `brimType` ('none' by default; 'auto' | 'outer'), `brimWidthMm` 5, `brimObjectGapMm` 0.1, `brimLineWidthMm` (null: 1.25 x the nozzle,

@@ -24,6 +24,10 @@
  *                 unchanged; on for a support, off for a part unless asked;
  *                 and the repo meshes' G-code pinned byte for byte, flag off
  *                 and on (none of them has a thin wall 0.13 mm or wider).
+ *  10. arachne   variable-width walls: thin strips one bead their own width,
+ *                a strip shared out over its beads, the distribution count,
+ *                the minimum feature / wall width, a wedge, the threshold
+ *                angle; thick parts byte for byte as Classic; supports Classic.
  */
 'use strict';
 
@@ -466,6 +470,68 @@ function frustum(n, r0, r1, z0, z1) {
       }));
     }
     check('the repo meshes slice byte for byte as before the thin-wall pass, with it off and on (' + n + ' slices pinned)', !bad.length, bad.join('; ') || 'all ' + n);
+  }
+
+  // =========================================================================
+  section('Arachne - variable-width walls fitted to the thickness (docs/SLICER.md "Arachne")');
+  // =========================================================================
+  {
+    const plen = p => { const q = p.closed ? p.pts.concat([p.pts[0]]) : p.pts; let l = 0; for (let i = 0; i + 1 < q.length; i++) l += Math.hypot(q[i + 1][0] - q[i][0], q[i + 1][1] - q[i][1]); return l; };
+    const sl = (soup, over) => SL.sliceObjects([{ name: 't', soup }], SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, firstLayerMm: 0.2 }, over)), wasm);
+    const walls = (r, i) => r.objects[0].layers[i == null ? 2 : i].paths.filter(p => /wall/.test(p.feature));
+    const strip = wd => prism(rect(0, 20, 0, wd), 0, 1);
+    const ar = { wallGenerator: 'arachne' };
+    check('Classic unless asked, with Studio\'s six levers at its defaults (the four fractions of the nozzle)',
+          (() => { const d = SL.defaultsFor(0.4); return d.wallGenerator === 'classic' && d.wallTransitionAngleDeg === 10 && d.wallTransitionFilterMargin === 0.25 &&
+            d.wallTransitionLength === 1 && d.wallDistributionCount === 1 && d.minBeadWidth === 0.85 && d.minFeatureSize === 0.25; })());
+    /* thin strips: Classic prints nothing under the bead, Arachne one bead the strip's own width (never under 85 % of the nozzle, nothing under 25 %) */
+    const one = [[0.05, 0], [0.2, 0.34], [0.3, 0.34], [0.42, 0.42], [0.6, 0.6]].map(([wd, want]) => {
+      const c = walls(sl(strip(wd))), a = walls(sl(strip(wd), ar));
+      return { wd, c: c.length, a: a.map(p => p.width.toFixed(3) + (p.closed ? 'C' : 'O') + p.feature[0]).join(' '),
+               ok: want === 0 ? a.length === 0 : (a.length === 1 && !a[0].closed && a[0].feature === 'Outer wall' && Math.abs(a[0].width - want) < 1e-3 &&
+                 a[0].pts.every(q => Math.abs(q[1] - wd / 2) < 0.02) && plen(a[0]) > 19 - wd) };
+    });
+    check('a strip under 1.5 beads is ONE open Outer wall down its middle, as wide as the strip: 0.05 nothing (under the minimum feature size), 0.2 / 0.3 at the minimum wall width (0.34), 0.42 / 0.6 their own',
+          one.every(o => o.ok), one.map(o => o.wd + ': ' + (o.a || 'none') + ' (classic ' + o.c + ' path)').join(' | '));
+    check('...where Classic draws nothing under the bead (0.05 - 0.42) and a sliver loop at 0.6', one.slice(0, 4).every(o => o.c === 0) && one[4].c === 1);
+    /* 1.0 mm, two walls: Classic's one loop leaves a 0.58 mm gap down the middle; Arachne three beads of 0.362 (a loop and a middle bead) */
+    const c10 = walls(sl(strip(1.0))), a10 = walls(sl(strip(1.0), ar));
+    const sp = SL.spacingOf(0.42, 0.2), fat = 0.42 - sp, w3 = (1.0 - fat) / 3 + fat;
+    check('a 1.0 mm strip, 2 walls: Classic one loop and a gap; Arachne a loop and a middle bead, all three ' + w3.toFixed(3) + ' wide (the strip shared out)',
+          c10.length === 1 && a10.length === 2 && a10.every(p => Math.abs(p.width - w3) < 2e-3) && a10.some(p => !p.closed && p.feature === 'Inner wall' && p.pts.every(q => Math.abs(q[1] - 0.5) < 0.02)),
+          a10.map(p => p.feature + ' ' + p.width.toFixed(3) + (p.closed ? ' loop' : ' line')).join(', '));
+    /* the beads across fill the strip: their spacings plus the overlap are its width */
+    const cover = a10.reduce((t, p) => t + (p.closed ? 2 : 1) * (p.width - fat), 0) + fat;
+    check('...the three beads fill it wall to wall: their spacings plus one overlap = 1.000 mm', Math.abs(cover - 1.0) < 3e-3, cover.toFixed(4));
+    /* thick parts: the classic walls and infill, byte for byte */
+    const same = ['fixtures/box-20mm.stl', 'fixtures/cylinder_r10h30_s64.stl'].map(f => { const soup = readSTL(path.join(ROOT, f));
+      const a = sl(soup).gcode, b = sl(soup, ar).gcode; return a === b.replace('; wall_generator = arachne\n', ''); });
+    check('a part with nothing thin (the box, the cylinder) slices byte for byte as Classic (but the generator\'s line in the config block)', same.every(Boolean), same.join(' '));
+    /* distribution count: a 2.5 mm strip with 4 walls - the outer walls keep their width, only the innermost share the rest */
+    const dc = [1, 2, 4].map(n => walls(sl(prism(rect(0, 20, 0, 2.5), 0, 0.6), Object.assign({ wallLoops: 4, wallDistributionCount: n }, ar)), 1).map(p => +p.width.toFixed(3)).sort((x, y) => x - y));
+    check('Wall distribution count: 1 keeps the outer two walls at 0.42 and widens the inner; 2 keeps only the outer; 4 shares the strip over all',
+          dc[0].filter(x => x === 0.42).length === 2 && dc[1].filter(x => x === 0.42).length === 1 && dc[2].every(x => Math.abs(x - dc[2][0]) < 2e-3 && x !== 0.42),
+          dc.map(l => l.join(' ')).join(' | '));
+    /* the levers: minimum feature and wall width */
+    const mf = walls(sl(strip(0.15), Object.assign({ minFeatureSize: 0.5 }, ar))), mw = walls(sl(strip(0.2), Object.assign({ minBeadWidth: 0.6 }, ar)));
+    check('Minimum feature size 50 %: a 0.15 strip is not printed; minimum wall width 60 %: a 0.2 strip prints at 0.24', mf.length === 0 && mw.length === 1 && Math.abs(mw[0].width - 0.24) < 1e-3,
+          mf.length + ' / ' + (mw[0] && mw[0].width));
+    /* a wedge narrowing to a point: two walls, then one bead that follows the room down, then nothing under the minimum feature */
+    const wedge = walls(sl(prism([[0, 0], [20, -1], [20, 1]], 0, 0.6), ar), 1), tip = wedge.filter(p => !p.closed && p.feature === 'Outer wall');
+    const tipX = tip.length ? Math.min(...tip.map(p => Math.min(...p.pts.map(q => q[0])))) : null;
+    check('a 2 mm wedge to a point: the loops stop where the wedge narrows, one Outer wall bead runs on to the tip - from where it is 0.1 mm (min feature 25 %) wide, its width growing with the room',
+          tip.length >= 2 && Math.abs(tipX - 1) < 0.15 && tip.slice().sort((p, q) => p.pts[0][0] - q.pts[0][0]).every((p, i, a) => i === 0 || p.width >= a[i - 1].width) && wedge.some(p => p.closed),
+          tip.map(p => p.width.toFixed(3) + ' from x ' + Math.min(...p.pts.map(q => q[0])).toFixed(2)).join(', '));
+    /* the threshold angle: a 28 deg wedge's middle bead between its loops is left out at 10 deg, laid at 40 */
+    const steep = a => walls(sl(prism([[0, 0], [6, -1.5], [6, 1.5]], 0, 0.6), Object.assign({ wallTransitionAngleDeg: a }, ar)), 1).filter(p => !p.closed && p.feature === 'Inner wall').length;
+    check('Wall transitioning threshold angle: a wedge opening at 28 deg gets no middle bead at 10 deg, one at 40 deg', steep(10) === 0 && steep(40) >= 1, steep(10) + ' / ' + steep(40));
+    /* supports stay classic (their export says wall_generator = classic) */
+    const sup = SL.sliceObjects([{ name: 's', soup: strip(0.4), role: 'support' }], SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2 }, ar)), wasm);
+    check('a support slices Classic (with its Detect thin wall pass) whatever the part\'s generator', sup.objects[0].layers[2].paths.every(p => p.thinWall && !p.variable));
+    /* the G-code reads back each width */
+    const pg = G.parseGcode(sl(strip(1.0), ar).gcode);
+    const ws = [...new Set(pg.moves.filter(m => /wall/.test(m.feature)).map(m => m.width.toFixed(3)))];
+    check('...and the G-code reads back the variable width (parseGcode, nothing assumed)', ws.length === 1 && Math.abs(+ws[0] - w3) < 2e-3, ws.join(' '));
   }
 
   section('The raft: its own system under the plate, as Bambu lays it (fixtures/supports/raft_circle.gcode.3mf, docs/SLICER.md "The raft")');

@@ -216,7 +216,9 @@ async function main() {
         bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null,   /* the filament's own */
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
-        supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true }), JSON.stringify(base));
+        supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true,
+        /* the wall generator: the template's classic, and Studio's Arachne defaults (docs/SLICER.md "Arachne") */
+        wallGen: 'classic', wallAngle: 10, wallFilter: 25, wallTransLen: 100, wallDist: 1, minWall: 85, minFeature: 25 }), JSON.stringify(base));
     const rov = PRINT.configOverlay(tpl, Object.assign({}, base, { raft: 10 }));
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));
@@ -226,6 +228,24 @@ async function main() {
     check('a nozzle the profile is not is refused, not sliced with the 0.4 blocks', /0\.6 mm nozzle needs its own profile/.test(threw), threw);
     const cl = PRINT.cleanSettings({ layer: '9', walls: '0', density: '150', pattern: 'no-such-pattern', angle: '0', brim: 'x', interfaceRule: 'column' });
     check('each row is clamped to what it takes, and an unknown pattern / brim is the default', cl.layer === 0.3 && cl.walls === 1 && cl.density === 100 && cl.pattern === 'grid' && cl.angle === 1 && cl.brim === 'auto' && cl.interfaceRule === 'column', JSON.stringify(cl));
+    {
+      /* THE WALL GENERATOR (Quality): Arachne and its six levers, by Studio's own keys - the percentages of the nozzle as Studio writes them */
+      const wov = PRINT.configOverlay(tpl, Object.assign({}, base, { wallGen: 'arachne', wallAngle: 20, wallFilter: 30, wallTransLen: 150, wallDist: 2, minWall: 70, minFeature: 40 }));
+      check('Arachne on the card is the file\'s wall_generator = arachne, and each lever its own key',
+        JSON.stringify(wov) === JSON.stringify({ wall_generator: 'arachne', wall_transition_angle: '20', wall_transition_filter_deviation: '30%', wall_transition_length: '150%',
+          wall_distribution_count: '2', min_bead_width: '70%', min_feature_size: '40%' }), JSON.stringify(wov));
+      const eo = PL.engineOptions(PRINT.withOverlay(tpl, wov)).over;
+      check('...the planner hands the engine each of them (a percentage as a fraction of the nozzle)',
+        eo.wallGenerator === 'arachne' && eo.wallTransitionAngleDeg === 20 && Math.abs(eo.wallTransitionFilterMargin - 0.3) < 1e-9 && Math.abs(eo.wallTransitionLength - 1.5) < 1e-9 &&
+          eo.wallDistributionCount === 2 && Math.abs(eo.minBeadWidth - 0.7) < 1e-9 && Math.abs(eo.minFeatureSize - 0.4) < 1e-9, JSON.stringify(eo));
+      const back = PRINT.settingsFromConfig(PRINT.withOverlay(tpl, wov));
+      check('...and a template that says Arachne shows it, levers and all, on the card\'s rows',
+        back.wallGen === 'arachne' && back.wallAngle === 20 && back.wallFilter === 30 && back.wallTransLen === 150 && back.wallDist === 2 && back.minWall === 70 && back.minFeature === 40, JSON.stringify(back));
+      check('...while the template\'s own (classic) hands the engine classic', PL.engineOptions(tpl).over.wallGenerator === 'classic');
+      const wc = PRINT.cleanSettings({ wallGen: 'spider', wallAngle: '90', wallFilter: '-5', wallTransLen: '0', wallDist: '0', minWall: '1', minFeature: '200' });
+      check('...each lever clamped to what Studio takes, an unknown generator is Classic',
+        wc.wallGen === 'classic' && wc.wallAngle === 59 && wc.wallFilter === 0 && wc.wallTransLen === 1 && wc.wallDist === 1 && wc.minWall === 5 && wc.minFeature === 100, JSON.stringify(wc));
+    }
     const SURF = ['internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern'];
     const ringOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: 'concentric' }));
     check('the infill row is the sparse infill\'s alone: concentric changes sparse_infill_pattern and nothing else', ringOver.sparse_infill_pattern === 'concentric' && Object.keys(ringOver).length === 1, JSON.stringify(ringOver));
@@ -267,6 +287,23 @@ async function main() {
           .every(k => (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(rg) || [])[1] === 'concentric'));
         check('...and the print is the same plastic as the lines\' within 5 % (' + plain.stats.grams + ' -> ' + rings.stats.grams + ' g)',
           Math.abs(rings.stats.grams / plain.stats.grams - 1) < 0.05);
+      }
+    }
+
+    {
+      /* Arachne through the whole build: the slicer told so, the file says so, and these two parts (no feature thinner than their walls) print the
+         same plastic as Classic's within 1 % */
+      let wOpts = null;
+      const SLw = require(path.join(ROOT, 'nso_slicer.js')), runW = SLw.run;
+      SLw.run = function (ob, o) { wOpts = o; return runW.apply(this, arguments); };
+      let ar;
+      try { ar = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { wallGen: 'arachne' }) }); } finally { SLw.run = runW; }
+      check('Arachne slices to a file, the slicer told wallGenerator arachne with Studio\'s levers', ar.ok && wOpts && wOpts.wallGenerator === 'arachne' &&
+        wOpts.wallTransitionAngleDeg === 10 && Math.abs(wOpts.minBeadWidth - 0.85) < 1e-9 && Math.abs(wOpts.minFeatureSize - 0.25) < 1e-9 && wOpts.wallDistributionCount === 1, ar.reason);
+      if (ar.ok) {
+        const ag = L.text(await L.R.openZip(ar.bytes).read('Metadata/plate_1.gcode'));
+        check('...its CONFIG_BLOCK says wall_generator = arachne', /^; wall_generator = arachne$/m.test(ag));
+        check('...the same plastic as Classic\'s within 1 % (' + plain.stats.grams.toFixed(2) + ' -> ' + ar.stats.grams.toFixed(2) + ' g)', Math.abs(ar.stats.grams / plain.stats.grams - 1) < 0.01);
       }
     }
 
@@ -741,7 +778,10 @@ async function main() {
         ['btn-sup-all', 'btn-sup-slice', 'btn-slice-export', 'btn-slice-saveas', 'btn-slice-cancel', 'slice-profile', 'slice-readout', 'slice-progress', 'print-printer', 'sup-on', 'print-sup-body', 'sup-style',
          'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-settings-reset',
          'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band', 'slice-filament-note',
-         'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-bridge-temp', 'slice-bridge-note', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-retract-before', 'slice-set-zhop'].every(has) &&
+         'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-bridge-temp', 'slice-bridge-note', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-retract-before', 'slice-set-zhop',
+         'slice-set-wall-gen', 'slice-arachne-rows', 'slice-set-wall-angle', 'slice-set-wall-filter', 'slice-set-wall-translen', 'slice-set-wall-dist', 'slice-set-min-wall', 'slice-set-min-feature'].every(has) &&
+        /* the wall generator and its levers are Quality's, Arachne's six hidden until it is picked */
+        ['slice-set-wall-gen', 'slice-set-wall-angle', 'slice-set-min-feature'].every(id => sec('print-sec-quality').includes('id="' + id + '"')) && /^id="slice-arachne-rows" hidden>/.test(from('slice-arachne-rows')) &&
         /* ...and nothing of the cards it took the place of: no second Slice button, no None, no Remove, no second angle, no interface rule */
         ['btn-slice-go', 'btn-sup-none', 'btn-sup-remove', 'slice-set-angle', 'slice-set-iface', 'slice-settings-toggle', 'btn-slice-preview', 'sup-plate'].every(id => !html.includes('id="' + id + '"')) &&
         c.indexOf('id="btn-sup-all"') < c.indexOf('id="btn-sup-slice"') && c.indexOf('id="btn-sup-slice"') < c.indexOf('id="btn-slice-export"') && c.indexOf('id="btn-slice-export"') < c.indexOf('id="sup-style"') &&

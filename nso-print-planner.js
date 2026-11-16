@@ -281,6 +281,14 @@
       sparsePattern: ENGINE_PATTERNS[raw(config, 'sparse_infill_pattern')] || 'zigzag',
       infillDirectionDeg: num(config, 'infill_direction', 45),
       detectThinWall: num(config, 'detect_thin_wall', 0) === 1,
+      // the wall generator and Arachne's six levers (nso_slicer.js arachneWalls); a percentage is of the nozzle, as the slicer takes it
+      wallGenerator: raw(config, 'wall_generator') === 'arachne' ? 'arachne' : 'classic',
+      wallTransitionAngleDeg: num(config, 'wall_transition_angle', 10),
+      wallTransitionFilterMargin: pct('wall_transition_filter_deviation', 0.25),
+      wallTransitionLength: pct('wall_transition_length', 1),
+      wallDistributionCount: num(config, 'wall_distribution_count', 1),
+      minBeadWidth: pct('min_bead_width', 0.85),
+      minFeatureSize: pct('min_feature_size', 0.25),
       supportThresholdDeg: num(config, 'support_threshold_angle', 30),
       // the project's own brim: auto_brim (a tall thin part gets one), outer_only / outer_and_inner (every part), no_brim
       brimType: ({ auto_brim: 'auto', outer_only: 'outer', outer_and_inner: 'outer', no_brim: 'none' })[raw(config, 'brim_type')] || 'none',

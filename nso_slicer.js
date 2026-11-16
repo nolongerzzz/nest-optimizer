@@ -36,6 +36,9 @@
  *                                     the bead is ONE pass down its medial
  *                                     centreline (medialPaths), at the bead's
  *                                     width; the rest gets its walls as ever.
+ *   4c. arachne   arachneWalls()    - wallGenerator 'arachne': thin parts get
+ *                                     walls fitted to their thickness, beads
+ *                                     of variable count and width.
  *   5. shells     classify()        - top / bottom solid layers by region
  *                                     booleans against the layers above and
  *                                     below; bridges; sparse interior.
@@ -93,6 +96,7 @@
  *   scanFill(polys, angleRad, spacing, phase) -> segments (pure JS)
  *   thinWalls(g, region, opts)         -> the thin pieces' centre passes, or null (Detect thin wall)
  *   medialPaths(polys, w, restPolys)   -> a thin piece's centreline as paths (pure JS)
+ *   arachneWalls(g, region, h, opts, above) -> perimeters()' shape plus the variable middle beads (Arachne)
  */
 (function (root, factory) {
   'use strict';
@@ -286,6 +290,16 @@
       // (detect_thin_wall = 0); a support object is sliced with it on
       // (CONSTANTS.thinWall.supportsOn), and an object can say either way.
       detectThinWall: BAMBU_PROFILE_06.detectThinWall,
+      // The wall generator (Bambu's wall_generator): 'classic', or 'arachne' - variable-width walls fitted to the part's thickness
+      // (arachneWalls). Classic unless asked, as both real profiles. The six Arachne levers are Studio's, with its defaults; the four
+      // given as a fraction are of the nozzle's diameter, as Studio's percentages are.
+      wallGenerator: 'classic',
+      wallTransitionAngleDeg: 10,          // wall_transition_angle: a wedge opening wider than this gets no middle bead
+      wallTransitionFilterMargin: 0.25,    // wall_transition_filter_deviation: a bead's width changes only when the room moves more than this
+      wallTransitionLength: 1,             // wall_transition_length: the length a bead's width follows the room over
+      wallDistributionCount: 1,            // wall_distribution_count: the innermost walls a side that share the variation
+      minBeadWidth: 0.85,                  // min_bead_width: a narrower bead is printed this wide
+      minFeatureSize: 0.25,                // min_feature_size: a thinner feature is not printed
       thinWallMm: null,                    // null -> CONSTANTS.thinWall.ratio x outer wall width
       // An open section chain (a hole in the mesh) is closed by a straight
       // chord when its ends are this close; wider, it is dropped and counted.
@@ -2273,6 +2287,200 @@
     if (ends[1]) P[n - 1] = ends[1];
   }
 
+  // ===========================================================================
+  // Arachne - variable-width walls (wallGenerator: 'arachne')
+  // ===========================================================================
+  //
+  // Bambu Studio's other wall generator. Classic lays every wall at one fixed
+  // width, offset by one spacing, so a part whose thickness is not a whole
+  // number of beads gets a gap down its middle (or nothing at all under one
+  // bead). Arachne fits the walls to the thickness: it varies the beads' count
+  // and width so a thin feature is filled wall to wall.
+  //
+  // This is NSO's own construction, written here from the behaviour and the
+  // six settings Studio shows - not a port of CuraEngine's or Studio's Arachne
+  // (both AGPL; see section 1 of docs/SLICER.md). docs/SLICER.md "Arachne".
+  //
+  //   THICK AND THIN. The region opened by the depth N classic walls and a
+  //   spacing of fill need (N x spacing + spacing / 2: the half-thickness) is
+  //   the thick part; it gets exactly the classic walls and fill. What the
+  //   opening takes off (ribs, fins, necks, a thin part whole) is thin, and is
+  //   all walls.
+  //   A THIN PIECE. Its thickness T is twice its deepest inset. The beads
+  //   across it: n = round((T - fat) / spacing), at least one. The outermost
+  //   ones keep the nominal width; the innermost wallDistributionCount a side
+  //   (and a middle bead when n is odd) share what is left equally: their
+  //   width is (T - fat - fixed spacings) / their count + fat. They are laid as
+  //   insets of the piece, edge to edge.
+  //   THE MIDDLE. What those loops leave of the piece - a middle bead's room,
+  //   and the taper where a piece narrows under its deepest - is drawn down
+  //   its centreline (medialPaths), each stretch as wide as the room there:
+  //     - narrower than minFeatureSize: not printed;
+  //     - narrower than minBeadWidth: printed at minBeadWidth;
+  //     - the width follows the room averaged over wallTransitionLength, and
+  //       changes only when it moves by more than wallTransitionFilterMargin;
+  //     - between loops (a middle bead), a stretch where the room opens wider
+  //       than a wedge of wallTransitionAngleDeg is left out: no centre bead
+  //       fills a wedge's widening gap.
+  //   A support or a brim keeps the classic generator: its export says
+  //   wall_generator = classic. Detect thin wall has no work under Arachne.
+
+  var ARACHNE_STEP_MM = 0.1;          // a variable bead's width is read along its centreline at this step
+
+  /**
+   * The room across a piece at a point near its centreline: to the nearest edge, plus on through the point to the edge across. Not twice the
+   * nearest: the raster centreline (medialPaths) can sit half a pixel off the middle.
+   */
+  function roomAt(edges, q) {
+    var best = Infinity, nx = 0, ny = 0;
+    for (var e = 0; e < edges.length; e += 2) {
+      var A = edges[e], B = edges[e + 1], dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy;
+      var t = L2 > 0 ? Math.max(0, Math.min(1, ((q[0] - A[0]) * dx + (q[1] - A[1]) * dy) / L2)) : 0;
+      var px = A[0] + t * dx, py = A[1] + t * dy, d = Math.hypot(q[0] - px, q[1] - py);
+      if (d < best) { best = d; nx = px; ny = py; }
+    }
+    if (!(best > 1e-9) || !isFinite(best)) return 0;
+    var across = rayToEdges(q, [(q[0] - nx) / best, (q[1] - ny) / best], edges);
+    return isFinite(across) ? best + Math.min(across, 3 * best + 1) : 2 * best;
+  }
+
+  /** The fraction lever (of the nozzle) as mm. */
+  function ofNozzle(o, v, d) { return (v != null && isFinite(v) ? v : d) * o.nozzleMm; }
+
+  /**
+   * A centreline as runs of one width each: [{ pts, width, outer }]. polys the room it runs down, piece the outline of the thin piece it is
+   * in, fat the bead's overlap: a step whose room is bounded by beads takes it on (a bead between beads), one bounded by the piece's own
+   * outline does not, and is that stretch's outer wall. centreFill: the piece has loops (the angle rule applies between them).
+   */
+  function variableRuns(pa, polys, piece, fat, o, centreFill) {
+    var pts = pa.closed ? pa.pts.concat([pa.pts[0]]) : pa.pts;
+    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25), minBead = ofNozzle(o, o.minBeadWidth, 0.85);
+    var margin = ofNozzle(o, o.wallTransitionFilterMargin, 0.25), tLen = ofNozzle(o, o.wallTransitionLength, 1);
+    var wMax = 2 * o.innerWallWidthMm, angle = o.wallTransitionAngleDeg != null ? o.wallTransitionAngleDeg : 10;
+    /* the path cut into short steps, the room at each step's middle */
+    var edges = [];
+    polys.forEach(function (P) { for (var e = 0; e < P.length; e++) edges.push(P[e], P[(e + 1) % P.length]); });
+    var pEdges = [];
+    piece.forEach(function (P) { for (var e = 0; e < P.length; e++) pEdges.push(P[e], P[(e + 1) % P.length]); });
+    var seg = [];
+    for (var i = 0; i + 1 < pts.length; i++) {
+      var a = pts[i], b = pts[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(L / ARACHNE_STEP_MM));
+      for (var k = 0; k < n; k++) {
+        var p0 = [a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n], p1 = [a[0] + (b[0] - a[0]) * (k + 1) / n, a[1] + (b[1] - a[1]) * (k + 1) / n];
+        var mid = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2], room = roomAt(edges, mid);
+        seg.push({ a: p0, b: p1, len: L / n, room: room, outer: distToEdges(mid, pEdges) <= room / 2 + 0.02 });
+      }
+    }
+    if (!seg.length) return [];
+    var at = [], acc = 0;
+    seg.forEach(function (s) { at.push(acc + s.len / 2); acc += s.len; });
+    var total = acc;
+    /* the room averaged over the transition length (a closed path wraps round) */
+    var smooth = seg.map(function (s, i) {
+      var sum = 0, wsum = 0;
+      for (var j = 0; j < seg.length; j++) {
+        var dd = Math.abs(at[j] - at[i]);
+        if (pa.closed) dd = Math.min(dd, total - dd);
+        if (dd <= tLen / 2) { sum += seg[j].room * seg[j].len; wsum += seg[j].len; }
+      }
+      return wsum > 0 ? sum / wsum : s.room;
+    });
+    /* the width each step asks for; the bead starts at their median (not at an end, where the room tapers) */
+    var want = seg.map(function (s, i) {
+      var r = smooth[i], wv = 0;
+      if (s.room >= minFeat && r >= minFeat) {
+        wv = Math.max(minBead, Math.min(wMax, r + (s.outer ? 0 : fat)));
+        /* a wedge between loops: the room opening faster than the angle allows (read over the transition length, away from an open end) */
+        if (centreFill && !s.outer && angle > 0) {
+          var i0 = i, i1 = i;
+          while (i0 > 0 && at[i] - at[i0 - 1] <= tLen / 2) i0--;
+          while (i1 + 1 < seg.length && at[i1 + 1] - at[i] <= tLen / 2) i1++;
+          var span = at[i1] - at[i0], nearEnd = !pa.closed && (at[i] < ARACHNE_STEP_MM || total - at[i] < ARACHNE_STEP_MM);
+          if (span > 0 && !nearEnd) {
+            var opening = 2 * Math.atan(Math.abs(seg[i1].room - seg[i0].room) / span / 2) * 180 / Math.PI;
+            if (opening > angle) wv = 0;
+          }
+        }
+      }
+      return wv;
+    });
+    var live = want.filter(function (v) { return v > 0; }).sort(function (x, y) { return x - y; });
+    var cur = live.length ? Math.round(live[live.length >> 1] * 1000) / 1000 : null, runs = [], run = null;
+    seg.forEach(function (s, i) {
+      var wv = want[i];
+      if (wv > 0) {
+        if (Math.abs(wv - cur) > margin) cur = Math.round(wv * 1000) / 1000;
+        wv = cur;
+      }
+      if (run && run.width === wv && run.outer === s.outer) run.pts.push(s.b);
+      else { run = { width: wv, outer: s.outer, pts: [s.a, s.b] }; runs.push(run); }
+    });
+    return runs.filter(function (r) { return r.width > 0 && pathLength(r.pts, false) >= minFeat; });
+  }
+
+  /**
+   * Arachne walls for one layer region, in perimeters()' shape - { loops: [{ depth, cs, width }], wallCount, infillRegion } - and `extra`, the
+   * variable middle beads ([{ feature, width, closed, pts }]). The thick part's loops and infill region are perimeters()' own.
+   */
+  function arachneWalls(g, region, h, o, above) {
+    var we = o.outerWallWidthMm, wi = o.innerWallWidthMm, s = spacingOf(wi, h), fat = wi - s;
+    var N = Math.max(1, Math.round(o.wallLoops)), d = Math.max(1, Math.min(N, Math.round(o.wallDistributionCount || 1)));
+    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25);
+    var rho = N * s + s / 2;
+    var thickCore = g.offset(region, -rho);
+    var thick = g.isEmpty(thickCore) ? g.empty() : g.inter(region, g.offset(thickCore, rho));
+    var thin = g.diff(region, thick);
+    thin = g.offset(g.offset(thin, -minFeat / 2), minFeat / 2);
+    /* nothing thin: the classic walls of the region itself, byte for byte */
+    if (g.isEmpty(thin)) thick = region;
+    var per = perimeters(g, thick, h, o, above);
+    per.loops.forEach(function (lp) { lp.width = lp.depth === 0 ? we : wi; });
+    var extra = [], pieces = 0, beads = 0;
+    g.parts(thin).forEach(function (pc) {
+      if (!(pc.area() >= minFeat * minFeat)) return;
+      var T = 2 * insetDepth(g, pc, rho + s);
+      if (T < minFeat) return;
+      pieces++;
+      var n = Math.max(1, Math.round((T - fat) / s)), side = Math.floor(n / 2), fixed = Math.max(0, side - d);
+      var sp = (T - fat - 2 * fixed * s) / (n - 2 * fixed);
+      var c = fat / 2, prev = 0, bands = [];
+      for (var k = 0; k < side; k++) {
+        var spk = k < fixed ? s : sp;
+        c += (prev + spk) / 2; prev = spk;
+        /* a loop only where its two sides stand apart: where the piece narrows they would lie on each other (a sliver drawn out and back);
+           there the middle bead takes the room instead - the count drops by one, the width follows */
+        var cs = g.offset(g.offset(g.offset(pc, -c), -spk / 4), spk / 4);
+        if (g.isEmpty(cs)) break;
+        var width = k < fixed ? (k === 0 ? we : wi) : spk + fat;
+        per.loops.push({ depth: k, cs: cs, width: width, variable: k >= fixed });
+        bands.push(g.diff(g.offset(cs, spk / 2), g.offset(cs, -spk / 2)));
+        beads++;
+      }
+      if (bands.length > per.wallCount) per.wallCount = bands.length;
+      /* the middle: what the loops leave of the piece, down its centreline at the room's width */
+      var rest = bands.length ? g.diff(pc, g.unionAll(bands)) : pc, piecePolys = g.polys(pc);
+      rest = g.offset(g.offset(rest, -minFeat / 2), minFeat / 2);
+      g.parts(rest).forEach(function (rp) {
+        var polys = g.polys(rp);
+        var med = medialPaths(polys, wi, []);
+        if (!med) return;
+        med.forEach(function (pa) {
+          variableRuns(pa, polys, piecePolys, fat, o, bands.length > 0).forEach(function (r) {
+            extra.push({ feature: r.outer ? 'Outer wall' : 'Inner wall', width: r.width, closed: false, pts: r.pts, variable: true });
+            beads++;
+          });
+        });
+      });
+      if (!per.wallCount) per.wallCount = 1;
+    });
+    /* the loops inner first is the caller's (by depth, deepest first) */
+    per.loops.sort(function (a, b) { return a.depth - b.depth; });
+    per.extra = extra;
+    per.thinPieces = pieces;
+    per.variableBeads = beads;
+    return per;
+  }
+
   function sliceObjects(objects, opts, wasm) {
     var o = defaultsFor(opts && opts.nozzleMm, opts);
     var t0 = Date.now();
@@ -2398,10 +2606,18 @@
           var below = i > 0 ? S[i - 1] : null;
           // Detect thin wall: the thin islands come out of the region and
           // print as their centre passes; with none, the region is as it was
-          var thin = P.thin ? thinWalls(g, region, o) : null;
+          /* Arachne (o.wallGenerator): a part's walls fit to its thickness, thin features included - no Detect thin wall pass. A support and a
+             brim keep the classic generator their export names. */
+          var arachne = o.wallGenerator === 'arachne' && P.role === 'part';
+          var thin = P.thin && !arachne ? thinWalls(g, region, o) : null;
           /* a support has one loop and no top shell: the one-wall-on-top rule has no loop to drop there, and left to run it kept the fill out from under
              whatever stands on the layer - a pad with a pocket between its trunks printed hollow under every trunk, their second layer over air */
-          var per = perimeters(g, thin ? thin.rest : region, h, oS, oS.onlyOneWallTop && P.role !== 'support' ? above : null);
+          var per = arachne ? arachneWalls(g, region, h, oS, oS.onlyOneWallTop ? above : null)
+            : perimeters(g, thin ? thin.rest : region, h, oS, oS.onlyOneWallTop && P.role !== 'support' ? above : null);
+          if (arachne) {
+            L.variableBeads = per.variableBeads;
+            per.extra.forEach(function (pa) { L.paths.push(pa); });     /* the middle beads first: inner walls first, outer last */
+          }
           L.wallCount = per.wallCount;
           L.wallLoopsByDepth = per.loops.map(function (lp) { return g.polys(lp.cs).length; });
 
@@ -2416,7 +2632,7 @@
 
           per.loops.slice().reverse().forEach(function (lp) {     // inner walls first, outer last
             var feat = lp.depth === 0 ? 'Outer wall' : 'Inner wall';
-            var w = lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm;
+            var w = lp.width || (lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm);
             loopsOf(g, lp.cs).forEach(function (path) {
               var seq = [];
               splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm, belowIn).forEach(function (piece) {
@@ -2918,7 +3134,7 @@
             layers: P.layers.map(function (L) {
               return {
                 index: L.index, printZ: L.printZ, h: L.h, areaMm2: L.areaMm2,
-                wallCount: L.wallCount || 0, wallLoopsByDepth: L.wallLoopsByDepth || [], thinWalls: L.thinWalls || 0,
+                wallCount: L.wallCount || 0, wallLoopsByDepth: L.wallLoopsByDepth || [], thinWalls: L.thinWalls || 0, variableBeads: L.variableBeads || 0,
                 areas: L.areas || null, overhangMm2: L.overhangMm2 || 0,
                 overhangPolys: L.overhangCs ? g.polys(L.overhangCs) : [],
                 sectionPolys: g.polys(P.S[L.index]),
@@ -4902,6 +5118,7 @@
     L.push('; inner_wall_line_width = ' + o.innerWallWidthMm);
     L.push('; sparse_infill_line_width = ' + o.infillWidthMm);
     L.push('; wall_loops = ' + o.wallLoops);
+    if (o.wallGenerator === 'arachne') L.push('; wall_generator = arachne');     /* only then: a classic slice's text is as it was */
     L.push('; top_shell_layers = ' + o.topShellLayers);
     L.push('; bottom_shell_layers = ' + o.bottomShellLayers);
     L.push('; sparse_infill_density = ' + Math.round(o.sparseDensity * 100) + '%');
@@ -4953,6 +5170,7 @@
     brimFor: brimFor,
     brimWanted: brimWanted,
     thinWalls: thinWalls,
+    arachneWalls: arachneWalls,
     medialPaths: medialPaths,
     concentricFill: concentricFill,
     spiralFill: spiralFill,
