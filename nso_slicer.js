@@ -2616,11 +2616,29 @@
             };
             var base = score(solidAngle);
             if (!(base.all > 0) || base.both >= 0.98 * base.all) return null;
+            /* by the share of the lines held, not their length: the same area is the same length of line at any angle, give or take a line
+               of the scan's phase - which, compared in millimetres, favoured a slant (the test's slot: 49.6 mm at 175 degrees, 48.0 at 0, all of
+               both held) */
+            var frac = function (sc) { return sc.all > 0 ? sc.both / sc.all : 0; };
             var tries = [], most = 0;
-            for (var deg = 0; deg < 180; deg += 5) { var sc = score(deg * Math.PI / 180); sc.ang = deg * Math.PI / 180; tries.push(sc); if (sc.both > most) most = sc.both; }
-            if (!(most > 0) || most <= base.both * 1.05) return null;
+            for (var deg = 0; deg < 180; deg += 5) { var sc = score(deg * Math.PI / 180); sc.ang = deg * Math.PI / 180; tries.push(sc); if (frac(sc) > most) most = frac(sc); }
+            if (!(most > 0) || most <= frac(base) * 1.05) return null;
+            /* among the angles that hold (nearly) the most, the one that crosses the gap the short way: the piece's extent along the lines.
+               It was the mean length of the scan's lines, which the scan's phase moves by a line more or less: on the owner's TPU tower the
+               2.4 x 9.6 mm slot over the cone went at 10 degrees (mean 2.6 against 0 degrees' 2.6, a line apart) - every line slanted across
+               the slot, and the first and last starting and ending in mid-air (2026-11-15). The extent is the geometry's own: 2.4 at 0
+               degrees, 4.0 at 10. */
+            var extentAt = function (ang) {
+              var c = Math.cos(ang), s2 = Math.sin(ang), lo = Infinity, hi = -Infinity;
+              pp.forEach(function (pl) { pl.forEach(function (q) { var u = q[0] * c + q[1] * s2; if (u < lo) lo = u; if (u > hi) hi = u; }); });
+              return hi - lo;
+            };
             var pick = null;
-            tries.forEach(function (sc) { if (sc.both >= 0.98 * most && (!pick || sc.mean < pick.mean - 1e-9)) pick = sc; });
+            tries.forEach(function (sc) {
+              if (!(frac(sc) >= most - 0.02)) return;
+              sc.extent = extentAt(sc.ang);
+              if (!pick || sc.extent < pick.extent - 1e-6) pick = sc;
+            });
             return pick ? pick.ang : null;
           }
           var freeFrom = L.paths.length, fitBridge = o.bridgeFitSpacing !== false;

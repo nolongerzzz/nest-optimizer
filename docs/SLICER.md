@@ -912,6 +912,17 @@ planner's bridge temperature counts only those.
 Pinned slices that changed: `hinge_knuckle_box` at 0.4 and `top_clip_x2_coupon` at both nozzles
 (`slicer:test`). Held by `print:slice` 3c: a doorway's roof is laid 99 % along its 30 mm gap.
 
+
+**Choosing among the angles that hold (2026-11-15).** The 5-degree tries were compared by the length
+of their held lines, and the tie among those within 2 % broken by the mean line length. Both are
+the scan's phase as much as the geometry - the same area is the same length of line at any angle,
+give or take a line - and on the owner's tower the 2.4 x 9.6 mm slot over the cone (the top of the
+round hole) was laid at 10 degrees: every line slanted, the first and last starting and ending in
+mid-air, a build-up the owner traced to that layer. Now the tries are compared by the share of their
+lines held at both ends, and among those within 2 % of the best the one with the piece's shortest
+extent along the lines wins: the slot goes straight across, 0 degrees. Checked in `slicer:test`
+("Bridges": a 2.4 mm slot open at both ends).
+
 ### A bridge reaches onto what holds it (`bridgeAnchorMm`, 2026-11-15)
 
 An open-air bridge is the layer's solid minus the layer below, so its lines used to stop at the gap's

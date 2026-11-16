@@ -441,12 +441,13 @@ function frustum(n, r0, r1, z0, z1) {
     // docs/SLICER.md "A wall over a gap"): the same wall, cut where it leaves the layer below, its straight run one move.
     // ...and those three again on 2026-11-15, when an open-air bridge began to reach 1 mm onto the fill beside its gap (bridgeAnchorMm: docs/SLICER.md
     // "A bridge reaches onto what holds it"); the sphere, torus and tube, whose overhangs are slivers along a sloping wall, are untouched. Again
-    // the same day when an open-air bridge's lines were evened out to fill its gap wall to wall (bridgeFitSpacing), the slivers still on the grid.
+    // the same day when an open-air bridge's lines were evened out to fill its gap wall to wall (bridgeFitSpacing), the slivers still on the grid;
+    // and hinge_knuckle_box @0.4 once more when a free bridge's direction among the angles that hold went to the gap's short way across (freeBridgeAngle).
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
       'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
-      'fixtures/hinge_knuckle_box.stl': ['c89a50295c97bee5', '0156b77d8893373f'],
+      'fixtures/hinge_knuckle_box.stl': ['20e5be5f129c19b2', '0156b77d8893373f'],
       'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'e686396781f0952d'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
       'fixtures/supports/top_clip_x2.stl': ['75ed15ac0996f214', '022b9449f42d4ac7'],
@@ -578,6 +579,15 @@ function frustum(n, r0, r1, z0, z1) {
       const fit = span(on), grid = span(SL.sliceObjects([{ name: 'roof', soup: roof }], opt({ bridgeFitSpacing: false }), wasm).objects[0]);
       check('...and fills the gap wall to wall: its outer lines 0.4 mm or less from the walls on both sides, evenly (the global grid left over 0.5 on one)',
         fit.front <= 0.4 && fit.back <= 0.4 && Math.abs(fit.front - fit.back) < 0.02 && Math.max(grid.front, grid.back) > 0.5, JSON.stringify({ fit, grid }));
+    }
+    {
+      /* a slot 2.4 mm wide and 9.6 long, open at both ends (the owner's arch over the cone): its lines go straight across, the short way */
+      const slot = Array.from(prism(rect0(0, 4, 0, 9.6), 0, 4)).concat(Array.from(prism(rect0(6.4, 10.4, 0, 9.6), 0, 4)), Array.from(prism(rect0(0, 10.4, 0, 9.6), 4, 5)));
+      const so = SL.sliceObjects([{ name: 'slot', soup: slot }], opt({ infillDirectionDeg: 45 }), wasm).objects[0], Ls = at(so, 4.2);   /* Bambu's 45 / 135: across the slot, its end lines leave by the open ends */
+      const segs = [].concat(...Ls.paths.filter(p => p.feature === 'Bridge' && p.free).map(p => p.pts.slice(1).map((q, k) => [p.pts[k], q]))).filter(([a, b]) => Math.hypot(b[0] - a[0], b[1] - a[1]) > 1);
+      check('...a 2.4 mm slot open at both ends is crossed the short way: every line square across it (it went at 10 degrees, the first and last lines ending in mid-air)',
+        segs.length >= 15 && segs.every(([a, b]) => Math.abs(b[1] - a[1]) < 0.05 * Math.hypot(b[0] - a[0], b[1] - a[1])),
+        JSON.stringify({ n: segs.length, off: segs.filter(([a, b]) => !(Math.abs(b[1] - a[1]) < 0.05 * Math.hypot(b[0] - a[0], b[1] - a[1]))) }));
     }
     check('...and the ground it took is not filled twice: no solid infill under the bridge\'s ends', at(on, 4.2).paths.filter(p => p.feature === 'Internal solid infill').every(p => p.pts.every(q => q[0] < 8 - 1.0 - 0.3 || q[0] > 20 + 1.0 + 0.3)));
   }
