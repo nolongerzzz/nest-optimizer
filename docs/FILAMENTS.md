@@ -207,6 +207,14 @@ window's inside clean; a little sag on the front lip. So CR-TPU prints at 215 (f
 asks for no bridge temperature: no stop at the park. Bridge temp stays on the card for a job that
 wants it.
 
+### No fill piece under 1 mm (2026-11-15)
+
+CR-TPU carries one slicer rule of its own (`slicer: { shortFillMm: 1 }`): a fill piece shorter than
+1 mm is not laid, so no prime and retraction is spent on a crumb at a corner (docs/SLICER.md "No
+crumbs"). The owner's lead-in print of the tower level had the back edge clean but a looser lip than
+the clean-lip print before it, whose layers below the roof it matches move for move: what changed
+there was the print, not the file.
+
 ### Retract before wipe (the card's row, `filament_retract_before_wipe`)
 
 Bambu's profiles pull the retraction along the wipe: the nozzle moves back over the wall it has just

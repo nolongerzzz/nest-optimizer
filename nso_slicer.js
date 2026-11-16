@@ -314,6 +314,7 @@
       supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
       seamOffOverhang: true,               // a wall loop cut by an overhang begins at a piece on the layer below, not at one hanging over air; false: where its seam fell
       bridgeFirst: false,                  // a layer's open-air bridges laid before its walls (a soft filament's: the walls first, the nozzle rides a hanging wall down); false: walls first, as Studio
+      shortFillMm: 0,                      // an open fill piece shorter than this (mm) is dropped: each is a travel, prime and retraction of its own (NO CRUMBS); 0 keeps all, as Studio does (a filament's choice: CR-TPU 1)
       islandOrder: true,                   // a layer's separate islands print one after the other, each whole (islandOrder), as Studio's do; false: every island's inner walls, then every outer wall, then the fill
       bridgeFitSpacing: true,              // an open-air bridge's lines evened out to fill its gap wall to wall (Bambu's adjust_solid_spacing); false: the global grid
       bridgeAnchorMm: 1,                   // an open-air bridge reaches this far onto the solid fill beside its gap, so its lines end on the layer below (bridgeReach); 0: they stop at the gap
@@ -2757,6 +2758,16 @@
           L.sparseCs = sparse;                                     /* where a travel need not retract (the planner: Studio's reduce_infill_retraction) */
         }
         if (lightningAt) lightningFill(g, P.layers, lightningAt, PL, P.boxCentre, dirOf(o), o);
+        /* NO CRUMBS (o.shortFillMm; a filament's choice, CR-TPU's 1 mm - Studio keeps every piece): an open fill piece shorter than this is dropped. Each piece is its own travel, prime and retraction,
+           and a 0.03 mm corner of solid infill got the whole 1.5 mm prime, then a retraction, at the tip of a CR-TPU roof - the owner saw whole
+           lines hang off that tip (2026-11-15). A piece that short fills nothing a neighbour does not. Walls and closed loops always stay. */
+        if (P.role === 'part' && o.shortFillMm > 0) P.layers.forEach(function (L) {
+          L.paths = L.paths.filter(function (p) {
+            if (p.closed || !FILL_FEATURES[p.feature]) return true;
+            for (var k = 1, len = 0; k < p.pts.length; k++) { len += Math.hypot(p.pts[k][0] - p.pts[k - 1][0], p.pts[k][1] - p.pts[k - 1][1]); if (len >= o.shortFillMm) return true; }
+            return false;
+          });
+        });
         /* BRIDGES BEFORE THE WALLS (o.bridgeFirst; a filament's choice, docs/FILAMENTS.md): on a layer with an open-air bridge, its lines are laid
            first and the walls after them. Walls first, the bridge's first line runs alongside a wall that hangs over the gap, and the nozzle's
            face rides over it: the owner watched it bend a CR-TPU lip down and the bridge weld it there (2026-11-15). Laid first, the bridge is
@@ -3163,6 +3174,7 @@
    */
   /* the lead-in a loop is begun with before a run that hangs over a gap (seamOffOverhang), mm along the held wall before it */
   var SEAM_LEAD_IN_MM = 3;
+  var FILL_FEATURES = { 'Sparse infill': 1, 'Internal solid infill': 1, 'Solid infill': 1, 'Top surface': 1, 'Bottom surface': 1, 'Bridge': 1 };
   /** A polyline cut `mm` from its end: { head, tail }, sharing the cut point (the whole line is the tail when it is shorter). */
   function cutFromEnd(pts, mm) {
     var acc = 0;

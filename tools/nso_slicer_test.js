@@ -631,6 +631,22 @@ function frustum(n, r0, r1, z0, z1) {
           on.layers.every((L, i) => [0, 1].every(sd => JSON.stringify(L.paths.filter(p => sideOf(p) === sd).map(p => p.feature)) === JSON.stringify(off.layers[i].paths.filter(p => sideOf(p) === sd).map(p => p.feature)))));
   }
 
+  section('No crumbs - a fill piece shorter than shortFillMm is not laid (docs/SLICER.md "No crumbs")');
+  {
+    const opt = (over) => SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.42, topShellLayers: 5, bottomShellLayers: 3 }, over));
+    /* a notched block: the notch's sides leave fill pieces of a fraction of a millimetre */
+    const wedge = Array.from(prism([[0, 0], [12, 0], [12, 12], [6, 4], [0, 12]], 0, 3));
+    const FILL = { 'Sparse infill': 1, 'Internal solid infill': 1, 'Top surface': 1, 'Bottom surface': 1, 'Bridge': 1 };
+    const lenOf = p => p.pts.reduce((a, q, k) => k ? a + Math.hypot(q[0] - p.pts[k - 1][0], q[1] - p.pts[k - 1][1]) : 0, 0);
+    const crumbs = o => o.layers.reduce((n, L) => n + L.paths.filter(p => FILL[p.feature] && !p.closed && lenOf(p) < 1).length, 0);
+    const keep = SL.sliceObjects([{ name: 'w', soup: wedge }], opt({}), wasm).objects[0];
+    const drop = SL.sliceObjects([{ name: 'w', soup: wedge }], opt({ shortFillMm: 1 }), wasm).objects[0];
+    check('by default every piece is laid, as Studio lays them (' + crumbs(keep) + ' under 1 mm here)', SL.defaultsFor(0.4, {}).shortFillMm === 0 && crumbs(keep) > 0);
+    check('...at 1 mm none under 1 mm is left', crumbs(drop) === 0);
+    const walls = o => o.layers.map(L => L.paths.filter(p => !FILL[p.feature]).map(p => p.feature + p.pts.length).join()).join('|');
+    check('...and the walls are as they were', walls(keep) === walls(drop));
+  }
+
   section('Rectilinear - Bambu\'s name for the zigzag lines, against a real Bambu slice (fixtures/slicer-rectilinear-reference.json, docs/SLICER.md "Rectilinear")');
   {
     const fsx = require('fs');

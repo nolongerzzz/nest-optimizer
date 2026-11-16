@@ -432,6 +432,8 @@ async function main() {
       const ov = PRINT.configOverlay(tpl, Object.assign({}, base, { bridgeSpeed: 12, bridgeFlow: 0.9, flowRatio: 0.95, retractLen: 1.2, retractSpeed: 20, zHop: 0 }));
       check('a changed row is its Bambu key: bridge_speed, bridge_flow (the process\'s), filament_flow_ratio, filament_retraction_length, filament_(de)retraction_speed, filament_z_hop (the filament\'s own, the printer\'s keys left alone)',
         JSON.stringify(ov) === JSON.stringify({ filament_flow_ratio: '0.95', filament_retraction_length: '1.2', filament_retraction_speed: '20', filament_deretraction_speed: '20', filament_z_hop: '0', bridge_speed: '12', bridge_flow: '0.9' }), JSON.stringify(ov));
+      check('CR-TPU lays no fill piece under 1 mm (the slicer\'s shortFillMm, docs/SLICER.md "No crumbs"); the profile\'s PLA lays them all, as Studio does',
+        JSON.stringify(PRINT.FILAMENTS['cr-tpu'].slicer) === JSON.stringify({ shortFillMm: 1 }) && !PRINT.FILAMENTS.profile.slicer);
       {
         /* Retract before wipe: Bambu's retract_before_wipe, the filament's own key */
         const ovB = PRINT.configOverlay(tpl, Object.assign({}, base, { retractBefore: 100 }));

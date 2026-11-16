@@ -182,6 +182,9 @@
       /* No Hanging wall speed of its own: 10 mm/s on those walls (the window's lip) was tried on the owner's 215 level of 2026-11-15 and
          made the lip no better and the bridges worse, so they print at the bridge's speed, as Studio's do. */
       tune: function () { return {}; },
+      /* ITS SLICER RULES: a fill piece under 1 mm is not laid (the slicer's NO CRUMBS) - at the tip of the tower level's roof a 0.03 mm corner
+         of solid infill got the whole prime and retraction, and the owner's print of 2026-11-15 hung whole lines off that tip */
+      slicer: { shortFillMm: 1 },
       /* what the printer's own Studio preset changes of those keys */
       printerKeys: function (config) {
         return isA1Mini(config) ? { hot_plate_temp: '30', hot_plate_temp_initial_layer: '30', textured_plate_temp: '30', textured_plate_temp_initial_layer: '30' } : {};
@@ -505,6 +508,7 @@
     /* the planner reads two patterns off a config (grid, else zigzag); the card's own is the slicer's */
     if (settings) o.sparsePattern = settings.pattern;
     if (settings && bridgeFirstOf(assets.config, settings)) o.bridgeFirst = true;   /* the filament's choice, or the row's */
+    if (settings && filamentOf(settings.filament).slicer) Object.assign(o, filamentOf(settings.filament).slicer);   /* the filament's own slicer rules */
     /* the supports' own count of top interface layers (the card's 0 - 3) is the slicer's, as G-scope's Slice does */
     var ni = -1;
     objects.forEach(function (ob) { if (ob.interfaceLayers != null && ob.interfaceLayers > ni) ni = ob.interfaceLayers; });

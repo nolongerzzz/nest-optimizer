@@ -969,6 +969,17 @@ prime at the gap's far corner (the owner's next print: squirts off the lip, a le
 `seamOffOverhang: false` is the seam where it fell.
 Checked in `slicer:test` ("Bridges").
 
+### No crumbs (`shortFillMm`, 2026-11-15)
+
+Every fill piece is its own travel, prime and retraction. At a corner where the fill meets a wall
+at a slant the zigzag leaves pieces of a fraction of a millimetre: the owner's CR-TPU tower level had
+62 primes that laid less than 1.5 mm, among them 0.03 mm and 0.31 mm of solid infill at the tip of the
+roof, each with the whole 1.5 mm prime pushed out and pulled back on the spot - and whole lines hung
+off that tip. `shortFillMm` drops an open fill piece (sparse, solid, top, bottom, bridge) shorter than
+it; walls and closed loops always stay. It is 0 by default - Studio lays every piece, and the
+Studio-matched fixtures keep them - and a filament asks for it (`FILAMENTS[id].slicer`; CR-TPU: 1 mm,
+which left that level 40 primes fewer). Checked in `slicer:test` ("No crumbs").
+
 ### A wall over a gap (`spanPieces`, `path.span`, 2026-11-14)
 
 An Overhang wall is a wall whose whole width hangs. Bambu prints it two ways. Measured on the
