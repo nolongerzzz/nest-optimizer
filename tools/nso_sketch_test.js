@@ -152,6 +152,44 @@ console.log('a top flush with the piece');
   check('farther: untouched', b.lowered === 0 && near(bb.hi[2], 10, 1e-5));
 }
 
+console.log('line assist');
+{
+  const kinds = r => r.runs.map(x => x.kind).join(',');
+  const rough = []; for (let i = 0; i <= 40; i++) rough.push([i * 0.5 + Math.sin(i) * 0.15, Math.cos(i * 1.3) * 0.2]);
+  for (let i = 1; i <= 30; i++) rough.push([20 + Math.sin(i * 2) * 0.2, i * 0.5 + 0.1 * Math.cos(i)]);
+  const L = SK.assist(SK.smooth(rough), { mode: 'auto' });
+  check('a rough L: two straight walls at 0 and 90 degrees, one sharp corner', kinds(L) === 'line,line' && L.pts.length === 3 &&
+        near(L.pts[0][1], L.pts[1][1], 1e-9) && near(L.pts[1][0], L.pts[2][0], 1e-9), JSON.stringify(L.pts));
+  const sq = [[0, 0], [20.3, 0.4], [19.8, 10.2], [0.2, 9.7]], raw = [];
+  for (let k = 0; k < 4; k++) { const A = sq[k], B = sq[(k + 1) % 4]; for (let i = 0; i < 20; i++) raw.push([A[0] + (B[0] - A[0]) * i / 20 + Math.sin(i) * 0.1, A[1] + (B[1] - A[1]) * i / 20]); }
+  const R = SK.assist(SK.smooth(raw, { closed: true }), { mode: 'auto', closed: true });
+  const axis = R.pts.every((p, i) => { const q = R.pts[(i + 1) % R.pts.length]; return near(p[0], q[0], 1e-9) || near(p[1], q[1], 1e-9); });
+  check('a rough closed rectangle: four sides, every one exactly level or upright', R.pts.length === 4 && axis, JSON.stringify(R.pts));
+  const arc = []; for (let i = 0; i <= 60; i++) { const t = i / 60 * Math.PI; arc.push([10 * Math.cos(t) + Math.sin(i * 3) * 0.15, 10 * Math.sin(t) + Math.cos(i * 2) * 0.15]); }
+  const A = SK.assist(SK.smooth(arc), { mode: 'auto' });
+  check('a rough half circle: one arc, radius 10 to 0.15', kinds(A) === 'arc' && near(A.runs[0].r, 10, 0.15) && A.pts.every(p => near(Math.hypot(p[0] - A.runs[0].c[0], p[1] - A.runs[0].c[1]), A.runs[0].r, 1e-6)), A.runs[0] && A.runs[0].r);
+  const u = []; for (let i = 0; i <= 30; i++) u.push([-10 + Math.sin(i) * 0.1, 20 - i * 0.5]);
+  for (let i = 1; i <= 40; i++) { const t = Math.PI + i / 40 * Math.PI; u.push([10 * Math.cos(t), 5 + 10 * Math.sin(t) + Math.cos(i) * 0.1]); }
+  for (let i = 1; i <= 30; i++) u.push([10, 5 + i * 0.5]);
+  const U = SK.assist(SK.smooth(u), { mode: 'auto' });
+  check('a U (no corner): line, arc, line - the straight legs found where the curve begins', kinds(U) === 'line,arc,line' && near(U.runs[1].r, 10, 0.1), kinds(U));
+  const j = []; for (let i = 0; i <= 40; i++) j.push([0, 30 - i * 0.5]);
+  for (let i = 1; i <= 30; i++) { const t = Math.PI + i / 30 * Math.PI / 2; j.push([8 + 8 * Math.cos(t), 10 + 8 * Math.sin(t)]); }
+  const J = SK.assist(SK.smooth(j), { mode: 'auto' });
+  check('a J: a line into an arc of radius 8', kinds(J) === 'line,arc' && near(J.runs[1].r, 8, 0.05), kinds(J));
+  const Us = SK.assist(SK.smooth(u), { mode: 'straight' });
+  check('Straight on the U: only straight lines, its legs still upright', Us.runs.every(x => x.kind === 'line') && Us.runs.length >= 3 && near(Us.pts[0][0], Us.pts[1][0], 1e-9), kinds(Us));
+  const tilt = []; for (let i = 0; i <= 40; i++) tilt.push([i * 0.5 * Math.cos(0.38) + Math.sin(i) * 0.1, i * 0.5 * Math.sin(0.38)]);
+  const T1 = SK.assist(tilt, { mode: 'straight', dirs: [22] }), ang = T1.runs[0].angle;
+  check('a line near a traced wall\'s 22 degrees takes that angle (not 15 or 30)', near(((ang % 180) + 180) % 180, 22, 1e-9), ang);
+  const ci = []; for (let i = 0; i < 80; i++) { const t = i / 80 * 2 * Math.PI; ci.push([6 * Math.cos(t) + Math.sin(i * 2.3) * 0.15, 6 * Math.sin(t)]); }
+  const C = SK.assist(SK.smooth(ci, { closed: true }), { mode: 'auto', closed: true });
+  check('a rough closed circle: a true circle, radius 6 to 0.1, still a fill that builds', kinds(C) === 'arc' && near(C.runs[0].r, 6, 0.1) &&
+        SK.solids({ height: 1, objects: [{ kind: 'fill', pts: C.pts }] }).ok);
+  const built = SK.solids({ height: 1, objects: [{ kind: 'line', pts: U.pts, width: 1.2 }] });
+  check('the assisted U still builds as a line', built.ok, built.reason);
+}
+
 console.log('normalize / describe');
 {
   const n = SK.normalize({ height: 2, objects: [{ kind: 'fill', pts: [[0, 0], [1, 0], [0, 1]] }, { kind: 'line', pts: [[0, 0]] }, { kind: 'line', id: 7, pts: [[0, 0], [3, 0]] }] });

@@ -483,11 +483,243 @@
     return (words.join(' + ') || 'nothing drawn') + (b ? ', ' + f2(b.w) + ' × ' + f2(b.h) + ' mm' : '');
   }
 
+  /* ---------------------------------------------------------------- line assist
+     A rough hand stroke made clean (docs/DRAW.md, "Line assist"):
+       'straight'  every run between two corners becomes a straight line;
+       'auto'      a run that is straight enough is a line, one that follows a circle is a true arc, the rest
+                   is left smooth.
+     Corners are where the stroke turns more than CORNER_TURN over a short window either side (a hand's
+     corner is rounded, so the window is a millimetre or more). A straight run's direction snaps to the
+     nearest 15 degrees, or to a direction given (a traced wall's), within ANGLE_SNAP; two straight runs meet
+     where their lines cross, so the corner is sharp and both stay exactly on their angle.
+     -> { pts, closed, runs: [{ kind: 'line'|'arc'|'free', angle?, r?, c? }], corners } */
+  var CORNER_TURN = 35, ANGLE_SNAP = 7;
+
+  function resample(P, step, closed) {
+    var Q = closed ? P.concat([P[0]]) : P, out = [Q[0].slice()], carry = 0;
+    for (var i = 1; i < Q.length; i++) {
+      var a = Q[i - 1], b = Q[i], L = d2(a, b), t = step - carry;
+      while (t <= L) { out.push([a[0] + (b[0] - a[0]) * t / L, a[1] + (b[1] - a[1]) * t / L]); t += step; }
+      carry = L - (t - step);
+    }
+    if (closed) { if (d2(out[out.length - 1], out[0]) < step * 0.5) out.pop(); }
+    else if (d2(out[out.length - 1], Q[Q.length - 1]) > step * 0.25) out.push(Q[Q.length - 1].slice());
+    else out[out.length - 1] = Q[Q.length - 1].slice();
+    return out;
+  }
+
+  function fitLine(pts) {                 // total least squares: centroid, unit direction, the farthest point off it
+    var n = pts.length, cx = 0, cy = 0;
+    pts.forEach(function (p) { cx += p[0]; cy += p[1]; });
+    cx /= n; cy /= n;
+    var sxx = 0, syy = 0, sxy = 0;
+    pts.forEach(function (p) { var x = p[0] - cx, y = p[1] - cy; sxx += x * x; syy += y * y; sxy += x * y; });
+    var th = 0.5 * Math.atan2(2 * sxy, sxx - syy), d = [Math.cos(th), Math.sin(th)];
+    var a = pts[0], b = pts[n - 1];                                   // point it from the run's start to its end
+    if ((b[0] - a[0]) * d[0] + (b[1] - a[1]) * d[1] < 0) d = [-d[0], -d[1]];
+    var dev = 0;
+    pts.forEach(function (p) { dev = Math.max(dev, Math.abs((p[0] - cx) * d[1] - (p[1] - cy) * d[0])); });
+    return { c: [cx, cy], d: d, dev: dev };
+  }
+
+  function fitCircle(pts) {                // Kasa's algebraic fit, then the RMS distance off it
+    var n = pts.length, mx = 0, my = 0;
+    pts.forEach(function (p) { mx += p[0]; my += p[1]; });
+    mx /= n; my /= n;
+    var suu = 0, svv = 0, suv = 0, suuu = 0, svvv = 0, suvv = 0, svuu = 0;
+    pts.forEach(function (p) {
+      var u = p[0] - mx, v = p[1] - my;
+      suu += u * u; svv += v * v; suv += u * v; suuu += u * u * u; svvv += v * v * v; suvv += u * v * v; svuu += v * u * u;
+    });
+    var det = suu * svv - suv * suv;
+    if (Math.abs(det) < 1e-12) return null;
+    var r1 = 0.5 * (suuu + suvv), r2 = 0.5 * (svvv + svuu);
+    var uc = (r1 * svv - r2 * suv) / det, vc = (r2 * suu - r1 * suv) / det;
+    var c = [uc + mx, vc + my], R = Math.sqrt(uc * uc + vc * vc + (suu + svv) / n), e = 0;
+    pts.forEach(function (p) { var d = d2(p, c) - R; e += d * d; });
+    return { c: c, r: R, rms: Math.sqrt(e / n) };
+  }
+
+  function snapAngle(d, dirs) {
+    var a = Math.atan2(d[1], d[0]) * 180 / Math.PI, best = null, bd = ANGLE_SNAP;
+    var cand = [];
+    for (var k = 0; k < 24; k++) cand.push(k * 15);
+    (dirs || []).forEach(function (x) { cand.push(x, x + 90); });
+    cand.forEach(function (c) {
+      var diff = ((a - c) % 180 + 540) % 180 - 90;                     // to the nearest line through c, either way
+      diff = 90 - Math.abs(diff);
+      if (diff < bd) { bd = diff; best = c; }
+    });
+    if (best == null) return d;
+    var r = best * Math.PI / 180, e = [Math.cos(r), Math.sin(r)];
+    return e[0] * d[0] + e[1] * d[1] < 0 ? [-e[0], -e[1]] : e;
+  }
+
+  function cross2(a, b) { return a[0] * b[1] - a[1] * b[0]; }
+  function meet(p, d, q, e) {               // where line p + t d meets line q + s e, or null when nearly parallel
+    var den = cross2(d, e);
+    if (Math.abs(den) < Math.sin(10 * Math.PI / 180)) return null;
+    var t = cross2([q[0] - p[0], q[1] - p[1]], e) / den;
+    return [p[0] + d[0] * t, p[1] + d[1] * t];
+  }
+  function onLine(p, run) { var c = run.c, d = run.d, t = (p[0] - c[0]) * d[0] + (p[1] - c[1]) * d[1]; return [c[0] + d[0] * t, c[1] + d[1] * t]; }
+  function onCircle(p, run) { var v = [p[0] - run.c[0], p[1] - run.c[1]], L = Math.hypot(v[0], v[1]) || 1; return [run.c[0] + v[0] / L * run.r, run.c[1] + v[1] / L * run.r]; }
+
+  function maxOff(seg, C) { var m = 0; seg.forEach(function (p) { m = Math.max(m, Math.abs(d2(p, C.c) - C.r)); }); return m; }
+  /* one run: a line, an arc, or free */
+  function classify(seg, mode, dirs) {
+    var len = pathLength(seg), L = fitLine(seg), run = { pts: seg, len: len };
+    var C = mode !== 'straight' && seg.length >= 5 ? fitCircle(seg) : null;
+    var arcBetter = !!(C && L.dev > 0.15 && C.rms < 0.25 * L.dev && C.r < 3 * len);      // a short bend: a circle, not a line
+    if (mode === 'straight' || (!arcBetter && L.dev <= Math.max(0.3, 0.06 * len))) {
+      run.kind = 'line'; run.c = L.c; run.d = snapAngle(L.d, dirs);
+      run.angle = Math.atan2(run.d[1], run.d[0]) * 180 / Math.PI;
+      return run;
+    }
+    if (C && C.rms <= Math.max(0.15, 0.02 * C.r) && C.r < 20 * len && maxOff(seg, C) <= Math.max(0.4, 0.05 * C.r)) { run.kind = 'arc'; run.c = C.c; run.r = C.r; return run; }
+    run.kind = 'free';
+    return run;
+  }
+  /* A run that is neither: a line running into an arc (a U, a J) turns without a corner. Its straight ends
+     are peeled off first - the longest start, and end, that stay within a fifth of a millimetre (or 2% of
+     their length) of a line - and what is left between them is fitted again; still free, it is halved, three
+     deep. */
+  function straightEnd(seg, fromEnd) {
+    var m = seg.length, best = 0;
+    for (var i = 4; i < m - 4; i++) {
+      var part = fromEnd ? seg.slice(m - 1 - i) : seg.slice(0, i + 1), L = fitLine(part), len = pathLength(part);
+      if (L.dev <= Math.max(0.15, 0.008 * len)) best = i; else if (best) break;
+    }
+    return best >= 4 && pathLength(fromEnd ? seg.slice(m - 1 - best) : seg.slice(0, best + 1)) >= Math.max(2, 0.12 * pathLength(seg)) ? best : 0;
+  }
+  function split(seg, depth) {
+    var whole = classify(seg, 'auto');
+    if (whole.kind !== 'free' || depth >= 3 || seg.length < 12) return [whole];
+    var m = seg.length, a = straightEnd(seg, false), b = straightEnd(seg, true), out = [];
+    if (a && b && a < m - 1 - b - 4) {
+      return [classify(seg.slice(0, a + 1), 'straight')].concat(split(seg.slice(a, m - b), depth + 1), [classify(seg.slice(m - 1 - b), 'straight')]);
+    }
+    if (a) return [classify(seg.slice(0, a + 1), 'straight')].concat(split(seg.slice(a), depth + 1));
+    if (b) return split(seg.slice(0, m - b), depth + 1).concat([classify(seg.slice(m - 1 - b), 'straight')]);
+    var h = Math.floor(m / 2);
+    out = split(seg.slice(0, h + 1), depth + 1).concat(split(seg.slice(h), depth + 1));
+    return out.some(function (x) { return x.kind === 'free'; }) ? [whole] : out;
+  }
+  /* Straight mode on a run that bends without a corner (a U): cut where it strays farthest from its chord, until
+     every piece is within 5% of its length of a line - then each is one line */
+  function straighten(seg, dirs) {
+    var len = pathLength(seg), L = fitLine(seg);
+    if (seg.length < 6 || L.dev <= Math.max(0.6, 0.08 * len)) return [classify(seg, 'straight', dirs)];
+    var keep = rdp(seg, Math.max(0.6, 0.08 * len)), idx = [], j = 0;
+    keep.forEach(function (p) { while (j < seg.length && seg[j] !== p) j++; idx.push(j); });
+    if (idx.length <= 2) { var h = Math.floor(seg.length / 2); idx = [0, h, seg.length - 1]; }
+    var out = [];
+    for (var k = 0; k + 1 < idx.length; k++) straighten(seg.slice(idx[k], idx[k + 1] + 1), dirs).forEach(function (x) { out.push(x); });
+    return out;
+  }
+
+  function assist(pts, opts) {
+    opts = opts || {};
+    var mode = opts.mode === 'straight' ? 'straight' : 'auto', closed = !!opts.closed;
+    var src = dedupe(pts, 1e-6, closed);
+    if (src.length < 2) return { pts: src, closed: closed, runs: [], corners: 0 };
+    var b = bounds([{ pts: src, kind: 'fill' }]), diag = Math.max(1e-3, Math.hypot(b.w, b.h));
+    var step = Math.max(0.1, Math.min(0.5, diag / 150)), P = resample(src, step, closed), n = P.length;
+    if (n < 3) return { pts: src, closed: closed, runs: [{ kind: 'line' }], corners: 0 };
+    /* corners: the turn over a window either side, its local maxima over CORNER_TURN */
+    var k = Math.max(2, Math.round(Math.max(1.2, diag * 0.05) / step)), turn = new Float64Array(n);
+    /* the turn is read off a copy with a hand's wobble averaged out (over half the window), so a shaky curve has no
+       corners; the runs themselves are cut from the stroke as drawn */
+    var hw = Math.max(1, Math.round(k / 2)), Sm = [];
+    for (var z = 0; z < n; z++) {
+      var sx = 0, sy = 0, cnt = 0;
+      for (var w = -hw; w <= hw; w++) {
+        var q0 = z + w;
+        if (closed) q0 = (q0 % n + n) % n; else if (q0 < 0 || q0 >= n) continue;
+        sx += P[q0][0]; sy += P[q0][1]; cnt++;
+      }
+      Sm.push([sx / cnt, sy / cnt]);
+    }
+    function at(i) { return closed ? Sm[(i % n + n) % n] : Sm[Math.max(0, Math.min(n - 1, i))]; }
+    for (var i = 0; i < n; i++) {
+      if (!closed && (i < k || i > n - 1 - k)) continue;
+      var a = at(i - k), c = at(i), e = at(i + k);
+      var u = [c[0] - a[0], c[1] - a[1]], v = [e[0] - c[0], e[1] - c[1]], lu = Math.hypot(u[0], u[1]), lv = Math.hypot(v[0], v[1]);
+      if (lu < 1e-9 || lv < 1e-9) continue;
+      turn[i] = Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / (lu * lv)))) * 180 / Math.PI;
+    }
+    var corners = [];
+    for (i = 0; i < n; i++) {
+      if (turn[i] < CORNER_TURN) continue;
+      var peak = true;
+      for (var j = 1; j <= k && peak; j++) { if (turn[(i + j) % n] > turn[i] || (turn[(i - j + n) % n] >= turn[i] && j > 0 && (i - j >= 0 || closed))) peak = false; }
+      if (peak) corners.push(i);
+    }
+    /* the runs between them */
+    var breaks = closed ? corners.slice() : [0].concat(corners, [n - 1]);
+    if (closed && breaks.length === 0) {
+      var cf = fitCircle(P);
+      if (mode === 'auto' && cf && cf.rms <= Math.max(0.15, 0.03 * cf.r)) {
+        var m = Math.max(24, Math.min(180, Math.ceil(2 * Math.PI * cf.r / 0.6))), circ = [];
+        for (i = 0; i < m; i++) { var t = 2 * Math.PI * i / m; circ.push([cf.c[0] + cf.r * Math.cos(t), cf.c[1] + cf.r * Math.sin(t)]); }
+        if (signedArea(circ) * signedArea(src) < 0) circ.reverse();
+        return { pts: circ, closed: true, runs: [{ kind: 'arc', r: cf.r, c: cf.c }], corners: 0 };
+      }
+      return { pts: src, closed: true, runs: [{ kind: 'free' }], corners: 0 };
+    }
+    var nr = closed ? breaks.length : breaks.length - 1, runs = [];
+    opts.dirs = opts.dirs || null;
+    for (var r = 0; r < nr; r++) {
+      var s0 = breaks[r], s1 = closed ? breaks[(r + 1) % breaks.length] : breaks[r + 1], seg = [];
+      for (var q = s0; ; q = (q + 1) % n) { seg.push(P[q]); if (q === s1 || seg.length > n) break; }
+      var pieces = mode === 'straight' ? straighten(seg, opts.dirs) : split(seg, 0);
+      pieces.forEach(function (x) { if (x.kind === 'line') x.d = snapAngle(x.d, opts.dirs), x.angle = Math.atan2(x.d[1], x.d[0]) * 180 / Math.PI; runs.push(x); });
+    }
+    nr = runs.length;
+    /* where each run starts: two lines meet where their lines cross; next to an arc, on the arc */
+    function joint(ra, rb, p) {
+      if (ra.kind === 'line' && rb.kind === 'line') { var x = meet(ra.c, ra.d, rb.c, rb.d); if (x) return x; return onLine(onLine(p, ra), rb); }
+      if (ra.kind === 'arc') return onCircle(p, ra);
+      if (rb.kind === 'arc') return onCircle(p, rb);
+      if (ra.kind === 'line') return onLine(p, ra);
+      if (rb.kind === 'line') return onLine(p, rb);
+      return p.slice();
+    }
+    function endOf(run, p) { return run.kind === 'line' ? onLine(p, run) : run.kind === 'arc' ? onCircle(p, run) : p.slice(); }
+    var Q = [];
+    for (r = 0; r < nr; r++) {
+      var prev = closed ? runs[(r - 1 + nr) % nr] : (r > 0 ? runs[r - 1] : null);
+      Q.push(prev ? joint(prev, runs[r], runs[r].pts[0]) : endOf(runs[r], runs[r].pts[0]));
+    }
+    if (!closed) Q.push(endOf(runs[nr - 1], runs[nr - 1].pts[runs[nr - 1].pts.length - 1]));
+    var out = [];
+    for (r = 0; r < nr; r++) {
+      var A = Q[r], B = closed ? Q[(r + 1) % nr] : Q[r + 1], R0 = runs[r];
+      out.push(A);
+      if (R0.kind === 'arc') {
+        var a0 = Math.atan2(A[1] - R0.c[1], A[0] - R0.c[0]), a1 = Math.atan2(B[1] - R0.c[1], B[0] - R0.c[0]);
+        var mid = R0.pts[Math.floor(R0.pts.length / 2)], am = Math.atan2(mid[1] - R0.c[1], mid[0] - R0.c[0]);
+        var ccw = ((a1 - a0) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI), mcw = ((am - a0) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+        var sweep = mcw <= ccw ? ccw : ccw - 2 * Math.PI;              // the way round that passes the run's middle
+        var m2 = Math.max(2, Math.ceil(Math.abs(sweep) * R0.r / 0.4));
+        for (i = 1; i < m2; i++) { var aa = a0 + sweep * i / m2; out.push([R0.c[0] + R0.r * Math.cos(aa), R0.c[1] + R0.r * Math.sin(aa)]); }
+      } else if (R0.kind === 'free') {
+        for (i = 1; i < R0.pts.length - 1; i++) out.push(R0.pts[i]);
+      }
+    }
+    if (!closed) out.push(Q[nr]);
+    out = dedupe(out, 1e-6, closed);
+    if (R0 && runs.some(function (x) { return x.kind === 'free'; })) out = rdp(out.concat(closed ? [out[0]] : []), 0.02).slice(0, closed ? -1 : undefined);
+    return { pts: out, closed: closed, corners: corners.length, runs: runs.map(function (x) {
+      return x.kind === 'line' ? { kind: 'line', angle: x.angle } : x.kind === 'arc' ? { kind: 'arc', r: x.r, c: x.c } : { kind: 'free' };
+    }) };
+  }
+
   var API = {
     smooth: smooth, chaikin: chaikin, rdp: rdp, outlines: outlines, extrude: extrude, solids: solids, overlapGroups: overlapGroups,
     concat: concat, normalize: normalize, bounds: bounds, transform: transform, rectPts: rectPts, ellipsePts: ellipsePts,
     describe: describe, signedArea: signedArea, signedVolume: signedVolume, selfCross: selfCross, pathLength: pathLength,
-    FLUSH_GAP: FLUSH_GAP, MAX_EDGE: MAX_EDGE, MIN_WIDTH: MIN_WIDTH, MIN_HEIGHT: MIN_HEIGHT
+    assist: assist, fitCircle: fitCircle, fitLine: fitLine, FLUSH_GAP: FLUSH_GAP, MAX_EDGE: MAX_EDGE, MIN_WIDTH: MIN_WIDTH, MIN_HEIGHT: MIN_HEIGHT
   };
   root.NSO_Sketch = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

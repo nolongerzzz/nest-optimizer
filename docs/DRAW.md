@@ -16,7 +16,7 @@ DRAW
 | geometry | `nso_sketch.js` (`window.NSO_Sketch`, headless) — outlines, solids |
 | editor | `app-draw-editor.js` (`window.NSO_DrawEditor`) |
 | connect | `app-draw-connect.js` — a SOLO mode on the Assemble editor's stage (`NSO_AsmEditor.mode('drawconnect')`), as Step / Boss is |
-| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`), `npm run draw:trace` (`tools/nso_draw_trace_drive_check.js`: trace, snap, where drawn, stretch, weld; `TRACE_STL=` / `TRACE_BLOCK=` run it on a piece of your own); screenshots to `tools/draw-out/` |
+| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`), `npm run draw:assist` (`tools/nso_draw_assist_drive_check.js`), `npm run draw:trace` (`tools/nso_draw_trace_drive_check.js`: trace, snap, where drawn, stretch, weld; `TRACE_STL=` / `TRACE_BLOCK=` run it on a piece of your own); screenshots to `tools/draw-out/` |
 
 ## Why
 
@@ -71,6 +71,30 @@ changes until **Connect** or **Add to plate**. The drawing is kept in this
 browser (`localStorage` `nso.sketch.v1`, a convenience).
 
 **Add to plate** makes the drawing a piece of its own, flat on the plate.
+
+### Line assist
+
+A hand stroke made clean (`NSO_Sketch.assist`). **Line assist** in the top bar:
+
+| | a pencil stroke on release |
+|---|---|
+| **Off** | smoothed only, as drawn |
+| **Straight** | straight walls: sharp corners, every side squared to the nearest 15° — or to a **traced wall's** own angle — within 7°; two sides meet where their lines cross |
+| **Auto** | straight where it is straight, a **true arc** where it curves round (centre and radius fitted), smooth where it does neither; a closed stroke that is round all the way is a circle |
+
+**Shift** held when you let go makes that one stroke Straight. **Clean up**
+applies the assist (Auto when it is Off) to what is picked — for strokes already
+drawn; Ctrl+Z puts them back. The hint says what it made ("2 straight, 1 arc").
+The choice is kept in this browser.
+
+How: the stroke is resampled evenly; a **corner** is where it turns more than
+35° over a window either side (1.2 mm, or 5% of its size) — read off a copy
+with the wobble averaged out, so a shaky curve has none. Each run between two
+corners is fitted with a line (total least squares) and a circle (Kåsa). A run
+that bends without a corner (a U, a J) has its straight ends peeled off first —
+the longest start and end within 0.15 mm (or 0.8% of their length) of a line —
+and the middle fitted again. In Straight, a run that bends is cut where it
+strays farthest from its chord until every piece is within 8% of a line.
 
 ### Trace a piece
 

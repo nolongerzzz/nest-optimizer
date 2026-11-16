@@ -74,6 +74,63 @@
   var D = null;                 // the open session
   var sketch = load();          // kept across opens
   var defaults = { kind: 'line', width: 1.2 };
+  /* LINE ASSIST (NSO_Sketch.assist): what a pencil stroke is made on release - 'off' (smoothed only), 'straight'
+     (straight walls, corners sharp, angles to 15 degrees or the traced walls'), 'auto' (lines, true arcs, the
+     rest smooth). Kept in this browser. Shift held on release: Straight for that stroke. */
+  var assistMode = (function () { try { var v = window.localStorage && window.localStorage.getItem('nso.sketch.assist'); return v === 'straight' || v === 'auto' ? v : 'off'; } catch (e) { return 'off'; } })();
+  function setAssist(m) {
+    assistMode = m;
+    try { if (window.localStorage) window.localStorage.setItem('nso.sketch.assist', m); } catch (e) { /* fine */ }
+    sync();
+    say(m === 'off' ? 'Line assist off: a pencil stroke is only smoothed.' : m === 'straight'
+      ? 'Line assist Straight: a pencil stroke becomes straight walls - sharp corners, angles to 15° or to the traced walls.'
+      : 'Line assist Auto: straight where it is straight, a true arc where it curves, smooth where it does neither.');
+  }
+  /* the traced walls' own directions, for the assist to square up to */
+  function traceDirs() {
+    var T = sketch.trace, out = [];
+    if (!T) return null;
+    T.loops.forEach(function (L) {
+      for (var i = 0; i < L.length; i++) {
+        var a = L[i], b = L[(i + 1) % L.length];
+        if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 2) continue;
+        var ang = ((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI) % 180 + 180) % 180;
+        if (!out.some(function (x) { return Math.abs(x - ang) < 2 || Math.abs(Math.abs(x - ang) - 180) < 2; })) out.push(ang);
+      }
+    });
+    return out;
+  }
+  function assisted(pts, closed, mode) {
+    var r = SK.assist(pts, { mode: mode, closed: closed, dirs: traceDirs() });
+    var p = r.pts;
+    if (!closed && p.length >= 2) {                                   // its ends back on the traced edge, when they were on it
+      var a = edgeSnap(p[0]), b = edgeSnap(p[p.length - 1]);
+      if (a) p[0] = a;
+      if (b) p[p.length - 1] = b;
+    }
+    return { pts: p, words: assistWords(r) };
+  }
+  function assistWords(r) {
+    var n = { line: 0, arc: 0, free: 0 };
+    r.runs.forEach(function (x) { n[x.kind]++; });
+    var w = [];
+    if (n.line) w.push(n.line + ' straight');
+    if (n.arc) w.push(n.arc + ' arc' + (n.arc > 1 ? 's' : ''));
+    if (n.free) w.push(n.free + ' free');
+    return w.join(', ');
+  }
+  function cleanUp() {
+    var s = selected();
+    if (!s.length) { say('Pick what to clean up first.', true); return; }
+    var mode = assistMode === 'off' ? 'auto' : assistMode, words = [];
+    remember();
+    s.forEach(function (o) {
+      var a = assisted(o.pts, o.kind === 'fill' || o.closed, mode);
+      if (a.pts.length >= (o.kind === 'fill' || o.closed ? 3 : 2)) { o.pts = a.pts; words.push(o.name + ': ' + a.words); }
+    });
+    changed();
+    say('Cleaned up (' + (mode === 'straight' ? 'Straight' : 'Auto') + ') - ' + words.join(' · ') + '. Ctrl+Z puts it back.');
+  }
 
   function $(id) { return document.getElementById(id); }
   function h(tag, attrs, kids) {
@@ -605,9 +662,12 @@
       var e0 = edgeSnap(raw[0]), e1 = edgeSnap(raw[raw.length - 1]);      // a stroke that starts or ends on the traced edge lands on it
       if (e0) raw[0] = e0;
       if (e1) raw[raw.length - 1] = e1;
-      var kind = defaults.kind, pts = SK.smooth(raw, { closed: kind === 'fill' || closed });
-      if (pts.length < (kind === 'fill' || closed ? 3 : 2)) { draw(); return; }
-      addObject({ kind: kind, closed: kind === 'line' && closed, width: defaults.width, pts: pts });
+      var kind = defaults.kind, shut = kind === 'fill' || closed, pts = SK.smooth(raw, { closed: shut });
+      var mode = e.shiftKey ? 'straight' : assistMode, how = '';
+      if (mode !== 'off' && pts.length >= 2) { var as = assisted(pts, shut, mode); pts = as.pts; how = as.words; }
+      if (pts.length < (shut ? 3 : 2)) { draw(); return; }
+      var made = addObject({ kind: kind, closed: kind === 'line' && closed, width: defaults.width, pts: pts });
+      if (how) say(made.name + ': ' + how + ' (Line assist ' + (mode === 'straight' ? 'Straight' : 'Auto') + '). Ctrl+Z undoes it.');
     } else if (dr.kind === 'shape') {
       var d = D.draft; D.draft = null;
       if (!d.pts.length) { draw(); return; }
@@ -769,7 +829,10 @@
     setVal('dr-height', s.length ? (hts.every(function (x) { return x === hts[0]; }) && hts[0] != null ? f2(hts[0]) : '') : '');
     $('dr-height').placeholder = f2(sketch.height);
     ['dr-w', 'dr-h', 'dr-x', 'dr-y', 'dr-rot'].forEach(function (id) { $(id).disabled = !b; });
-    ['dr-mirror-x', 'dr-mirror-y', 'dr-del', 'dr-dup'].forEach(function (id) { $(id).disabled = !s.length; });
+    ['dr-mirror-x', 'dr-mirror-y', 'dr-del', 'dr-dup', 'dr-cleanup'].forEach(function (id) { $(id).disabled = !s.length; });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-dr-assist]'), function (x) {
+      var on = x.getAttribute('data-dr-assist') === assistMode; x.classList.toggle('is-on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
     setVal('dr-w', b ? f2(b.w) : ''); setVal('dr-h', b ? f2(b.h) : '');
     setVal('dr-x', b ? f2(b.cx) : ''); setVal('dr-y', b ? f2(b.cy) : '');
     $('dr-lock').setAttribute('aria-pressed', D.lock ? 'true' : 'false');
@@ -844,6 +907,11 @@
       group('Size (mm)', [field('dr-w', 'W', 'Width of what is picked', ''), h('button', { type: 'button', id: 'dr-lock', cls: 'btn btn-secondary dr-lock', text: '🔒', title: 'Keep the aspect when W, H or a corner handle changes the size', 'aria-pressed': 'true' }), field('dr-h', 'H', 'Height (on the sheet) of what is picked', '')]),
       group('Rotate', [field('dr-rot', '', 'Turn what is picked by this many degrees about its centre (Enter)', '°', { step: '1' })]),
       group('Position (mm)', [field('dr-x', 'X', 'Centre of what is picked, X', ''), field('dr-y', 'Y', 'Centre of what is picked, Y', '')]),
+      group('Line assist', [h('div', { cls: 'dr-seg', role: 'group', 'aria-label': 'Line assist' }, [
+        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-assist': 'off', id: 'dr-assist-off', text: 'Off', title: 'A pencil stroke is only smoothed, as drawn' }),
+        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-assist': 'straight', id: 'dr-assist-straight', text: 'Straight', title: 'A pencil stroke becomes clean straight walls: sharp corners, each side squared to 15° or to a traced wall. (Shift held when you let go does this for one stroke.)' }),
+        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-assist': 'auto', id: 'dr-assist-auto', text: 'Auto', title: 'Straight where the stroke is straight, a true arc where it curves round, smooth where it does neither' })
+      ]), btn('dr-cleanup', 'Clean up', 'Apply the assist (Auto when it is Off) to what is picked - for strokes already drawn. Ctrl+Z puts them back')]),
       group('Object', [btn('dr-dup', 'Duplicate', 'Duplicate what is picked (Ctrl+D)'), btn('dr-del', 'Delete', 'Delete what is picked (Delete)')])
     ]);
     var tools = h('div', { cls: 'dr-tools', role: 'toolbar', 'aria-label': 'Draw tools' }, TOOLS.map(function (t) {
@@ -902,6 +970,8 @@
     $('dr-mirror-y').addEventListener('click', function () { mirror('y'); });
     $('dr-del').addEventListener('click', del);
     $('dr-dup').addEventListener('click', duplicate);
+    $('dr-cleanup').addEventListener('click', cleanUp);
+    Array.prototype.forEach.call(root.querySelectorAll('[data-dr-assist]'), function (b) { b.addEventListener('click', function () { setAssist(b.getAttribute('data-dr-assist')); cv.focus(); }); });
     $('dr-lock').addEventListener('click', function () { D.lock = !D.lock; sync(); });
     $('dr-snap').addEventListener('change', function () { D.snap = $('dr-snap').checked; });
     $('dr-scale-width').addEventListener('change', function () { D.scaleWidth = $('dr-scale-width').checked; });
@@ -1037,6 +1107,7 @@
     /* for the checks: the sheet's pixel for a mm point, and what the editor holds */
     screenOf: function (p) { if (!D) return null; var r = cv.getBoundingClientRect(), s = toScreen(p); return [r.left + s[0], r.top + s[1]]; },
     trace: function (id, at) { if (!D) return { ok: false, reason: 'the editor is shut' }; $('dr-trace-piece').value = String(id); $('dr-trace-at').value = at == null ? '' : String(at); return { ok: doTrace(), trace: sketch.trace }; },
+    assist: function (m) { if (m) setAssist(m); return assistMode; },
     info: function () { return D ? { tool: D.tool, sel: D.sel.slice(), objects: sketch.objects.length, kind: defaults.kind, view: clone(D.view), history: D.history.length } : null; }
   };
 
