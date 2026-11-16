@@ -128,6 +128,30 @@ console.log('6. solids(): centred, scaled, mirrored, lifted');
   check('an object\'s own height over the drawing\'s', near(bp.hi[2], 4, 1e-5));
 }
 
+console.log('stretch, trace');
+{
+  const sk = { height: 2, objects: [{ kind: 'fill', pts: SK.rectPts(0, 0, 10, 4) }] };
+  const r = SK.solids(sk, { stretch: [3, 0.5] }), b = box(r.parts[0].soup);
+  check('stretch 3 x 0.5: 30 x 2, volume x1.5', near(b.hi[0] - b.lo[0], 30) && near(b.hi[1] - b.lo[1], 2) && near(r.parts[0].volume, 30 * 2 * 2, 1e-2) && near(r.box.w, 30) && near(r.box.h, 2));
+  check('the drawing\'s own centre is given back', r.centre[0] === 5 && r.centre[1] === 2);
+  const bad = SK.solids(sk, { stretch: [0, 1] });
+  check('a stretch of 0 is refused', !bad.ok);
+  const line = SK.solids({ height: 1, objects: [{ kind: 'line', pts: [[0, 0], [10, 0]], width: 2 }] }, { stretch: [2, 5] }), bl = box(line.parts[0].soup);
+  check('a line stretched keeps its width (2), its length doubles', near(bl.hi[1] - bl.lo[1], 2, 1e-3) && near(bl.hi[0] - bl.lo[0], 22, 1e-3));
+  const n = SK.normalize({ height: 1, objects: [], trace: { pieceId: 4, name: 'p', at: 3, box: { x0: -1, y0: -2, x1: 1, y1: 2 }, loops: [[[0, 0], [1, 0], [0, 1]], [[0, 0]]] } });
+  check('a trace is kept, its short loops dropped', n.trace && n.trace.pieceId === 4 && n.trace.loops.length === 1 && n.trace.box.y1 === 2);
+  check('no trace: null', SK.normalize({ objects: [] }).trace === null);
+}
+
+console.log('a top flush with the piece');
+{
+  const sk = { height: 10, objects: [{ kind: 'fill', pts: SK.rectPts(0, 0, 4, 4) }] };
+  const a = SK.solids(sk, { avoidTop: 10.01 }), ba = box(a.parts[0].soup);
+  check('within 0.015 of avoidTop: stood FLUSH_GAP over it', a.lowered === 1 && near(ba.hi[2], 10.01 + SK.FLUSH_GAP, 1e-5), ba.hi[2]);
+  const b = SK.solids(sk, { avoidTop: 10.5 }), bb = box(b.parts[0].soup);
+  check('farther: untouched', b.lowered === 0 && near(bb.hi[2], 10, 1e-5));
+}
+
 console.log('normalize / describe');
 {
   const n = SK.normalize({ height: 2, objects: [{ kind: 'fill', pts: [[0, 0], [1, 0], [0, 1]] }, { kind: 'line', pts: [[0, 0]] }, { kind: 'line', id: 7, pts: [[0, 0], [3, 0]] }] });

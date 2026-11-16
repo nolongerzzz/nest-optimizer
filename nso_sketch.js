@@ -38,6 +38,7 @@
   var THIN_MM = 0.35;        // a pointer's jitter: raw points closer than this are one
   var CORNER_DEG = 60;       // a turn sharper than this is kept as a corner when smoothing
   var MIN_WIDTH = 0.2, MIN_HEIGHT = 0.05;
+  var FLUSH_TOL = 0.015, FLUSH_GAP = 0.02;   // mm: a top this near the top of what it is welded to, and how far over it it is stood
 
   function CDT() { return root.NSO_CDT || (typeof require === 'function' ? tryReq('./nso_cdt.js') : null); }
   function tryReq(p) { try { return require(p); } catch (e) { return null; } }
@@ -375,17 +376,24 @@
     var objs = (sketch && sketch.objects || []).filter(function (o) { return o && o.hidden !== true; });
     if (!objs.length) return { ok: false, reason: 'the drawing is empty - draw something in the Draw editor first' };
     var sc = num(opts.scale, 1), mx = opts.mirror === 'x' ? -1 : 1, my = opts.mirror === 'y' ? -1 : 1;
+    /* stretch: the drawing pulled along its own x and y (a line's width is not stretched) */
+    var st = opts.stretch || [1, 1], sx = num(st[0], 1), sy = num(st[1], 1);
     if (!(sc > 0)) return { ok: false, reason: 'the scale must be more than 0' };
-    var b = bounds(objs), embed = Math.max(0, num(opts.embed, 0)), lift = num(opts.lift, 0), parts = [], area = 0;
+    if (!(sx > 0) || !(sy > 0)) return { ok: false, reason: 'a stretch must be more than 0' };
+    var b = bounds(objs), embed = Math.max(0, num(opts.embed, 0)), lift = num(opts.lift, 0), parts = [], area = 0, lowered = 0;
     for (var k = 0; k < objs.length; k++) {
       var src = objs[k];
       var o = { name: src.name, kind: src.kind, closed: src.closed, cap: src.cap, width: num(src.width, 1.2) * sc,
-                pts: (src.pts || []).map(function (p) { return [(p[0] - b.cx) * sc * mx, (p[1] - b.cy) * sc * my]; }) };
+                pts: (src.pts || []).map(function (p) { return [(p[0] - b.cx) * sc * sx * mx, (p[1] - b.cy) * sc * sy * my]; }) };
       if (mx * my < 0) o.pts.reverse();
       var h = num(opts.height, NaN);
       if (!(h > 0)) h = num(src.height, NaN);
       if (!(h > 0)) h = num(sketch.height, 1);
       if (!(h >= MIN_HEIGHT)) return { ok: false, reason: (src.name || 'an object') + ': the height must be at least ' + MIN_HEIGHT + ' mm', at: k };
+      /* a top flush with the top of what it is welded to is a seam the boolean cannot close cleanly (it leaves
+         non-manifold edges; just under it is worse - the cut runs through the piece's own slivers): stood FLUSH_GAP
+         over it instead - far below any layer height */
+      if (opts.avoidTop != null && Math.abs(lift + h - opts.avoidTop) < FLUSH_TOL) { h = opts.avoidTop + FLUSH_GAP - lift; lowered++; }
       var ol = outlines(o);
       if (!ol.ok) return { ok: false, reason: ol.reason, at: k };
       for (var g = 0; g < ol.regions.length; g++) {
@@ -395,7 +403,7 @@
         if (g === 0) area += ol.regions[g].reduce(function (s, L) { return s + signedArea(L); }, 0);
       }
     }
-    return { ok: true, parts: parts, area: area, box: { w: b.w * sc, h: b.h * sc }, count: objs.length };
+    return { ok: true, parts: parts, area: area, box: { w: b.w * sc * sx, h: b.h * sc * sy }, centre: [b.cx, b.cy], count: objs.length, lowered: lowered };
   }
 
   /* parts that share space (their boxes overlap): groups the caller unions before anything else */
@@ -426,7 +434,19 @@
   /* ---------------------------------------------------------------- the sketch */
 
   function normalize(sk) {
-    var s = { height: Math.max(MIN_HEIGHT, num(sk && sk.height, 1)), objects: [], nextId: 1 };
+    var s = { height: Math.max(MIN_HEIGHT, num(sk && sk.height, 1)), objects: [], nextId: 1, trace: null };
+    /* a piece traced under the sheet: the drawing is then in PLATE millimetres (x, y as the plate has them, from
+       above), and `box` is the piece's plan box when it was traced - so Connect can put the drawing where it was
+       drawn, and follow the piece if it has moved since */
+    var t = sk && sk.trace;
+    if (t && Array.isArray(t.loops) && t.box) {
+      s.trace = { pieceId: t.pieceId, name: String(t.name || ''), at: num(t.at, 0), z0: num(t.z0, 0), z1: num(t.z1, 0),
+                  box: { x0: num(t.box.x0, 0), y0: num(t.box.y0, 0), x1: num(t.box.x1, 0), y1: num(t.box.y1, 0) },
+                  loops: t.loops.filter(function (L) { return Array.isArray(L) && L.length >= 3; })
+                    .map(function (L) { return L.map(function (p) { return [num(p[0], 0), num(p[1], 0)]; }); }),
+                  rims: (t.rims || []).filter(function (L) { return Array.isArray(L) && L.length >= 3; })
+                    .map(function (L) { return L.map(function (p) { return [num(p[0], 0), num(p[1], 0)]; }); }) };
+    }
     ((sk && sk.objects) || []).forEach(function (o) {
       if (!o || !Array.isArray(o.pts) || o.pts.length < 2) return;
       s.objects.push({
@@ -467,7 +487,7 @@
     smooth: smooth, chaikin: chaikin, rdp: rdp, outlines: outlines, extrude: extrude, solids: solids, overlapGroups: overlapGroups,
     concat: concat, normalize: normalize, bounds: bounds, transform: transform, rectPts: rectPts, ellipsePts: ellipsePts,
     describe: describe, signedArea: signedArea, signedVolume: signedVolume, selfCross: selfCross, pathLength: pathLength,
-    MAX_EDGE: MAX_EDGE, MIN_WIDTH: MIN_WIDTH, MIN_HEIGHT: MIN_HEIGHT
+    FLUSH_GAP: FLUSH_GAP, MAX_EDGE: MAX_EDGE, MIN_WIDTH: MIN_WIDTH, MIN_HEIGHT: MIN_HEIGHT
   };
   root.NSO_Sketch = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

@@ -176,6 +176,10 @@
       var rb = { x0: -D.ref.w / 2, y0: -D.ref.h / 2, x1: D.ref.w / 2, y1: D.ref.h / 2 };
       b = b ? { x0: Math.min(b.x0, rb.x0), y0: Math.min(b.y0, rb.y0), x1: Math.max(b.x1, rb.x1), y1: Math.max(b.y1, rb.y1) } : rb;
     }
+    if (sketch.trace) {
+      var tb = sketch.trace.box;
+      b = b ? { x0: Math.min(b.x0, tb.x0), y0: Math.min(b.y0, tb.y0), x1: Math.max(b.x1, tb.x1), y1: Math.max(b.y1, tb.y1) } : { x0: tb.x0, y0: tb.y0, x1: tb.x1, y1: tb.y1 };
+    }
     if (!b) b = { x0: -50, y0: -50, x1: 50, y1: 50 };
     var w = Math.max(10, b.x1 - b.x0), hh = Math.max(10, b.y1 - b.y0);
     D.view.cx = (b.x0 + b.x1) / 2; D.view.cy = (b.y0 + b.y1) / 2;
@@ -212,6 +216,22 @@
     });
     var o0 = toScreen([0, 0]);
     ctx.strokeStyle = COL.axis; ctx.beginPath(); ctx.moveTo(o0[0], 0); ctx.lineTo(o0[0], D.h); ctx.moveTo(0, o0[1]); ctx.lineTo(D.w, o0[1]); ctx.stroke();
+    /* a traced piece, under everything: its outline at Trace at (orange), its foot and top (faint) */
+    if (sketch.trace) {
+      var T = sketch.trace;
+      ctx.save();
+      ctx.setLineDash([3, 4]); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(251,146,60,0.35)';
+      T.rims.forEach(function (L) { pathOf(L, true); ctx.stroke(); });
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      T.loops.forEach(function (L) { L.forEach(function (p, i) { var q = toScreen(p); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); });
+      ctx.fillStyle = 'rgba(251,146,60,0.12)'; ctx.fill('evenodd');
+      ctx.lineWidth = 1.5; ctx.strokeStyle = '#fb923c'; ctx.stroke();
+      var tl = toScreen([T.box.x0, T.box.y1]);
+      ctx.fillStyle = '#fb923c'; ctx.font = '11px ' + getComputedStyle(document.body).fontFamily;
+      ctx.fillText(T.name + ' - traced at ' + f2(T.at) + ' mm', tl[0], tl[1] - 6);
+      ctx.restore();
+    }
     /* the face it goes on, when the editor was opened for one */
     if (D.ref) {
       var a = toScreen([-D.ref.w / 2, D.ref.h / 2]), b = toScreen([D.ref.w / 2, -D.ref.h / 2]);
@@ -369,9 +389,99 @@
   /* ---------------------------------------------------------------- the pointer */
 
   function snapMm(p) {
+    var e = edgeSnap(p);
+    if (e) return e;
     if (!D.snap) return p;
     var s = 0.5;
     return [Math.round(p[0] / s) * s, Math.round(p[1] / s) * s];
+  }
+  /* onto the traced outline: a corner within 10 px, else the nearest point of an edge within 8 px */
+  function edgeSnap(p) {
+    if (!D.snapEdge || !sketch.trace) return null;
+    var best = null, bd = 8 / D.view.z, cd = 10 / D.view.z, corner = null;
+    sketch.trace.loops.forEach(function (L) {
+      for (var i = 0; i < L.length; i++) {
+        var a = L[i], b = L[(i + 1) % L.length], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+        var dc = Math.hypot(p[0] - a[0], p[1] - a[1]);
+        if (dc < cd) { cd = dc; corner = a; }
+        var t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+        var q = [a[0] + dx * t, a[1] + dy * t], d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        if (d < bd) { bd = d; best = q; }
+      }
+    });
+    return corner ? corner.slice() : best;
+  }
+
+  /* ---------------------------------------------------------------- trace a piece */
+
+  function pieces() {
+    if (typeof state === 'undefined' || !state.placed) return [];
+    return state.placed.filter(function (pl) {
+      if (!pl || !pl.mesh || pl.sourceId == null) return false;
+      var m = state.models.find(function (x) { return x && x.id === pl.sourceId; });
+      return m && !m.nsoSupport;
+    }).map(function (pl) {
+      var m = state.models.find(function (x) { return x && x.id === pl.sourceId; });
+      return { id: pl.sourceId, placed: pl, name: String(m.name || ('piece ' + pl.sourceId)).replace(/\.(stl|step|stp|3mf|obj)$/i, '') };
+    });
+  }
+  /* The piece in plate millimetres, from above: z up (the plate's own frame, as Connect reads it) */
+  function plateSoup(pl) {
+    pl.mesh.updateMatrixWorld(true);
+    var s = meshToWorldSoup(pl.mesh), up = new Float32Array(s.length);
+    for (var i = 0; i < s.length; i += 3) { up[i] = s[i]; up[i + 1] = -s[i + 2]; up[i + 2] = s[i + 1]; }
+    return up;
+  }
+  /* -> { ok, trace } : the cut through the piece at `at` mm above its foot, its foot and top for reference */
+  function traceOf(id, at) {
+    var pc = pieces().find(function (x) { return x.id === id; });
+    if (!pc) return { ok: false, reason: 'that piece is not on the plate' };
+    if (typeof NSO_Slicer === 'undefined' || !NSO_Slicer.sliceMesh) return { ok: false, reason: 'the slicer (nso_slicer.js) did not load' };
+    var up = plateSoup(pc.placed), z0 = Infinity, z1 = -Infinity, box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    for (var i = 0; i < up.length; i += 3) {
+      if (up[i + 2] < z0) z0 = up[i + 2]; if (up[i + 2] > z1) z1 = up[i + 2];
+      if (up[i] < box.x0) box.x0 = up[i]; if (up[i] > box.x1) box.x1 = up[i];
+      if (up[i + 1] < box.y0) box.y0 = up[i + 1]; if (up[i + 1] > box.y1) box.y1 = up[i + 1];
+    }
+    var h = z1 - z0, a = Math.max(0.01, Math.min(h - 0.01, at == null ? h / 2 : at));
+    function cut(z) {
+      var sec = NSO_Slicer.sliceMesh(up, [{ sliceZ: z }]).sections[0];
+      return (sec && sec.loops || []).filter(function (L) { return L.length >= 3; }).map(function (L) { return L.map(function (p) { return [p[0], p[1]]; }); });
+    }
+    var loops = cut(z0 + a);
+    if (!loops.length) return { ok: false, reason: 'nothing to trace at ' + f2(a) + ' mm - try another height' };
+    var rims = cut(z0 + Math.min(0.3, h / 4)).concat(cut(z1 - Math.min(0.3, h / 4)));
+    return { ok: true, trace: { pieceId: id, name: pc.name, at: a, z0: z0, z1: z1, box: box, loops: loops, rims: rims } };
+  }
+  function doTrace() {
+    var sel = $('dr-trace-piece'), id = sel && sel.value !== '' ? +sel.value : null;
+    if (id == null) { say('Pick a piece to trace.', true); return false; }
+    var raw = $('dr-trace-at').value.trim(), r = traceOf(id, raw === '' ? null : parseFloat(raw));
+    if (!r.ok) { say(r.reason, true); return false; }
+    remember();
+    sketch.trace = r.trace;
+    D.snapEdge = true;
+    changed(); fit();
+    say('Traced ' + r.trace.name + ': draw on its outline - points snap to it. Connect puts the drawing where you drew it, on the plate under the piece.');
+    return true;
+  }
+  function syncTrace() {
+    var sel = $('dr-trace-piece');
+    if (!sel) return;
+    var list = pieces(), want = sel.value;
+    if (want === '' && sketch.trace) want = String(sketch.trace.pieceId);
+    if (want === '' && typeof state !== 'undefined' && state.placed && state.placed[state.selectedIndex]) want = String(state.placed[state.selectedIndex].sourceId);
+    sel.textContent = '';
+    sel.appendChild(h('option', { value: '', text: list.length ? '- a piece on the plate -' : '- no piece on the plate -' }));
+    list.forEach(function (pc) { var o = h('option', { value: String(pc.id), text: pc.name }); sel.appendChild(o); });
+    sel.value = list.some(function (pc) { return String(pc.id) === want; }) ? want : '';
+    $('dr-trace-go').disabled = sel.value === '';
+    $('dr-trace-clear').disabled = !sketch.trace;
+    $('dr-snap-edge').disabled = !sketch.trace;
+    $('dr-snap-edge').checked = !!(D.snapEdge && sketch.trace);
+    var note = $('dr-trace-note'), T = sketch.trace;
+    note.textContent = T ? T.name + ', cut ' + f2(T.at) + ' mm above its foot (' + f2(T.z1 - T.z0) + ' mm tall). The drawing is in plate mm.'
+      : 'Lay a piece\'s outline (from above) under the sheet and draw on its border.';
   }
   function angleSnap(from, p) {
     var dx = p[0] - from[0], dy = p[1] - from[1], L = Math.hypot(dx, dy), a = Math.round(Math.atan2(dy, dx) / (Math.PI / 12)) * (Math.PI / 12);
@@ -492,6 +602,9 @@
       var raw = D.draft.raw, closed = D.draft.closedPreview;
       D.draft = null;
       if (raw.length < 2 || SK.pathLength(raw) < 0.5) { draw(); say('Too short to keep - press and drag to draw.', true); return; }
+      var e0 = edgeSnap(raw[0]), e1 = edgeSnap(raw[raw.length - 1]);      // a stroke that starts or ends on the traced edge lands on it
+      if (e0) raw[0] = e0;
+      if (e1) raw[raw.length - 1] = e1;
       var kind = defaults.kind, pts = SK.smooth(raw, { closed: kind === 'fill' || closed });
       if (pts.length < (kind === 'fill' || closed ? 3 : 2)) { draw(); return; }
       addObject({ kind: kind, closed: kind === 'line' && closed, width: defaults.width, pts: pts });
@@ -663,6 +776,7 @@
     $('dr-lock').classList.toggle('is-on', D.lock);
     setVal('dr-sheet-height', f2(sketch.height));
     $('dr-undo').disabled = !D.history.length; $('dr-redo').disabled = !D.future.length;
+    syncTrace();
     $('dr-snap').checked = !!D.snap;
     $('dr-scale-width').checked = !!D.scaleWidth;
     /* the objects list */
@@ -739,6 +853,15 @@
     var side = h('div', { cls: 'dr-side' }, [
       h('div', { cls: 'dr-side-title', text: 'Objects' }),
       h('div', { cls: 'dr-objects', id: 'dr-objects', role: 'list' }),
+      h('div', { cls: 'dr-side-title', text: 'Trace a piece' }),
+      h('p', { cls: 'dr-empty', id: 'dr-trace-note' }),
+      h('select', { id: 'dr-trace-piece', cls: 'dr-select', 'aria-label': 'Piece to trace', title: 'The piece whose outline goes under the sheet' }),
+      h('div', { cls: 'dr-row' }, [
+        field('dr-trace-at', 'at', 'How far above the piece\'s foot to cut its outline, mm. Blank: half way up', 'mm', { min: '0', step: '0.5' }),
+        btn('dr-trace-go', 'Trace', 'Lay this piece\'s outline, seen from above, under the sheet - in plate millimetres, so Connect puts the drawing exactly where it is drawn'),
+        btn('dr-trace-clear', 'Clear', 'Take the traced outline off the sheet')
+      ]),
+      h('label', { cls: 'dr-check', title: 'Line points, shape corners and the ends of a pencil stroke land on the traced outline when near it' }, [h('input', { type: 'checkbox', id: 'dr-snap-edge' }), h('span', { text: ' Snap to the traced edges' })]),
       h('div', { cls: 'dr-side-title', text: 'Drawing' }),
       field('dr-sheet-height', 'Height', 'How far the whole drawing stands out of the face it is put on, mm (an object with its own height keeps it)', 'mm', { min: String(SK.MIN_HEIGHT) }),
       h('label', { cls: 'dr-check', title: 'Shape tools, the Line tool and moves land on a 0.5 mm grid' }, [h('input', { type: 'checkbox', id: 'dr-snap' }), h('span', { text: ' Snap 0.5 mm' })]),
@@ -820,6 +943,10 @@
     $('dr-x').addEventListener('change', posChange);
     $('dr-y').addEventListener('change', posChange);
     $('dr-rot').addEventListener('change', function () { var v = num('dr-rot'); $('dr-rot').value = ''; if (v) rotateBy(v); });
+    $('dr-trace-go').addEventListener('click', doTrace);
+    $('dr-trace-piece').addEventListener('change', syncTrace);
+    $('dr-trace-clear').addEventListener('click', function () { if (!sketch.trace) return; remember(); sketch.trace = null; changed(); });
+    $('dr-snap-edge').addEventListener('change', function () { D.snapEdge = $('dr-snap-edge').checked; });
     $('dr-clear').addEventListener('click', function () { if (!sketch.objects.length) return; remember(); sketch.objects = []; D.sel = []; changed(true); });
     $('dr-done').addEventListener('click', function () { close(); });
     $('dr-connect').addEventListener('click', function () {
@@ -876,7 +1003,7 @@
     buildDom();
     if (D) close();
     D = { tool: 'pencil', sel: [], view: { cx: 0, cy: 0, z: 4 }, history: [], future: [], drag: null, draft: null,
-          lock: true, snap: false, scaleWidth: false, space: false, busy: false, w: 800, h: 600,
+          lock: true, snap: false, snapEdge: true, scaleWidth: false, space: false, busy: false, w: 800, h: 600,
           ref: opts.ref || null, onConnect: opts.onConnect || null, onChange: opts.onChange || null, onClose: opts.onClose || null };
     root.hidden = false;
     document.body.classList.add('draw-editor-open');
@@ -909,6 +1036,7 @@
     unionParts: unionParts, addToPlate: addToPlate,
     /* for the checks: the sheet's pixel for a mm point, and what the editor holds */
     screenOf: function (p) { if (!D) return null; var r = cv.getBoundingClientRect(), s = toScreen(p); return [r.left + s[0], r.top + s[1]]; },
+    trace: function (id, at) { if (!D) return { ok: false, reason: 'the editor is shut' }; $('dr-trace-piece').value = String(id); $('dr-trace-at').value = at == null ? '' : String(at); return { ok: doTrace(), trace: sketch.trace }; },
     info: function () { return D ? { tool: D.tool, sel: D.sel.slice(), objects: sketch.objects.length, kind: defaults.kind, view: clone(D.view), history: D.history.length } : null; }
   };
 

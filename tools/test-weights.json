@@ -89,6 +89,7 @@
     "scale:feature": {"weight":25000,"note":"drive: the Scale card's Feature size section, real clicks on the plate; ~20 s locally on a 2-core box (2026-11-16), not yet measured on a runner"},
     "sketch:test": {"weight":300,"note":"node: drawing lines, rings and fills as solids; ~0.2 s locally (2026-11-16)"},
     "draw:drive": {"weight":28000,"note":"drive: DRAW card, Draw editor strokes, Draw > Connect weld across two pieces, cut, own piece; ~23 s locally on a 2-core box (2026-11-16), not yet measured on a runner"},
+    "draw:trace": {"weight":20000,"note":"drive: Draw editor trace of a wall, edge snap, Connect where drawn, stretch handle, weld; ~15 s locally on a 2-core box (2026-11-16), not yet measured on a runner"},
     "boss:drive": {"weight":30000,"note":"drive: ADD > Step / Boss, its editor, real clicks and drags, two kernel unions; ~25 s locally on a 2-core box (2026-11-16), not yet measured on a runner"},
     "assemble:canonical": {"weight":2050,"note":""},
     "beds:test": {"weight":600,"note":"Node only, lifts the plate code and app-beds.js into a vm; measured under a second locally, three.js start-up dominates"},

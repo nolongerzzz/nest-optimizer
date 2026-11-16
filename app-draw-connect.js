@@ -47,7 +47,7 @@
              ['place', 'Own piece', 'Make the drawing a piece of its own, where the ghost is']];
   var COL = { weld: 0x4ade80, cut: 0xf87171, place: 0xfbbf24, host: 0xfb923c, touched: 0xfdba74, other: 0x38bdf8 };
   var L = null, K;
-  var prefs = { op: 'weld', scale: 100, lift: 0, height: '', mirror: false };
+  var prefs = { op: 'weld', scale: 100, sx: 100, sy: 100, lift: 0, height: '', mirror: false };
 
   function R() { return K.stage(); }
   function E() { return K.session(); }
@@ -82,8 +82,17 @@
           field('v', '↓ ↑', 'Offset of the drawing\'s centre from the face\'s centre, up the face, mm'),
           field('deg', 'Turn', 'Turn on the face, degrees ([ and ] turn 15, Shift 1)', { step: '1' }),
           field('scale', 'Scale %', 'The drawing\'s size, per cent', { step: '1', min: '1' }),
+          field('sx', 'Stretch ↔ %', 'Pull the drawing out along its own width, per cent (a line keeps its width). Or drag a side handle of the ghost', { step: '1', min: '1' }),
+          field('sy', 'Stretch ↕ %', 'Pull the drawing out along its own height on the sheet, per cent. Or drag the top or bottom handle of the ghost', { step: '1', min: '1' }),
           field('height', 'Height', 'How far it stands out of the face (or how deep it cuts), mm. Blank: the drawing\'s own heights', { min: String(SK.MIN_HEIGHT) }),
           field('lift', 'Lift', 'Raise the drawing off the face, mm (negative sinks it in). A Weld still bites the face by ' + EMBED + ' mm under its foot', { step: '0.1' })
+        ]),
+        h('div', { cls: 'asm-ed-row' }, [
+          h('button', { type: 'button', cls: 'btn btn-secondary', id: 'dc-where', text: 'Where drawn',
+            title: 'Back on the plate under the traced piece, exactly where it was drawn on the sheet (the drawing was traced from a piece)' }),
+          h('button', { type: 'button', cls: 'btn btn-secondary', id: 'dc-fullh', text: 'Piece height',
+            title: 'Height = the piece\'s own height: a block that stands from the plate to the piece\'s top' }),
+          h('button', { type: 'button', cls: 'btn btn-secondary', id: 'dc-unstretch', text: '1:1', title: 'Scale and both stretches back to 100%' })
         ]),
         h('div', { cls: 'asm-ed-row' }, [
           h('button', { type: 'button', cls: 'btn btn-secondary', id: 'dc-turn90', text: '+90°', title: 'A quarter turn on the face' }),
@@ -116,6 +125,16 @@
     el('v').addEventListener('change', function () { if (live(true)) { L.cv = L.fr.mv + numVal('v', 0); changed(); } });
     el('deg').addEventListener('change', function () { if (live(true)) { L.deg = numVal('deg', 0); changed(); } });
     el('scale').addEventListener('change', function () { var v = numVal('scale', 100); if (v > 0) prefs.scale = v; changed(); });
+    el('sx').addEventListener('change', function () { var v = numVal('sx', 100); if (v > 0) prefs.sx = v; changed(); });
+    el('sy').addEventListener('change', function () { var v = numVal('sy', 100); if (v > 0) prefs.sy = v; changed(); });
+    el('where').addEventListener('click', function () { if (L && E() && !E().busy) whereDrawn(true); });
+    el('fullh').addEventListener('click', function () {
+      if (!live(true)) return;
+      var b = L.host.piece.box;
+      prefs.height = Math.round((b.max.y - b.min.y) * 100) / 100;
+      changed();
+    });
+    el('unstretch').addEventListener('click', function () { prefs.scale = 100; prefs.sx = 100; prefs.sy = 100; changed(); });
     el('height').addEventListener('change', function () { var raw = el('height').value.trim(); prefs.height = raw === '' ? '' : Math.max(SK.MIN_HEIGHT, parseFloat(raw) || SK.MIN_HEIGHT); changed(); });
     el('lift').addEventListener('change', function () { prefs.lift = numVal('lift', 0); changed(); });
     el('turn90').addEventListener('click', function () { if (live(true)) { L.deg = ((L.deg + 90) % 360 + 360) % 360; changed(); } });
@@ -139,14 +158,28 @@
   function editDrawing() {
     if (typeof NSO_DrawEditor === 'undefined' || (E() && E().busy)) return;
     var ref = null;
-    if (L && L.host) ref = { w: L.fr.u1 - L.fr.u0, h: L.fr.v1 - L.fr.v0, label: K.nameOf(L.host.piece) + ' · ' + K.faceWord(L.host) + ' (' + f2(L.fr.u1 - L.fr.u0) + ' × ' + f2(L.fr.v1 - L.fr.v0) + ' mm)' };
-    var back = function () { changed(); var b = el('edit'); if (b) b.focus(); };
+    if (L && L.host && !L.host.plate) ref = { w: L.fr.u1 - L.fr.u0, h: L.fr.v1 - L.fr.v0, label: K.nameOf(L.host.piece) + ' · ' + K.faceWord(L.host) + ' (' + f2(L.fr.u1 - L.fr.u0) + ' × ' + f2(L.fr.v1 - L.fr.v0) + ' mm)' };
+    var back = function () {
+      /* traced on the sheet and nowhere yet, or still on the plate: put it where it was drawn */
+      if (L && (L.step === 'host' || (L.host && L.host.plate))) whereDrawn(false);
+      changed(); var b = el('edit'); if (b) b.focus();
+    };
     NSO_DrawEditor.open({ ref: ref, onClose: back, onConnect: function () { /* the stage is already open: close() returns here */ } });
   }
 
   /* ---------------------------------------------------------------- the face */
 
   /* Step / Boss's rule: on a wall, v points up the wall; u x v = n kept. */
+  /* the host piece's far side along the face's normal, from the face's plane: where a drawing's top would be flush with it */
+  function hostTop() {
+    if (!L || !L.host) return null;
+    var n = L.host.n, b = L.host.piece.box, best = -Infinity;
+    [b.min.x, b.max.x].forEach(function (x) { [b.min.y, b.max.y].forEach(function (y) { [b.min.z, b.max.z].forEach(function (z) {
+      best = Math.max(best, n.x * x + n.y * y + n.z * z);
+    }); }); });
+    return best - L.host.d;
+  }
+
   function upright(face) {
     var fr = face.frame, out;
     if (Math.abs(face.n.y) > 0.9 || fr.v.y >= 0) out = { u: fr.u, v: fr.v, u0: fr.u0, u1: fr.u1, v0: fr.v0, v1: fr.v1 };
@@ -159,9 +192,12 @@
 
   function plan() {
     if (!L || !L.host) return { ok: false, reason: 'no face picked' };
-    var sk = sketch(), cut = prefs.op === 'cut', own = prefs.op === 'place';
-    var r = SK.solids(sk, { embed: own ? 0 : EMBED, lift: cut ? 0 : prefs.lift, scale: prefs.scale / 100, mirror: prefs.mirror ? 'x' : null,
-                            height: prefs.height === '' ? null : prefs.height });
+    var sk = sketch(), onPlate = !!L.host.plate, cut = prefs.op === 'cut' && !onPlate, own = prefs.op === 'place';
+    /* on the plate the solid stands FROM the plate (nothing under it); on a face it bites EMBED into it.
+       A Cut from the plate is the solid as it stands, taken out of whatever it overlaps. */
+    var r = SK.solids(sk, { embed: own || onPlate ? 0 : EMBED, lift: cut ? 0 : prefs.lift, scale: prefs.scale / 100, mirror: prefs.mirror ? 'x' : null,
+                            stretch: [prefs.sx / 100, prefs.sy / 100], height: prefs.height === '' ? null : prefs.height,
+                            avoidTop: own || cut ? null : hostTop() });
     if (!r.ok) return { ok: false, reason: r.reason };
     var face = L.host, fr = L.fr, a = L.deg * Math.PI / 180, co = Math.cos(a), si = Math.sin(a);
     var o = fr.u.clone().multiplyScalar(L.cu).addScaledVector(fr.v, L.cv).addScaledVector(face.n, face.d);
@@ -186,6 +222,8 @@
     var su = r.box.w * Math.abs(co) + r.box.h * Math.abs(si), sv = r.box.w * Math.abs(si) + r.box.h * Math.abs(co);
     if (L.cu - su / 2 < fr.u0 - 1e-6 || L.cu + su / 2 > fr.u1 + 1e-6 || L.cv - sv / 2 < fr.v0 - 1e-6 || L.cv + sv / 2 > fr.v1 + 1e-6) notes.push('runs past the face\'s edge');
     if (!cut && !own && prefs.lift > 0) notes.push('lifted ' + f2(prefs.lift) + ' mm: only what still reaches a piece welds');
+    if (onPlate) notes.length = 0;
+    if (r.lowered) notes.push('its top stood ' + SK.FLUSH_GAP + ' mm over the piece\'s - a flush top is a seam the weld cannot close cleanly');
     return { ok: true, parts: parts, box: box, touched: touched, solids: r, notes: notes, sketch: sk, span: { u: su, v: sv } };
   }
 
@@ -194,12 +232,13 @@
   function redraw() {
     if (!L) return;
     K.disposeObj(L.ghost); L.ghost = null;
+    if (L.step !== 'set') { K.disposeObj(L.handles); L.handles = null; }
     L.plan = null;
     if (L.step !== 'set') { tint(); return; }
     var P = plan();
     L.plan = P;
     tint();
-    if (!P.ok) return;
+    if (!P.ok) { drawHandles(null); return; }
     var g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(SK.concat(P.parts.map(function (p) { return p.soup; })), 3));
     g.computeVertexNormals();
@@ -211,6 +250,95 @@
     grp.renderOrder = 5;
     R().group.add(grp);
     L.ghost = grp;
+    drawHandles(P);
+  }
+
+  /* ---------------------------------------------------------------- stretch handles
+     A white ball at the middle of each side of the drawing's own box (as it is turned): drag one and that side
+     follows the pointer while the opposite side stays put - the drawing is stretched along that axis. Shift keeps
+     its aspect (both axes by the same factor). */
+  var HANDLES = [['x+', 1, 0], ['x-', -1, 0], ['y+', 0, 1], ['y-', 0, -1]];
+  function axes() {
+    var a = L.deg * Math.PI / 180, co = Math.cos(a), si = Math.sin(a);
+    return { x: [co, si], y: [-si, co] };
+  }
+  function handleUV(k, P) {
+    var A = axes(), hw = P.solids.box.w / 2, hh = P.solids.box.h / 2;
+    if (k[0] === 'x') { var sx = k[1] === '+' ? 1 : -1; return [L.cu + A.x[0] * hw * sx, L.cv + A.x[1] * hw * sx]; }
+    var sy = k[1] === '+' ? 1 : -1; return [L.cu + A.y[0] * hh * sy, L.cv + A.y[1] * hh * sy];
+  }
+  function uvWorld(uv, z) {
+    return L.fr.u.clone().multiplyScalar(uv[0]).addScaledVector(L.fr.v, uv[1]).addScaledVector(L.host.n, L.host.d + z);
+  }
+  function drawHandles(P) {
+    K.disposeObj(L.handles); L.handles = null;
+    if (!P || !P.ok) return;
+    /* half way up the ghost (down, for a cut into the face), so they stand clear of the face it is on */
+    var n = L.host.n, top = -Infinity, bot = Infinity;
+    [P.box.min.x, P.box.max.x].forEach(function (x) { [P.box.min.y, P.box.max.y].forEach(function (y) { [P.box.min.z, P.box.max.z].forEach(function (z) {
+      var w = n.x * x + n.y * y + n.z * z - L.host.d; top = Math.max(top, w); bot = Math.min(bot, w);
+    }); }); });
+    var grp = new THREE.Group(), size = Math.max(0.3, Math.min(2.2, Math.max(P.span.u, P.span.v) / 40, Math.min(P.span.u, P.span.v) / 5)), up = (top + Math.max(0, bot)) / 2;
+    if (prefs.op === 'cut' && !L.host.plate) up = bot / 2;
+    L.handleZ = up;
+    HANDLES.forEach(function (hd) {
+      var m = new THREE.Mesh(new THREE.SphereGeometry(size, 16, 12), new THREE.MeshBasicMaterial({ color: 0xf8fafc, depthTest: false, transparent: true, opacity: 0.95 }));
+      m.position.copy(uvWorld(handleUV(hd[0], P), up));
+      m.userData.dcHandle = hd[0];
+      m.renderOrder = 8;
+      grp.add(m);
+    });
+    grp.position.copy(L.host.piece.offset);
+    R().group.add(grp);
+    L.handles = grp;
+  }
+  function dragHandle(k) {
+    var P = L.plan, A = axes(), ax = k[0] === 'x' ? A.x : A.y, sgn = k[1] === '+' ? 1 : -1;
+    var half0 = (k[0] === 'x' ? P.solids.box.w : P.solids.box.h) / 2, s0 = { sx: prefs.sx, sy: prefs.sy };
+    var opp = [L.cu - ax[0] * half0 * sgn, L.cv - ax[1] * half0 * sgn], z = L.handleZ || 0;
+    R().dom.style.cursor = 'grabbing';
+    function move(ev) {
+      var p = onPlane(ev, z); if (!p) return;
+      var e = Math.max(0.5, Math.round(sgn * ((p.u - opp[0]) * ax[0] + (p.v - opp[1]) * ax[1]) * 10) / 10), f = e / (2 * half0);
+      if (ev.shiftKey) { prefs.sx = Math.round(s0.sx * f * 100) / 100; prefs.sy = Math.round(s0.sy * f * 100) / 100; }
+      else if (k[0] === 'x') prefs.sx = Math.round(s0.sx * f * 100) / 100;
+      else prefs.sy = Math.round(s0.sy * f * 100) / 100;
+      L.cu = opp[0] + ax[0] * sgn * e / 2; L.cv = opp[1] + ax[1] * sgn * e / 2;
+      redraw(); sync();
+    }
+    function up() {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      R().dom.style.cursor = '';
+    }
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    return true;
+  }
+
+  /* ---------------------------------------------------------------- where it was drawn
+     A drawing traced from a piece is in plate millimetres: it goes on the plate under that piece, where it was
+     drawn - moved by as much as the piece has moved since it was traced. The "face" is the plate's plane at the
+     piece's foot: u = plate x, v = plate y (world -z), n = up. */
+  function whereDrawn(say) {
+    var sk = sketch(), T = sk.trace;
+    if (!T || !sk.objects.length) { if (say) K.say('The drawing was not traced from a piece - open Edit drawing, Trace a piece, and draw on it', true); return false; }
+    var piece = E().pieces.find(function (p) { return p.id === T.pieceId; });
+    if (!piece) { if (say) K.say(T.name + ', the traced piece, is not on the plate any more - click a face instead', true); return false; }
+    var b = piece.box, V = K.V;
+    var face = { plate: true, piece: piece, n: V(0, 1, 0), d: b.min.y, tris: [],
+                 frame: { u: V(1, 0, 0), v: V(0, 0, -1), u0: b.min.x, u1: b.max.x, v0: -b.max.z, v1: -b.min.z } };
+    var dx = b.min.x - T.box.x0, dy = -b.max.z - T.box.y0;               // how far the piece has moved since the trace
+    var c = SK.bounds(sk.objects);
+    L.host = face; L.fr = upright(face); L.step = 'set';
+    L.cu = c.cx + dx; L.cv = c.cy + dy; L.deg = 0;
+    prefs.mirror = false;
+    K.disposeObj(L.hostMark); L.hostMark = null;
+    K.disposeObj(L.hoverMark); L.hoverMark = null; L.hoverFace = null;
+    redraw();
+    K.frameBox(viewBox(), true);
+    K.syncPanel();
+    return true;
   }
 
   /* the host orange, the pieces it may reach light orange, the rest dimmed - all of them in sight */
@@ -237,10 +365,11 @@
     R().raycaster.setFromCamera(p, R().camera);
     return R().raycaster.ray;
   }
-  function onPlane(e) {
+  /* where the pointer's ray meets the face's plane - or a plane `lift` over it, parallel (a handle's own height) */
+  function onPlane(e, lift) {
     var ray = rayAt(e), face = L.host, org = ray.origin.clone().sub(face.piece.offset), den = ray.direction.dot(face.n);
     if (Math.abs(den) < 1e-6) return null;
-    var t = (face.d - org.dot(face.n)) / den;
+    var t = (face.d + (lift || 0) - org.dot(face.n)) / den;
     if (t <= 0) return null;
     var hit = org.addScaledVector(ray.direction, t);
     return { u: hit.dot(L.fr.u), v: hit.dot(L.fr.v) };
@@ -261,6 +390,10 @@
   function pointerDown(e) {
     if (!live(true) || !L.ghost) return false;
     rayAt(e);
+    if (L.handles) {
+      var hh = R().raycaster.intersectObjects(L.handles.children, false);
+      if (hh.length) return dragHandle(hh[0].object.userData.dcHandle);
+    }
     var meshes = [];
     L.ghost.traverse(function (c) { if (c.isMesh) meshes.push(c); });
     if (!R().raycaster.intersectObjects(meshes, false).length) return false;
@@ -287,6 +420,7 @@
   /* ---------------------------------------------------------------- steps */
 
   function toHost() {
+    K.disposeObj(L.handles); L.handles = null;
     L.step = 'host'; L.host = null; L.plan = null;
     K.disposeObj(L.hostMark); L.hostMark = null;
     K.disposeObj(L.hoverMark); L.hoverMark = null; L.hoverFace = null;
@@ -332,7 +466,7 @@
   function sync() {
     if (!L) return;
     var S = E(), set = L.step === 'set', busy = !!S.busy, sk = sketch(), active = document.activeElement;
-    el('chip-text').textContent = L.host ? (K.nameOf(L.host.piece) + ' · ' + K.faceWord(L.host)) : 'Click the face it goes on';
+    el('chip-text').textContent = L.host ? (L.host.plate ? 'The plate under ' + K.nameOf(L.host.piece) + ', where drawn' : K.nameOf(L.host.piece) + ' · ' + K.faceWord(L.host)) : 'Click the face it goes on';
     el('chip').classList.toggle('is-set', !!L.host);
     el('chip').classList.toggle('is-now', !L.host);
     el('drawing').textContent = 'Drawing: ' + SK.describe(sk) + (sk.objects.length ? '' : ' - open Edit drawing and draw first');
@@ -350,7 +484,11 @@
     function setVal(id, v) { if (el(id) !== active) el(id).value = v; }
     setVal('u', set ? f2(L.cu - L.fr.mu) : ''); setVal('v', set ? f2(L.cv - L.fr.mv) : '');
     setVal('deg', set ? String(Math.round(L.deg * 100) / 100) : '0');
-    setVal('scale', String(prefs.scale)); setVal('height', prefs.height === '' ? '' : String(prefs.height)); setVal('lift', String(prefs.lift));
+    setVal('scale', String(prefs.scale)); setVal('sx', String(prefs.sx)); setVal('sy', String(prefs.sy));
+    el('where').disabled = busy || !(sk.trace && sk.objects.length);
+    el('where').hidden = !sk.trace;
+    el('unstretch').disabled = busy || (prefs.scale === 100 && prefs.sx === 100 && prefs.sy === 100);
+    Array.prototype.forEach.call(box.querySelectorAll('#dc-sx, #dc-sy'), function (x) { x.disabled = busy; }); setVal('height', prefs.height === '' ? '' : String(prefs.height)); setVal('lift', String(prefs.lift));
     el('height').placeholder = 'own';
     el('lift').disabled = !set || busy || prefs.op === 'cut';
     var P = L.plan, out = el('readout');
@@ -509,12 +647,13 @@
     asPlaced: true,
     panel: panel,
     enter: function () {
-      L = { step: 'host', host: null, fr: null, cu: 0, cv: 0, deg: 0, plan: null, last: null, ghost: null, hostMark: null, hoverMark: null, hoverFace: null };
+      L = { step: 'host', host: null, fr: null, cu: 0, cv: 0, deg: 0, plan: null, last: null, ghost: null, handles: null, hostMark: null, hoverMark: null, hoverFace: null };
       toHost();
+      whereDrawn(false);                     // traced from a piece: it opens already where it was drawn
     },
     leave: function () {
       if (!L) return;
-      ['ghost', 'hostMark', 'hoverMark'].forEach(function (k) { K.disposeObj(L[k]); });
+      ['ghost', 'hostMark', 'hoverMark', 'handles'].forEach(function (k) { K.disposeObj(L[k]); });
       E().pieces.forEach(function (p) { var m = p.mesh.material; m.transparent = false; m.opacity = 1; m.depthWrite = true; p.mesh.visible = true; });
       L = null;
     },
@@ -522,7 +661,8 @@
     banner: function () {
       if (!sketch().objects.length) return ['', 'The drawing is empty', 'press Edit drawing and draw something first'];
       if (!L || L.step === 'host') return ['1', 'Click the face it goes on', 'any face - a top, a wall, an underside'];
-      return ['2', 'Drag the ghost where it goes', 'past the face\'s edge onto the next piece to connect them · Shift snaps · [ ] turn'];
+      if (L.host && L.host.plate) return ['2', 'Where you drew it - stretch it to fit', 'drag a white handle to pull a side out · drag the ghost to move it · or click a face to put it there'];
+      return ['2', 'Drag the ghost where it goes', 'the white handles stretch it · past the face\'s edge onto the next piece to connect them · Shift snaps · [ ] turn'];
     },
     hover: function (hit) {
       if (!L) return;
@@ -569,8 +709,9 @@
       if (!L) return null;
       var P = L.plan;
       return {
-        step: L.step, op: prefs.op, scale: prefs.scale, lift: prefs.lift, height: prefs.height, mirror: prefs.mirror,
-        host: L.host ? { id: L.host.piece.id, normal: L.host.n.toArray(), d: L.host.d, u: L.fr.u.toArray(), v: L.fr.v.toArray(),
+        step: L.step, op: prefs.op, scale: prefs.scale, sx: prefs.sx, sy: prefs.sy, lift: prefs.lift, height: prefs.height, mirror: prefs.mirror,
+        handles: L.handles ? L.handles.children.map(function (m) { var w = m.position.clone(); return { k: m.userData.dcHandle, at: w.toArray() }; }) : [],
+        host: L.host ? { id: L.host.piece.id, plate: !!L.host.plate, normal: L.host.n.toArray(), d: L.host.d, u: L.fr.u.toArray(), v: L.fr.v.toArray(),
           rect: { u0: L.fr.u0, u1: L.fr.u1, v0: L.fr.v0, v1: L.fr.v1 } } : null,
         cu: L.cu, cv: L.cv, deg: L.deg,
         plan: (P && P.ok) ? { box: { min: P.box.min.toArray(), max: P.box.max.toArray() }, touched: P.touched.map(function (p) { return p.id; }), notes: P.notes, parts: P.parts.length, ghost: !!L.ghost }

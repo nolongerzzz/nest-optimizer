@@ -16,7 +16,7 @@ DRAW
 | geometry | `nso_sketch.js` (`window.NSO_Sketch`, headless) — outlines, solids |
 | editor | `app-draw-editor.js` (`window.NSO_DrawEditor`) |
 | connect | `app-draw-connect.js` — a SOLO mode on the Assemble editor's stage (`NSO_AsmEditor.mode('drawconnect')`), as Step / Boss is |
-| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`, screenshots to `tools/draw-out/`) |
+| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`), `npm run draw:trace` (`tools/nso_draw_trace_drive_check.js`: trace, snap, where drawn, stretch, weld; `TRACE_STL=` / `TRACE_BLOCK=` run it on a piece of your own); screenshots to `tools/draw-out/` |
 
 ## Why
 
@@ -72,12 +72,32 @@ browser (`localStorage` `nso.sketch.v1`, a convenience).
 
 **Add to plate** makes the drawing a piece of its own, flat on the plate.
 
+### Trace a piece
+
+The sheet is seen from above. **Trace a piece** (right panel: pick it, *at* how
+far above its foot to cut, **Trace**) lays that piece's outline under the sheet
+— orange, with its foot and top dashed — in **plate millimetres**: x as the
+plate's, y as the plate's from above. Points of the Line tool, corners of a
+rectangle or ellipse and the two ends of a pencil stroke **snap to the traced
+outline** (a corner within 10 px, an edge within 8 px; *Snap to the traced
+edges* turns it off). The drawing is then in the plate's own coordinates, and
+Connect puts it **where it was drawn** (below).
+
+The owner's case (2026-11-16): a thin bent sheet (Thicken's output) whose wall
+is to be **furred out** — a block drawn on the sheet against the wall, seen from
+above, then stood up and welded on.
+
 ## Connect
 
 The Assemble editor's stage, with the plate's pieces **as they stand** (the
 mode asks `asPlaced`: one offset for every piece, so a drawing can run from one
 piece onto the next).
 
+0. **A traced drawing opens already placed**: on the plate under the traced
+   piece, exactly where it was drawn (moved with the piece if the piece has
+   moved since). Its foot is the plate the piece stands on; **Piece height**
+   stands it to the piece's top. **Where drawn** puts it back there after a
+   click on a face moved it.
 1. **Click the face it goes on** — any face: a top, a wall, an underside.
 2. The drawing stands on it as a **ghost** (green Weld, red Cut, amber Own
    piece), each object its own height out of the face; on a wall, up the sheet
@@ -85,6 +105,10 @@ piece onto the next).
    - **drag the ghost** anywhere on the face's plane — past the face's edge
      too, onto the next piece. A 0.1 mm step; Shift snaps to the face's centre
      lines and flush with its edges;
+   - **stretch**: a white handle at the middle of each side of the drawing's
+     own box — drag one and that side follows the pointer while the opposite
+     side stays put (Shift keeps the aspect); or type **Stretch ↔ / ↕ %**. A
+     line keeps its width when stretched. **1:1** puts scale and stretch back;
    - **arrows** nudge (Shift ×10), **[ ]** turn 15° (Shift 1°);
    - type **Offset** (from the face's centre), **Turn**, **Scale %**,
      **Height** (overrides every object's), **Lift** (off the face; negative
@@ -109,6 +133,16 @@ piece onto the next).
      ghost is.
 
 Escape steps back to the face pick; again returns to the plate. Return leaves.
+
+### A top flush with the piece's
+
+A block whose top is exactly flush with the top of the piece it is welded to is
+stood **0.02 mm over it**, and the readout says so. Measured on the owner's
+Thicken output (`thicken_oneside.stl`, 16 004 triangles, 15 155 of them
+slivers, itself clean): the same block welded at the wall's exact height left
+**2 non-manifold edges**; 0.02 mm *under* it left **32** (the cut runs through
+the wall's slivers); 0.02, 0.05 and 0.1 mm over, and a block stopping mid-wall,
+all came back clean. 0.02 mm is a tenth of a 0.2 mm layer.
 
 ## How a drawing becomes a solid (`nso_sketch.js`)
 
