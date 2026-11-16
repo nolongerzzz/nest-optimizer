@@ -589,6 +589,14 @@ function frustum(n, r0, r1, z0, z1) {
         segs.length >= 15 && segs.every(([a, b]) => Math.abs(b[1] - a[1]) < 0.05 * Math.hypot(b[0] - a[0], b[1] - a[1])),
         JSON.stringify({ n: segs.length, off: segs.filter(([a, b]) => !(Math.abs(b[1] - a[1]) < 0.05 * Math.hypot(b[0] - a[0], b[1] - a[1]))) }));
     }
+    {
+      /* bridgeFirst (a soft filament's choice): the roof's bridge before the walls, the same paths otherwise */
+      const bf = SL.sliceObjects([{ name: 'roof', soup: roof }], opt({ bridgeFirst: true }), wasm).objects[0], Lb = at(bf, 4.2), La = at(on, 4.2);
+      const k = Lb.paths.findIndex(p => !(p.feature === 'Bridge' && p.free)), keyOf = L => L.paths.map(p => p.feature + ':' + p.pts.length).sort().join('|');
+      check('...bridgeFirst lays the open-air bridge before the walls, and changes nothing else (walls first by default, as Studio)',
+        k > 0 && Lb.paths.slice(k).every(p => !(p.feature === 'Bridge' && p.free)) && keyOf(Lb) === keyOf(La) && /wall/i.test(La.paths[0].feature) &&
+          bf.layers.every((L, i) => i === 0 || L.paths.some(p => p.feature === 'Bridge' && p.free) || keyOf(L) === keyOf(on.layers[i])), JSON.stringify(Lb.paths.map(p => p.feature).slice(0, 4)));
+    }
     check('...and the ground it took is not filled twice: no solid infill under the bridge\'s ends', at(on, 4.2).paths.filter(p => p.feature === 'Internal solid infill').every(p => p.pts.every(q => q[0] < 8 - 1.0 - 0.3 || q[0] > 20 + 1.0 + 0.3)));
   }
 

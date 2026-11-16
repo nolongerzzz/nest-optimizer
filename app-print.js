@@ -116,7 +116,7 @@
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
                            /* TUNING (docs/FILAMENTS.md "Bridges and stringing"): the bridge's speed and flow are the process's (the profile's 50 mm/s
                               and 1); the flow ratio, the retraction and the z-hop are the filament's - a null row is the filament's own */
-                           bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null,
+                           bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null,
                            /* the bridges' own nozzle temperature, changed at the printer's park: null is the filament's own (none for the
                               profile's PLA, 215 for CR-TPU on the A1 mini), 0 is none whatever the filament */
                            bridgeTemp: null,
@@ -240,7 +240,7 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null,
+      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null,
       /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
          keys; a key the profile does not hold is this slicer's own default */
       supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
@@ -281,7 +281,7 @@
       nozzleTemp: opt(s.nozzleTemp, 170, 300, 0), firstTemp: opt(s.firstTemp, 170, 300, 0), bedTemp: opt(s.bedTemp, 0, 110, 0),
       maxFlow: opt(s.maxFlow, 0.5, 40, 2),
       tempStep: Math.round(n(s.tempStep, D.tempStep, -25, 25)), tempBand: Math.round(n(s.tempBand, D.tempBand, 1, 100) * 10) / 10,
-      bridgeSpeed: opt(s.bridgeSpeed, 1, 300, 1), bridgeFlow: opt(s.bridgeFlow, 0.5, 1.5, 2), hangSpeed: opt(s.hangSpeed, 1, 300, 1),
+      bridgeSpeed: opt(s.bridgeSpeed, 1, 300, 1), bridgeFlow: opt(s.bridgeFlow, 0.5, 1.5, 2), hangSpeed: opt(s.hangSpeed, 1, 300, 1), bridgeFirst: s.bridgeFirst === true || s.bridgeFirst === 'on' ? true : s.bridgeFirst === false || s.bridgeFirst === 'off' ? false : null,
       flowRatio: opt(s.flowRatio, 0.8, 1.2, 3), retractLen: opt(s.retractLen, 0, 3, 2), retractSpeed: opt(s.retractSpeed, 5, 80, 0), retractBefore: opt(s.retractBefore, 0, 100, 0), zHop: opt(s.zHop, 0, 2, 2),
       bridgeTemp: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.max(170, Math.min(300, v))); })(s.bridgeTemp),   /* 0: none */
       supDensity: Math.round(n(s.supDensity, D.supDensity, 10, 100)),
@@ -368,6 +368,13 @@
   var FILAMENT_KEY = /^(filament_|nozzle_temperature|temperature_vitrification|close_fan_|additional_cooling_|close_additional_|(cool|eng|hot|textured|supertack)_plate_temp)/;
 
   /** The bridge temperature a slice is made with: the row's (0: none), else the filament's own on this printer; null for none. */
+  /** Whether a layer's open-air bridges go before its walls: the row's (bridgeFirst true / false), else the filament's own, else no. */
+  function bridgeFirstOf(config, settings) {
+    if (!settings) return false;
+    if (settings.bridgeFirst === true || settings.bridgeFirst === false) return settings.bridgeFirst;
+    var fb = filamentBase(config, settings.filament);
+    return !!(fb && fb.bridgeFirst);
+  }
   /** The speed a wall hanging over open air prints at, for the planner: the row's, else the filament's own, else none (the bridge's speed). */
   function hangSpeedOf(config, settings) {
     if (!settings) return null;
@@ -497,6 +504,7 @@
     var o = SL.defaultsFor(eng.nozzleMm, Object.assign({ emitGcode: false }, eng.over));
     /* the planner reads two patterns off a config (grid, else zigzag); the card's own is the slicer's */
     if (settings) o.sparsePattern = settings.pattern;
+    if (settings && bridgeFirstOf(assets.config, settings)) o.bridgeFirst = true;   /* the filament's choice, or the row's */
     /* the supports' own count of top interface layers (the card's 0 - 3) is the slicer's, as G-scope's Slice does */
     var ni = -1;
     objects.forEach(function (ob) { if (ob.interfaceLayers != null && ob.interfaceLayers > ni) ni = ob.interfaceLayers; });

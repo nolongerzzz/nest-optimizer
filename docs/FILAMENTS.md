@@ -261,6 +261,16 @@ CR-TPU carried 10 of its own for one print (2026-11-15): the lip no better, the 
 has none - its hanging walls print at the bridge's speed, as Studio's do - and the row stays for a
 job that wants it.
 
+## Bridges before the walls (`bridgeFirst`, being printed, 2026-11-15)
+
+The owner watched the nozzle bend a CR-TPU lip down: on the roof layer the walls go first, the front
+and back ones hanging over the window, and the bridge's first line then runs 0.36 mm beside the inner
+one - the nozzle's face rides over the soft lip, presses it down, and the bridge welds it there. The
+same at the slot over the cone. The slicer's `bridgeFirst` lays a layer's open-air bridges before its
+walls (`nso_slicer.js`, before `islandOrder`), so the bridge is anchored on what holds it and touches
+nothing, and the hanging walls are laid against a sheet. Off by default (walls first, as Studio);
+settings `bridgeFirst: true` turns it on. Not on the card or in any filament yet: one print decides.
+
 ## Adding a filament
 
 One entry in `FILAMENTS` (`app-print.js`) and one `<option>` in `#slice-set-filament`

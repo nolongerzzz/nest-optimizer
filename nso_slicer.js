@@ -312,6 +312,7 @@
       supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
       supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
       supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
+      bridgeFirst: false,                  // a layer's open-air bridges laid before its walls (a soft filament's: the walls first, the nozzle rides a hanging wall down); false: walls first, as Studio
       islandOrder: true,                   // a layer's separate islands print one after the other, each whole (islandOrder), as Studio's do; false: every island's inner walls, then every outer wall, then the fill
       bridgeFitSpacing: true,              // an open-air bridge's lines evened out to fill its gap wall to wall (Bambu's adjust_solid_spacing); false: the global grid
       bridgeAnchorMm: 1,                   // an open-air bridge reaches this far onto the solid fill beside its gap, so its lines end on the layer below (bridgeReach); 0: they stop at the gap
@@ -2731,6 +2732,15 @@
           sparsePrev = sparse;
         }
         if (lightningAt) lightningFill(g, P.layers, lightningAt, PL, P.boxCentre, dirOf(o), o);
+        /* BRIDGES BEFORE THE WALLS (o.bridgeFirst; a filament's choice, docs/FILAMENTS.md): on a layer with an open-air bridge, its lines are laid
+           first and the walls after them. Walls first, the bridge's first line runs alongside a wall that hangs over the gap, and the nozzle's
+           face rides over it: the owner watched it bend a CR-TPU lip down and the bridge weld it there (2026-11-15). Laid first, the bridge is
+           anchored on what holds it and touches nothing; the hanging wall is then laid against a sheet that does not give. Only the open-air
+           bridges move (path.free), and only on a part. */
+        if (P.role === 'part' && o.bridgeFirst) P.layers.forEach(function (L) {
+          if (!L.paths.some(function (p) { return p.feature === 'Bridge' && p.free; })) return;
+          L.paths = L.paths.filter(function (p) { return p.feature === 'Bridge' && p.free; }).concat(L.paths.filter(function (p) { return !(p.feature === 'Bridge' && p.free); }));
+        });
         if (P.role === 'part' && o.islandOrder) { var endAt = null; P.layers.forEach(function (L, li) { endAt = islandOrder(g, L, S[li], endAt); }); }
       };
       var colRule = function (P) { if (P.role === 'support' && o.supportInterfaceRule === 'column') columnRule(g, P, perObject, planes, o); };
