@@ -443,16 +443,16 @@ function frustum(n, r0, r1, z0, z1) {
     // "A bridge reaches onto what holds it"); the sphere, torus and tube, whose overhangs are slivers along a sloping wall, are untouched. Again
     // the same day when an open-air bridge's lines were evened out to fill its gap wall to wall (bridgeFitSpacing), the slivers still on the grid;
     // and hinge_knuckle_box @0.4 once more when a free bridge's direction among the angles that hold went to the gap's short way across (freeBridgeAngle);
-    // and those three when a wall loop cut by an overhang began at a piece on the layer below (seamOffOverhang).
+    // and the two clips when a wall loop that began on a run hanging over a gap was begun a 3 mm lead-in before it (seamOffOverhang).
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
       'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
-      'fixtures/hinge_knuckle_box.stl': ['bd0d0a2e696c6feb', 'f956cc128ea10ccf'],
+      'fixtures/hinge_knuckle_box.stl': ['20e5be5f129c19b2', '0156b77d8893373f'],
       'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'e686396781f0952d'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
-      'fixtures/supports/top_clip_x2.stl': ['cf3f1622e5186cbf', '43b605ebdd2f8c66'],
-      'fixtures/supports/top_clip_x2_coupon.stl': ['086b57f7a2e81a86', '65551253b6a94c4a']
+      'fixtures/supports/top_clip_x2.stl': ['f79c02b856b6974f', '895ad934f185710a'],
+      'fixtures/supports/top_clip_x2_coupon.stl': ['42466b39965e65be', '0b074e76435c796e']
     };
     const bad = [];
     let n = 0;

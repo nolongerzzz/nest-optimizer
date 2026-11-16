@@ -2430,12 +2430,23 @@
               /* A LOOP STARTS WHERE IT IS HELD (o.seamOffOverhang): a loop cut into pieces is the same loop, so it may begin at any of them.
                  Begun at a piece that hangs - the seam fell on a corner of the gap - its first line is laid into the air from a start that
                  rests on nothing, and pulled along: the owner's CR-TPU roof threw its back walls off the back edge, both loops starting at the
-                 gap's corner with a 15.7 mm hanging run (2026-11-15), where the front walls, entered from the block beside the gap, held. So
-                 the pieces are turned to start at the first one laid on the layer below; the loop ends where it began, on that same point. */
-              if (o.seamOffOverhang !== false && seq.length > 1 && seq[0].feature === 'Overhang wall') {
-                var k0 = -1;
-                for (var sk = 1; sk < seq.length; sk++) if (seq[sk].feature !== 'Overhang wall') { k0 = sk; break; }
-                if (k0 > 0) seq = seq.slice(k0).concat(seq.slice(0, k0));
+                 gap's corner with a 15.7 mm hanging run (2026-11-15), where the front walls, entered from the block beside the gap, held. */
+              /* Only a run that hangs from end to end (span) moves the start - a wall that only partly hangs is laid on its own edge, and
+                 moving its start put a CR-TPU prime and wipe on the slanting lip face (the owner's next print). And the loop is not begun at
+                 the far end of the held pieces but a short lead-in before the run: the held piece before it is cut LEAD_IN_MM from its end
+                 and the loop begins there, so the nozzle starts on the layer below, close to where the old start was, and comes into the
+                 run already laying - not across the roof to a prime at the gap's far corner. */
+              if (o.seamOffOverhang !== false && seq.length > 1 && seq[0].span) {
+                var lastP = seq[seq.length - 1];
+                if (lastP.feature !== 'Overhang wall' && lastP.pts.length > 1) {
+                  var cut = cutFromEnd(lastP.pts, SEAM_LEAD_IN_MM);
+                  var lead = Object.assign({}, lastP, { pts: cut.tail }), rest = Object.assign({}, lastP, { pts: cut.head });
+                  seq = [lead].concat(seq.slice(0, seq.length - 1), cut.head.length > 1 ? [rest] : []);
+                } else {
+                  var k0 = -1;
+                  for (var sk = 1; sk < seq.length; sk++) if (seq[sk].feature !== 'Overhang wall') { k0 = sk; break; }
+                  if (k0 > 0) seq = seq.slice(k0).concat(seq.slice(0, k0));
+                }
               }
               seq.forEach(function (pa) { L.paths.push(pa); });
             });
@@ -3150,6 +3161,22 @@
    * on both sides: those runs carry span: true, with their points on a straight line dropped (one move, not one every overhangSubMm), and
    * the planner prints them as a bridge. A run under `minMm` is not worth a change of speed. Nothing spans: the piece comes back as it was.
    */
+  /* the lead-in a loop is begun with before a run that hangs over a gap (seamOffOverhang), mm along the held wall before it */
+  var SEAM_LEAD_IN_MM = 3;
+  /** A polyline cut `mm` from its end: { head, tail }, sharing the cut point (the whole line is the tail when it is shorter). */
+  function cutFromEnd(pts, mm) {
+    var acc = 0;
+    for (var i = pts.length - 1; i > 0; i--) {
+      var a = pts[i - 1], b = pts[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (acc + l >= mm) {
+        var t = (mm - acc) / l, c = [b[0] + (a[0] - b[0]) * t, b[1] + (a[1] - b[1]) * t];
+        return { head: pts.slice(0, i).concat([c]), tail: [c].concat(pts.slice(i)) };
+      }
+      acc += l;
+    }
+    return { head: [pts[0]], tail: pts.slice() };
+  }
+
   function spanPieces(piece, belowIn, width, minMm) {
     if (!belowIn || !(minMm > 0) || !(width > 0)) return [piece];
     var pts = piece.pts, n = pts.length, m = piece.closed ? n : n - 1;

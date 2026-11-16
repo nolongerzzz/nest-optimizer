@@ -959,9 +959,14 @@ A wall loop that an overhang cuts into pieces is still one loop, laid piece afte
 fell on a corner of the owner's roof gap, so both back walls began with their 15.7 mm hanging run:
 the first line laid into the air from a start that rested on nothing and was pulled along, and on
 CR-TPU it went off the back edge (a bump the next layer printed over), where the front walls,
-entered from the block beside the gap, held. The pieces of such a loop are now turned to begin at
-the first one laid on the layer below; the loop ends where it began, on that same point, and a
-hanging run is always entered from a held one. `seamOffOverhang: false` is the seam where it fell.
+entered from the block beside the gap, held. Such a loop now begins on the held wall just before
+the run - the piece before it is cut 3 mm (`SEAM_LEAD_IN_MM`) from its end and the loop starts
+there - so the nozzle primes on the layer below, close to the old start, and comes into the run
+already laying. Only a run that hangs from end to end moves the start: the first try turned any loop
+that began on an overhang piece to its first held one, which moved the slanting lip face's start too
+and put the CR-TPU prime and wipe on that face, and sent the roof's loops across the bridge to a
+prime at the gap's far corner (the owner's next print: squirts off the lip, a leak on the roof).
+`seamOffOverhang: false` is the seam where it fell.
 Checked in `slicer:test` ("Bridges").
 
 ### A wall over a gap (`spanPieces`, `path.span`, 2026-11-14)
