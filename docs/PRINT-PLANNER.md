@@ -293,3 +293,16 @@ this print's values and with the frozen slice's (`Pr.values`), and adds the diff
 temperature stay as measured. The block's lines are indented inside `M620`, so they are trimmed before
 timing. PLA's start is unchanged (340 s on the A1 mini); `build()` reports it as `stats.startSeconds`.
 Checked in `print:slice` 3c.
+
+## Where a travel need not retract (2026-11-15)
+
+Studio retracts and lifts for every travel of a part except one wholly inside the layer's sparse
+infill (`GCode::needs_retraction`, `reduce_infill_retraction`): on its slice of the owner's TPU tower
+it retracts 371 of 377 times from an outer wall to solid infill, 119 of 124 from solid to sparse
+infill. NSO skipped the retraction for any travel inside the layer's section, so 30 of 77 travels off
+an outer wall went at the layer's height - on the owner's CR-TPU level the nozzle leaving the wall's
+end at the corner dragged the soft lip it had just laid (a bump on the same spot, two prints running).
+The slicer now hands each part layer its sparse region (`sparsePolys`), and `layerItems` takes that
+for `travelInside`; a support's layer keeps its section, as Studio's travels keep its islands. On the
+level: 74 of 77 from an outer wall now retract, 31 of 32 from solid to sparse.
+

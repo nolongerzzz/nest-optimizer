@@ -614,7 +614,12 @@
       var L = ob.layers[li];
       if (!L || !L.paths.length) return;
       var rings = [];
-      (L.sectionPolys || []).forEach(function (p) { rings.push(p); });
+      /* WHERE A TRAVEL NEED NOT RETRACT: Studio's (GCode::needs_retraction, reduce_infill_retraction) is a travel wholly inside the layer's
+         sparse infill; every other travel of a part retracts and lifts - its tower slice retracts 371 of 377 times from an outer wall to
+         solid infill. NSO took the whole section: a travel off the end of a wall that hung over an edge, across the solid, went at the
+         layer's height, and the nozzle dragged the soft CR-TPU lip it had just laid (the owner, 2026-11-15, layer 41 of his tower level).
+         A part's layer now carries its sparse region (sparsePolys); a support's travels keep its section, as Studio's keep its islands. */
+      (L.sparsePolys ? L.sparsePolys : (L.sectionPolys || [])).forEach(function (p) { rings.push(p); });
       L.paths.forEach(function (p) {
         var pts = p.closed && p.pts.length ? p.pts.concat([p.pts[0]]) : p.pts;
         if (pts.length < 2) return;

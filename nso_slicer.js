@@ -2730,6 +2730,7 @@
             });
           }
           sparsePrev = sparse;
+          L.sparseCs = sparse;                                     /* where a travel need not retract (the planner: Studio's reduce_infill_retraction) */
         }
         if (lightningAt) lightningFill(g, P.layers, lightningAt, PL, P.boxCentre, dirOf(o), o);
         /* BRIDGES BEFORE THE WALLS (o.bridgeFirst; a filament's choice, docs/FILAMENTS.md): on a layer with an open-air bridge, its lines are laid
@@ -2886,6 +2887,7 @@
                 areas: L.areas || null, overhangMm2: L.overhangMm2 || 0,
                 overhangPolys: L.overhangCs ? g.polys(L.overhangCs) : [],
                 sectionPolys: g.polys(P.S[L.index]),
+                sparsePolys: P.role === 'part' ? (L.sparseCs && !g.isEmpty(L.sparseCs) ? g.polys(L.sparseCs) : []) : undefined,
                 paths: L.paths
               };
             }),
