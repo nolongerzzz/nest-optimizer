@@ -5337,3 +5337,98 @@ body.sup-card-open #adjust-status { display: none; }
 .asm-ed-status.is-bad { color: #fca5a5; }
 .asm-under { margin-top: -4px; padding: 2px 6px; font-size: 11px; text-align: left; }
 .asm-under[hidden] { display: none; }
+
+/* The editor's tools (Mate, Interlock) and the Interlock tab's own controls
+   (app-asm-interlock.js, docs/INTERLOCK.md). */
+.asm-card > .btn-secondary { width: 100%; }
+.asm-ed-tabs { display: flex; gap: 4px; }
+.asm-tab {
+  flex: 1;
+  padding: 6px 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.asm-tab.is-on { border-color: #7dd3fc; background: rgba(125, 211, 252, 0.14); color: var(--text); }
+.asm-tab:disabled { cursor: default; opacity: 0.6; }
+.asm-tab:focus-visible, .asm-il-opt:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; }
+.asm-ed-body { display: flex; flex-direction: column; gap: 8px; }
+.asm-ed-body[hidden] { display: none; }
+.asm-il-seg { display: flex; gap: 4px; }
+.asm-il-opt {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.asm-il-opt.is-on { border-color: #4ade80; background: #102418; color: var(--text); }
+.asm-il-opt:disabled { cursor: default; }
+.asm-il-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+.asm-il-field { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; color: var(--muted); }
+.asm-il-field[hidden] { display: none; }
+.asm-il-field input, .asm-il-edge input {
+  width: 62px;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0f1115;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.asm-il-pair { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.35; color: var(--text); cursor: pointer; }
+.asm-il-pair[hidden] { display: none; }
+.asm-il-note { margin: 0; font-size: 11px; line-height: 1.35; color: var(--muted); }
+.asm-il-note[hidden] { display: none; }
+.asm-il-cross {
+  display: grid;
+  grid-template-columns: 1fr 34px 1fr;
+  grid-template-areas: ". top ." "left key right" ". bottom .";
+  gap: 4px;
+  align-items: center;
+  justify-items: center;
+}
+.asm-il-cross-key { grid-area: key; width: 30px; height: 14px; border-radius: 3px; background: #4ade80; }
+.asm-il-edge { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+.asm-il-edge-top { grid-area: top; grid-column: 1 / 4; }
+.asm-il-edge-bottom { grid-area: bottom; grid-column: 1 / 4; }
+.asm-il-edge-left { grid-area: left; }
+.asm-il-edge-right { grid-area: right; }
+.asm-il-edge-k, .asm-il-tag {
+  font-weight: 700;
+  color: #0b1a33;
+  background: #f8fafc;
+  border-radius: 4px;
+}
+.asm-il-edge-k { width: 16px; height: 16px; line-height: 16px; text-align: center; font-size: 11px; }
+.asm-il-turn { display: flex; align-items: center; gap: 8px; }
+.asm-il-turn .asm-il-field { flex: 1; }
+.asm-il-turn .btn { flex: none; padding: 4px 10px; }
+.asm-il-tag {
+  position: fixed;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  padding: 1px 5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+  pointer-events: none;
+}
+.asm-il-tag[hidden] { display: none; }
+.asm-ed-readout.is-bad { color: #fca5a5; }
+.asm-ed-panel, .asm-ed-banner, .asm-ed-return, .asm-ed-status { z-index: 3; }
+.asm-il-tag { z-index: 1; }
+.asm-il-turn .btn { flex: 0 0 auto; width: auto; text-align: center; }

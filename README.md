@@ -211,6 +211,11 @@ Smart build-plate packing for 3D printing.
   quarter turn, a nudge and a gap finish it; **Weld into one** or **Place**
   bakes it as one Undo. The three old cards are sections of the same card,
   every control where its id says. See [docs/ASSEMBLE-EDITOR.md](docs/ASSEMBLE-EDITOR.md).
+- **Interlocks & pins** is the editor's second tab: a tongue, a round pin or a
+  snap tab on a face, sized by typed caliper values, dragged into place or
+  typed to its distance from the face's edges. With another piece seated on
+  that face, the matching socket - the key grown by the fit - is cut in it.
+  One Undo, and neither piece moves. See [docs/INTERLOCK.md](docs/INTERLOCK.md).
 - **Triple join** (Assemble card, Join by slots) joins three pieces in one press: pick A, B and C,
   choose a **vertical stack** or a **horizontal sequence**, and each of the two
   junctions (A-B, B-C) gets Center lock then Seat (support) at **its own gap**.

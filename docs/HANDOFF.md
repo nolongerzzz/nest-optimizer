@@ -64,6 +64,7 @@ merging its list by hand. The list below is generated.
 - [In-house slicer - real layers, walls, infill, overhang calls; G-scope Slice (2026-09-27)](handoff/in-house-slicer-real-layers-walls-infill-overhang-calls-g-scope.md)
 - [Inside corners — the corners8 setback in a pocket (landed, `nso_inside_corners.js`)](handoff/inside-corners-the-corners8-setback-in-a-pocket.md)
 - [Integration stress test - the joins, not the tools (2026-09-19)](handoff/integration-stress-test-the-joins-not-the-tools.md)
+- [Interlock - keys and sockets on the assembly editor: tongue, pin, snap tab; dragged or typed into place (2026-11-15)](handoff/interlock.md)
 - [Join - one card (join-one-card, 2026-10-22)](handoff/join-one-card.md)
 - [Lean after Tip - the lean darts lean about the footprint's level sides (2026-10-21)](handoff/lean-after-tip-the-lean-darts-lean-about-the-footprints-level.md)
 - [library/CTH_fixture.stl is the drive's INPUT, not its output](handoff/library-cth-fixture-stl-is-the-drives-input-not-its-output.md)

@@ -66,6 +66,16 @@
 
   var root = null, R = null;     // DOM, and the renderer / scene / camera / controls
   var E = null;                  // the open session, or null
+  /* The editor has MODES. 'mate' is this file: put one piece on another.
+     Another tool that wants the same stage - the pieces alone, a face under
+     the pointer, a ghost, one Undo - registers itself here (NSO_AsmEditor.mode)
+     and is handed the stage's clicks, hovers and Escape while it is the mode
+     in use. app-asm-interlock.js is the first. A mode is
+       { label, title, panel(container), enter(), leave(), restart(),
+         click(hit, event), hover(hit, event), clearHover(), escape() -> handled,
+         pointerDown(event) -> taken, sync(), banner() -> [n, main, sub],
+         tick(), info(), view() -> Box3 | null } */
+  var MODES = {};
 
   function $(id) { return document.getElementById(id); }
   function V(x, y, z) { return new THREE.Vector3(x, y, z); }
@@ -100,8 +110,7 @@
         }));
       }
     }
-    var panel = h('div', { cls: 'asm-ed-panel', id: 'asm-ed-panel' }, [
-      h('div', { cls: 'asm-ed-title', text: 'Assemble' }),
+    var mateBody = h('div', { cls: 'asm-ed-body', id: 'asm-mate-body' }, [
       h('button', { type: 'button', cls: 'asm-chip asm-chip-part', id: 'asm-chip-part', title: 'The face being attached. Click to pick it again.' }, [
         h('span', { cls: 'asm-chip-n', text: '1' }), h('span', { cls: 'asm-chip-text', id: 'asm-chip-part-text', text: 'Click the face to attach' })]),
       h('button', { type: 'button', cls: 'btn btn-ghost asm-under', id: 'asm-underside', text: 'Use its underside instead',
@@ -147,7 +156,16 @@
           h('button', { type: 'button', cls: 'btn btn-secondary', id: 'asm-place', text: 'Place',
             title: 'Move the piece to where the ghost is and leave the two as separate pieces. One Undo.' })
         ])
-      ]),
+      ])
+    ]);
+    var tabs = h('div', { cls: 'asm-ed-tabs', id: 'asm-ed-tabs', role: 'tablist', 'aria-label': 'Tool' }, [
+      h('button', { type: 'button', cls: 'asm-tab', id: 'asm-tab-mate', role: 'tab', 'data-mode': 'mate', text: 'Mate',
+        title: 'Put one piece on another: click the face to attach, click where it goes' })
+    ]);
+    var panel = h('div', { cls: 'asm-ed-panel', id: 'asm-ed-panel' }, [
+      h('div', { cls: 'asm-ed-title', text: 'Assemble' }),
+      tabs,
+      mateBody,
       h('div', { cls: 'asm-ed-row asm-ed-foot' }, [
         h('button', { type: 'button', cls: 'btn btn-ghost', id: 'asm-restart', text: 'Start over', title: 'Drop both picks and begin again' }),
         h('button', { type: 'button', cls: 'btn btn-ghost', id: 'asm-undo', text: 'Undo', title: 'Undo the last step on the plate' })
@@ -163,14 +181,27 @@
       h('div', { cls: 'asm-ed-status', id: 'asm-ed-status', role: 'status', 'aria-live': 'polite' })
     ]);
     document.body.appendChild(root);
+    /* a tab and a panel body for every other mode, in the order they registered */
+    var foot = panel.querySelector('.asm-ed-foot');
+    Object.keys(MODES).forEach(function (name) {
+      var m = MODES[name];
+      tabs.appendChild(h('button', { type: 'button', cls: 'asm-tab', id: 'asm-tab-' + name, role: 'tab', 'data-mode': name,
+        text: m.label || name, title: m.title || '' }));
+      var body = h('div', { cls: 'asm-ed-body', id: 'asm-' + name + '-body', hidden: '' });
+      panel.insertBefore(body, foot);
+      if (m.panel) m.panel(body);
+    });
     wireDom();
   }
 
   function wireDom() {
     $('asm-return').addEventListener('click', close);
+    Array.prototype.forEach.call(root.querySelectorAll('.asm-tab'), function (b) {
+      b.addEventListener('click', function () { setMode(b.getAttribute('data-mode')); });
+    });
     $('asm-restart').addEventListener('click', function () { restart(); });
     $('asm-undo').addEventListener('click', undo);
-    $('asm-chip-part').addEventListener('click', function () { if (E && !E.busy) restart(); });
+    $('asm-chip-part').addEventListener('click', function () { if (E && !E.busy && E.mode === 'mate') restart(); });
     $('asm-chip-target').addEventListener('click', function () { if (E && !E.busy && E.part) toStep('target'); });
     $('asm-underside').addEventListener('click', function () {
       if (!E || E.busy || !E.part) return;
@@ -257,6 +288,15 @@
           raycaster: new THREE.Raycaster(), dom: renderer.domElement, raf: 0 };
 
     var down = null;
+    /* A mode may take a press for itself (dragging its ghost). It is asked in
+       the capture phase, before the view's own controls hear the press, and a
+       press it takes goes no further - so the view does not turn under a drag. */
+    R.dom.addEventListener('pointerdown', function (e) {
+      var m = E && MODES[E.mode];
+      if (m && m.pointerDown && !E.busy && e.button === 0 && m.pointerDown(e)) {
+        e.stopImmediatePropagation(); e.preventDefault(); down = null;
+      }
+    }, true);
     R.dom.addEventListener('pointerdown', function (e) { down = { x: e.clientX, y: e.clientY, b: e.button }; });
     R.dom.addEventListener('pointerup', function (e) {
       var d = down; down = null;
@@ -289,6 +329,8 @@
     if (!E) { R.raf = 0; return; }
     R.controls.update();
     R.renderer.render(R.scene, R.camera);
+    var m = MODES[E.mode];
+    if (m && m.tick) m.tick();
     R.raf = requestAnimationFrame(tick);
   }
 
@@ -359,7 +401,9 @@
     /* groups of pieces that stand together */
     var parent = list.map(function (_, i) { return i; });
     function find(a) { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; }
-    for (var i = 0; i < list.length; i++) for (var j = i + 1; j < list.length; j++) {
+    /* A mode that works on the faces BETWEEN seated pieces asks for every
+       piece on its own (E.apart), so those faces can be clicked. */
+    for (var i = 0; !E.apart && i < list.length; i++) for (var j = i + 1; j < list.length; j++) {
       var a = list[i].box, b = list[j].box, r = CLUSTER_REACH;
       if (a.min.x - r <= b.max.x && b.min.x - r <= a.max.x && a.min.y - r <= b.max.y && b.min.y - r <= a.max.y &&
           a.min.z - r <= b.max.z && b.min.z - r <= a.max.z) parent[find(i)] = find(j);
@@ -544,6 +588,7 @@
 
   function clearHover() {
     if (!E) return;
+    if (E.mode !== 'mate') { if (MODES[E.mode].clearHover) MODES[E.mode].clearHover(); R.dom.style.cursor = ''; return; }
     disposeObj(E.hoverMark); E.hoverMark = null; E.hoverFace = null;
     if (E.step === 'target' && E.ghost) E.ghost.visible = false;
     R.dom.style.cursor = '';
@@ -552,6 +597,7 @@
   function onHover(e) {
     if (!E || E.busy) return;
     var hit = hitAt(e);
+    if (E.mode !== 'mate') { if (MODES[E.mode].hover) MODES[E.mode].hover(hit, e); return; }
     if (E.step === 'adjust') {
       R.dom.style.cursor = (hit && hit.piece === E.target.face.piece) ? 'crosshair' : '';
       return;
@@ -582,6 +628,7 @@
   function onClick(e) {
     if (!E || E.busy) return;
     var hit = hitAt(e);
+    if (E.mode !== 'mate') { if (MODES[E.mode].click) MODES[E.mode].click(hit, e); return; }
     if (!hit) return;
     if (E.step === 'part' || (E.step === 'target' && hit.piece === E.part.face.piece)) {
       E.part = { face: hit.face };
@@ -791,6 +838,22 @@
 
   function syncPanel() {
     if (!E) return;
+    Array.prototype.forEach.call(root.querySelectorAll('.asm-tab'), function (t) {
+      var on = t.getAttribute('data-mode') === E.mode;
+      t.classList.toggle('is-on', on); t.setAttribute('aria-selected', on ? 'true' : 'false'); t.disabled = !!E.busy;
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('.asm-ed-body'), function (d) { d.hidden = d.id !== 'asm-' + E.mode + '-body'; });
+    $('asm-undo').disabled = !!E.busy || !(state.undoStack && state.undoStack.length);
+    if (E.mode !== 'mate') {
+      var mm = MODES[E.mode], mb = mm.banner ? mm.banner() : ['', '', ''], bn = $('asm-ed-banner');
+      bn.innerHTML = '';
+      if (mb[0]) bn.appendChild(h('span', { cls: 'asm-ed-banner-n', text: mb[0] }));
+      bn.appendChild(h('span', { cls: 'asm-ed-banner-main', text: mb[1] }));
+      bn.appendChild(h('span', { cls: 'asm-ed-banner-sub', text: mb[2] }));
+      $('asm-restart').disabled = !!E.busy;
+      if (mm.sync) mm.sync();
+      return;
+    }
     var b = BANNER[E.step], banner = $('asm-ed-banner');
     banner.innerHTML = '';
     banner.appendChild(h('span', { cls: 'asm-ed-banner-n', text: b[0] }));
@@ -838,9 +901,33 @@
 
   function restart(keepStatus) {
     if (!E) return;
+    if (E.mode !== 'mate') {
+      MODES[E.mode].restart();
+      frameBox(stageBox(E.pieces), true);
+      if (!keepStatus) say('');
+      syncPanel();
+      return;
+    }
     toStep('part');
     frameBox(stageBox(E.pieces), true);
     if (!keepStatus) say('');
+  }
+
+  /* One mode out, another in: the stage is rebuilt for the new one (the mate
+     keeps seated pieces together, another mode may want them apart) and it
+     starts from its first step. Sizes typed into a mode's panel stay. */
+  function setMode(name) {
+    if (!E || E.busy || name === E.mode || (name !== 'mate' && !MODES[name])) return;
+    if (E.mode === 'mate') toStep('part');
+    else if (MODES[E.mode].leave) MODES[E.mode].leave();
+    E.mode = name;
+    E.apart = name !== 'mate' && !!MODES[name].apart;
+    buildPieces();
+    if (name === 'mate') toStep('part');
+    else if (MODES[name].enter) MODES[name].enter();
+    frameBox(stageBox(E.pieces), true);
+    say('');
+    syncPanel();
   }
 
   /* ---------------- bake ---------------- */
@@ -966,6 +1053,7 @@
     if (e.key === 'Escape') {
       e.preventDefault();
       if (E.busy) return;
+      if (E.mode !== 'mate') { if (!(MODES[E.mode].escape && MODES[E.mode].escape())) close(); return; }
       if (E.step === 'adjust') toStep('target');
       else if (E.step === 'target') restart();
       else close();
@@ -975,8 +1063,8 @@
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
   }
 
-  function open() {
-    if (E) return true;
+  function open(mode) {
+    if (E) { if (mode) setMode(mode); return true; }
     if (typeof THREE === 'undefined' || !THREE.OrbitControls || typeof NSO_poseApplyWorld !== 'function') {
       if (typeof setStatus === 'function') setStatus('The assembly editor could not start - a script it needs did not load', true);
       return false;
@@ -986,7 +1074,8 @@
     if (menu && menu.open) menu.open = false;
     if (typeof clearJoinSlots === 'function' && state.joinSession) clearJoinSlots();
     buildDom(); buildStage();
-    E = { step: 'part', pieces: [], part: null, target: null, anchor: { mode: 'click' }, nudge: { u: 0, v: 0 }, spin: 0,
+    E = { mode: 'mate', apart: false,
+          step: 'part', pieces: [], part: null, target: null, anchor: { mode: 'click' }, nudge: { u: 0, v: 0 }, spin: 0,
           solution: null, busy: false, ghost: null, hoverMark: null, partMark: null, targetMark: null, hoverFace: null, last: null };
     root.hidden = false;
     document.body.classList.add('asm-editor-open');
@@ -999,12 +1088,14 @@
     window.addEventListener('keydown', onKey, true);
     if (!R.raf) R.raf = requestAnimationFrame(tick);
     $('asm-return').focus();
+    if (mode && mode !== 'mate') setMode(mode);
     return true;
   }
 
   function close() {
     if (!E || E.busy) return;
     window.removeEventListener('keydown', onKey, true);
+    if (E.mode !== 'mate' && MODES[E.mode].leave) MODES[E.mode].leave();
     clearPieces();
     E = null;
     root.hidden = true;
@@ -1028,7 +1119,8 @@
   function info() {
     if (!E) return { open: false };
     return {
-      open: true, step: E.step, busy: E.busy, pieces: E.pieces.map(function (p) { return p.id; }),
+      open: true, mode: E.mode, lock: (E.mode !== 'mate' && MODES[E.mode].info) ? MODES[E.mode].info() : null,
+      step: E.step, busy: E.busy, pieces: E.pieces.map(function (p) { return p.id; }),
       visible: E.pieces.filter(function (p) { return p.mesh.visible; }).map(function (p) { return p.id; }),
       part: E.part ? { id: E.part.face.piece.id, normal: E.part.face.n.toArray(), tris: E.part.face.tris.length } : null,
       target: E.target ? { id: E.target.face.piece.id, normal: E.target.face.n.toArray(), tris: E.target.face.tris.length } : null,
@@ -1040,18 +1132,38 @@
   }
   function view(dir) {            // look from a direction, for a check that needs a face in sight
     if (!E) return;
-    var box = E.step === 'adjust' ? stageBox(E.pieces).union(new THREE.Box3().setFromObject(E.ghost)) : stageBox(E.pieces);
+    var mv = (E.mode !== 'mate' && MODES[E.mode].view) ? MODES[E.mode].view() : null;
+    var box = mv || ((E.mode === 'mate' && E.step === 'adjust') ? stageBox(E.pieces).union(new THREE.Box3().setFromObject(E.ghost)) : stageBox(E.pieces));
     R.camera.position.copy(R.controls.target).add(V(dir[0], dir[1], dir[2]));
     frameBox(box, true);
     R.renderer.render(R.scene, R.camera);
     syncPad();
   }
 
-  window.NSO_AsmEditor = { open: open, close: close, isOpen: function () { return !!E; }, info: info, screenOf: screenOf, view: view };
+  window.NSO_AsmEditor = {
+    open: open, close: close, isOpen: function () { return !!E; }, info: info, screenOf: screenOf, view: view,
+    /* Register a mode (see MODES). `kit` is what a mode needs of this file's
+       own workings - the stage, the session, faces, marks - handed over
+       rather than copied, so there is one definition of "the face under a
+       click" for every tool on the stage. */
+    mode: function (name, def) {
+      MODES[name] = def;
+      return {
+        stage: function () { return R; }, session: function () { return E; },
+        h: h, $: $, V: V, nameOf: nameOf, faceOf: faceOf, triData: triData, faceWord: faceWord, markFor: markFor,
+        disposeObj: disposeObj, frameBox: frameBox, stageBox: stageBox, buildPieces: buildPieces,
+        say: say, syncPanel: syncPanel, asOneStep: asOneStep, appStatus: appStatus, restart: restart,
+        FACE_COS: FACE_COS
+      };
+    }
+  };
 
   function bind() {
     var b = $('btn-asm-open');
     if (b) b.addEventListener('click', function () { open(); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-asm-mode]'), function (el) {
+      el.addEventListener('click', function () { open(el.getAttribute('data-asm-mode')); });
+    });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
   else bind();

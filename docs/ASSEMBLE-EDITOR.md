@@ -41,6 +41,8 @@ were three cards and a guess.
 ASSEMBLE
 [ Open editor ]
 Click the face to attach, click where it goes. …
+[ Interlocks & pins ]                            (docs/INTERLOCK.md)
+A key on one piece, its socket in the piece seated on it. …
 ▸ Join by slots      the Join card, id for id   (docs/JOIN-TRIPLE.md)
 ▸ Seat               the Seat card, id for id
 ▸ Align              the Align card, id for id  (it was in the top row)
@@ -57,6 +59,10 @@ Removed ids: `menu-joins`, `menu-seat`, `menu-align`. New: `menu-assemble`,
 `asm-card`, `btn-asm-open`, `asm-sec-join`, `asm-sec-seat`, `asm-sec-align`.
 
 ## The editor
+
+The editor is a stage with tabs: **Mate**, described here, and **Interlock**
+([INTERLOCK.md](INTERLOCK.md)), which registers itself as a second mode
+(`NSO_AsmEditor.mode`).
 
 A stage of its own over the whole app, the way a slicer's paint mode shows
 only the object being painted: no bed, no grid, no other tool's handles. The

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=8ebb0f68" />
+  <link rel="stylesheet" href="styles.css?v=191be2da" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1228,6 +1228,9 @@
                 <button id="btn-asm-open" class="btn btn-primary" type="button"
                         title="Open the assembly editor: the plate's pieces alone, spread apart, on a stage you can turn. Click the face to attach, click where it goes on the other piece, and a ghost shows it there. Set its place on the face, a turn and a gap, then Weld into one or Place. Nothing on the plate moves until then; one Undo takes it back.">Open editor</button>
                 <p class="asm-hint">Click the face to attach, click where it goes. A ghost shows it before anything moves.</p>
+                <button id="btn-asm-interlock" class="btn btn-secondary" type="button" data-asm-mode="lock"
+                        title="Open the editor on its Interlock tab: a tongue, a round pin or a snap tab on a face, sized by typed caliper values, placed by dragging it or by typing its distance from the face's edges. With another piece seated on that face (Place it there in the editor first), the matching socket is cut in that piece. One Undo.">Interlocks &amp; pins</button>
+                <p class="asm-hint">A key on one piece, its socket in the piece seated on it. Typed sizes, dragged or typed into place.</p>
                 <details class="vp-sec asm-sec" id="asm-sec-join">
                   <summary class="vp-sec-head" title="Join two pieces, or three in one go: pick A, B and C, set a gap at each junction, JOIN">Join by slots</summary>
                   <div class="vp-sec-body">
@@ -3108,7 +3111,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=695eecbc"></script>
+  <script src="app-core.js?v=3f1e8256"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=5b4ec154"></script>
 
@@ -3230,7 +3233,9 @@
   <script src="app-thicken-live.js?v=dab1b45f"></script>
   <script src="app-soften-live.js?v=d13157a0"></script>
   <script src="app-seat-surface.js?v=4b0f2e5d"></script>
-  <script src="app-asm-editor.js?v=ba53e6e8"></script>
+  <script src="app-asm-editor.js?v=d2bafe96"></script>
+  <script src="nso_interlock.js?v=d3c3b968"></script>
+  <script src="app-asm-interlock.js?v=ed5c1051"></script>
   <script src="app-skin.js?v=cb03e88b"></script>
   <script src="app-skin-patch.js?v=42ac8ff6"></script>
   <script src="app-raster.js?v=2f85efde"></script>
