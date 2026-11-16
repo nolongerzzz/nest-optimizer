@@ -500,74 +500,16 @@
 
   /* ---------------- Apply ---------------- */
 
-  function volume(s) { return IL.signedVolume(s); }
-
-  /* One piece's share: the tool carried into the piece's own raw frame, the
-     boolean run, and the box the result will have in the world. Nothing is
-     changed here - both shares are worked out before either is committed, so
-     a refusal on one leaves both pieces as they were. */
-  async function work(piece, tool, op) {
-    var placed = piece.placed, name = K.nameOf(piece);
-    var m = state.models.find(function (x) { return x && x.id === piece.id; });
-    if (!m || !(m.rawTris && m.rawAxis === 'zup' && m.rawTris.length >= 9)) return { ok: false, reason: name + ' has no untransformed soup to work on' };
-    if (typeof nsoRawFrameOf !== 'function') return { ok: false, reason: 'the raw-frame mapping (app-mask.js) did not load' };
-    var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
-    if (painted > 0) return { ok: false, reason: painted + ' painted face(s) on ' + name + ' - the boolean replaces every triangle on the piece and cannot hold a face still. Clear the paint first.' };
-    var sol = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? await nsoOverlap.solid(m) : { ok: true, merged: false };
-    if (!sol.ok) return { ok: false, reason: sol.cancelled ? 'stopped' : name + ': ' + sol.reason };
-    var hull = sol.merged ? sol.soup : m.rawTris;
-    var f = nsoRawFrameOf(m), mesh = placed.mesh;
-    mesh.updateMatrixWorld(true);
-    var inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert(), v = new THREE.Vector3();
-    var raw = new Float32Array(tool.length), i;
-    for (i = 0; i < tool.length; i += 3) {
-      v.set(tool[i], tool[i + 1], tool[i + 2]).applyMatrix4(inv);
-      var rp = nsoRawPointFromLocal(f, [v.x, v.y, v.z]);
-      raw[i] = rp[0]; raw[i + 1] = rp[1]; raw[i + 2] = rp[2];
-    }
-    if (volume(raw) < 0) {                                      // a mirrored pose turns a solid inside out: wind it back
-      for (i = 0; i < raw.length; i += 9) for (var k = 0; k < 3; k++) { var t = raw[i + 3 + k]; raw[i + 3 + k] = raw[i + 6 + k]; raw[i + 6 + k] = t; }
-    }
-    var r = op === 'union' ? await NSO_unionSoups(hull, raw, { label: 'Adding the key' })
-                           : await NSO_subtractSoups(hull, raw, { label: 'Cutting the socket' });
-    if (r.cancelled || r.timedOut) return { ok: false, reason: r.cancelled ? 'stopped' : r.reason };
-    if (!r.ok || !r.soup || r.soup.length < 9) return { ok: false, reason: name + ': the ' + (op === 'union' ? 'union' : 'cut') + ' ' + (r.reason ? '- ' + r.reason : 'missed') };
-    var stats = r.stats || ((typeof NSO_edgeStats === 'function') ? NSO_edgeStats(r.soup) : null);
-    if (stats && (stats.open > 0 || stats.nm > 0)) return { ok: false, reason: name + ': the result came back open (' + stats.open + ' open, ' + stats.nm + ' non-manifold edges)' };
-    var vh = Math.abs(volume(hull)), vt = Math.abs(volume(raw)), vr = Math.abs(volume(r.soup));
-    /* A key that bites the piece shares volume with it; one that does not is
-       a loose body beside it. A socket that removes nothing missed. */
-    if (op === 'union' && vr > vh + vt - 1e-4) return { ok: false, reason: 'the key would not be joined to ' + name + ' there - there is nothing under it to stand on' };
-    if (op !== 'union' && vr > vh - 1e-4) return { ok: false, reason: 'the socket misses ' + name + ' there - nothing would be cut' };
-    var box = new THREE.Box3();
-    for (i = 0; i < r.soup.length; i += 3) {
-      var lp = nsoLocalPointFromRaw(f, [r.soup[i], r.soup[i + 1], r.soup[i + 2]]);
-      box.expandByPoint(v.set(lp[0], lp[1], lp[2]).applyMatrix4(mesh.matrixWorld));
-    }
-    return { ok: true, piece: piece, model: m, soup: r.soup, box: box, op: op, tris: r.soup.length / 9, removed: vh - vr, merged: sol.merged ? sol.note : '' };
+  /* One piece's share, and its commit: the editor's own (app-asm-editor.js,
+     toolShare / commitShare), shared with Step / Boss. */
+  function work(piece, tool, op) {
+    return K.toolShare(piece, tool, op, {
+      label: op === 'union' ? 'Adding the key' : 'Cutting the socket',
+      noJoin: function (name) { return 'the key would not be joined to ' + name + ' there - there is nothing under it to stand on'; },
+      noCut: function (name) { return 'the socket misses ' + name + ' there - nothing would be cut'; }
+    });
   }
-
-  /* Commit one share and put the piece back where its body was. */
-  function commitShare(w) {
-    var placed = w.piece.placed, idx = state.placed.indexOf(placed);
-    var pose = (typeof snapshotPlacedPose === 'function') ? snapshotPlacedPose(idx) : null;
-    if (!NSO_sculptCommitRaw(w.model, w.soup, 'interlockReplace', null)) return false;
-    var top = state.undoStack[state.undoStack.length - 1];
-    if (top && top.type === 'interlockReplace' && top.modelId === w.model.id) top.prevPose = pose;
-    placed.liftY = 0;
-    applyPlacedXZ(placed, placed.x, placed.z);
-    placed.mesh.updateMatrixWorld(true);
-    var b = new THREE.Box3().setFromObject(placed.mesh);
-    var lift = w.box.min.y - b.min.y;
-    w.raise = lift < -1e-6 ? -lift : 0;                          // the result reaches under the plate: it rests on it instead
-    placed.liftY = Math.max(0, lift);
-    placed.x += (w.box.min.x + w.box.max.x) / 2 - (b.min.x + b.max.x) / 2;
-    placed.z += (w.box.min.z + w.box.max.z) / 2 - (b.min.z + b.max.z) / 2;
-    applyPlacedXZ(placed, placed.x, placed.z);
-    if (typeof refreshOutline === 'function') refreshOutline(placed);
-    placed.mesh.updateMatrixWorld(true);
-    return true;
-  }
+  function commitShare(w) { return K.commitShare(w, 'interlockReplace'); }
 
   async function apply() {
     if (!live(true)) return false;

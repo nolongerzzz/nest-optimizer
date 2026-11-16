@@ -74,7 +74,11 @@
        { label, title, panel(container), enter(), leave(), restart(),
          click(hit, event), hover(hit, event), clearHover(), escape() -> handled,
          pointerDown(event) -> taken, sync(), banner() -> [n, main, sub],
-         tick(), info(), view() -> Box3 | null } */
+         tick(), info(), view() -> Box3 | null,
+         solo: { title, returnTo } }
+     A SOLO mode is a tool of its own that borrows the stage: it gets no tab
+     on the Assemble editor, and opened on it the editor wears its title and
+     shows no tabs (app-boss.js, ADD > Step / Boss). */
   var MODES = {};
 
   function $(id) { return document.getElementById(id); }
@@ -163,7 +167,7 @@
         title: 'Put one piece on another: click the face to attach, click where it goes' })
     ]);
     var panel = h('div', { cls: 'asm-ed-panel', id: 'asm-ed-panel' }, [
-      h('div', { cls: 'asm-ed-title', text: 'Assemble' }),
+      h('div', { cls: 'asm-ed-title', id: 'asm-ed-title', text: 'Assemble' }),
       tabs,
       mateBody,
       h('div', { cls: 'asm-ed-row asm-ed-foot' }, [
@@ -185,7 +189,7 @@
     var foot = panel.querySelector('.asm-ed-foot');
     Object.keys(MODES).forEach(function (name) {
       var m = MODES[name];
-      tabs.appendChild(h('button', { type: 'button', cls: 'asm-tab', id: 'asm-tab-' + name, role: 'tab', 'data-mode': name,
+      if (!m.solo) tabs.appendChild(h('button', { type: 'button', cls: 'asm-tab', id: 'asm-tab-' + name, role: 'tab', 'data-mode': name,
         text: m.label || name, title: m.title || '' }));
       var body = h('div', { cls: 'asm-ed-body', id: 'asm-' + name + '-body', hidden: '' });
       panel.insertBefore(body, foot);
@@ -843,6 +847,10 @@
       t.classList.toggle('is-on', on); t.setAttribute('aria-selected', on ? 'true' : 'false'); t.disabled = !!E.busy;
     });
     Array.prototype.forEach.call(root.querySelectorAll('.asm-ed-body'), function (d) { d.hidden = d.id !== 'asm-' + E.mode + '-body'; });
+    var solo = E.mode !== 'mate' && MODES[E.mode].solo;
+    $('asm-ed-tabs').hidden = !!solo;
+    $('asm-ed-title').textContent = solo ? solo.title : 'Assemble';
+    root.setAttribute('aria-label', solo ? solo.title + ' editor' : 'Assembly editor');
     $('asm-undo').disabled = !!E.busy || !(state.undoStack && state.undoStack.length);
     if (E.mode !== 'mate') {
       var mm = MODES[E.mode], mb = mm.banner ? mm.banner() : ['', '', ''], bn = $('asm-ed-banner');
@@ -918,6 +926,7 @@
      starts from its first step. Sizes typed into a mode's panel stay. */
   function setMode(name) {
     if (!E || E.busy || name === E.mode || (name !== 'mate' && !MODES[name])) return;
+    E.opener = name;
     if (E.mode === 'mate') toStep('part');
     else if (MODES[E.mode].leave) MODES[E.mode].leave();
     E.mode = name;
@@ -1071,10 +1080,10 @@
     }
     /* leave the plate quiet: the Assemble card shut (which ends its Join session), nothing armed */
     var menu = $('menu-assemble');
-    if (menu && menu.open) menu.open = false;
+    if (menu && menu.open && !(mode && MODES[mode] && MODES[mode].solo)) menu.open = false;
     if (typeof clearJoinSlots === 'function' && state.joinSession) clearJoinSlots();
     buildDom(); buildStage();
-    E = { mode: 'mate', apart: false,
+    E = { mode: 'mate', apart: false, opener: mode || 'mate',
           step: 'part', pieces: [], part: null, target: null, anchor: { mode: 'click' }, nudge: { u: 0, v: 0 }, spin: 0,
           solution: null, busy: false, ghost: null, hoverMark: null, partMark: null, targetMark: null, hoverFace: null, last: null };
     root.hidden = false;
@@ -1097,10 +1106,13 @@
     window.removeEventListener('keydown', onKey, true);
     if (E.mode !== 'mate' && MODES[E.mode].leave) MODES[E.mode].leave();
     clearPieces();
+    var solo = MODES[E.opener] && MODES[E.opener].solo;
+    var back = solo && solo.returnTo ? $(solo.returnTo) : null;
     E = null;
     root.hidden = true;
     document.body.classList.remove('asm-editor-open');
     if (R.raf) { cancelAnimationFrame(R.raf); R.raf = 0; }
+    if (back) { back.focus(); return; }
     var btn = $('menu-assemble');
     if (btn && btn.querySelector('summary')) btn.querySelector('summary').focus();
   }
@@ -1140,6 +1152,87 @@
     syncPad();
   }
 
+  /* ---------------- a tool added to or cut from a piece ----------------
+     Interlock's key and socket and Step / Boss's solid all go in this way.
+
+     One piece's share: the tool carried into the piece's own raw frame, the
+     boolean run, and the box the result will have in the world. Nothing is
+     changed here - both shares are worked out before either is committed, so
+     a refusal on one leaves both pieces as they were. */
+  async function toolShare(piece, tool, op, words) {
+    words = words || {};
+    var placed = piece.placed, name = nameOf(piece);
+    var m = state.models.find(function (x) { return x && x.id === piece.id; });
+    if (!m || !(m.rawTris && m.rawAxis === 'zup' && m.rawTris.length >= 9)) return { ok: false, reason: name + ' has no untransformed soup to work on' };
+    if (typeof nsoRawFrameOf !== 'function') return { ok: false, reason: 'the raw-frame mapping (app-mask.js) did not load' };
+    var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+    if (painted > 0) return { ok: false, reason: painted + ' painted face(s) on ' + name + ' - the boolean replaces every triangle on the piece and cannot hold a face still. Clear the paint first.' };
+    var sol = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? await nsoOverlap.solid(m) : { ok: true, merged: false };
+    if (!sol.ok) return { ok: false, reason: sol.cancelled ? 'stopped' : name + ': ' + sol.reason };
+    var hull = sol.merged ? sol.soup : m.rawTris;
+    var f = nsoRawFrameOf(m), mesh = placed.mesh;
+    mesh.updateMatrixWorld(true);
+    var inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert(), v = new THREE.Vector3();
+    var raw = new Float32Array(tool.length), i;
+    for (i = 0; i < tool.length; i += 3) {
+      v.set(tool[i], tool[i + 1], tool[i + 2]).applyMatrix4(inv);
+      var rp = nsoRawPointFromLocal(f, [v.x, v.y, v.z]);
+      raw[i] = rp[0]; raw[i + 1] = rp[1]; raw[i + 2] = rp[2];
+    }
+    if (soupVolume(raw) < 0) {                                      // a mirrored pose turns a solid inside out: wind it back
+      for (i = 0; i < raw.length; i += 9) for (var k = 0; k < 3; k++) { var t = raw[i + 3 + k]; raw[i + 3 + k] = raw[i + 6 + k]; raw[i + 6 + k] = t; }
+    }
+    var r = op === 'union' ? await NSO_unionSoups(hull, raw, { label: words.label || 'Adding' })
+                           : await NSO_subtractSoups(hull, raw, { label: words.label || 'Cutting' });
+    if (r.cancelled || r.timedOut) return { ok: false, reason: r.cancelled ? 'stopped' : r.reason };
+    if (!r.ok || !r.soup || r.soup.length < 9) return { ok: false, reason: name + ': the ' + (op === 'union' ? 'union' : 'cut') + ' ' + (r.reason ? '- ' + r.reason : 'missed') };
+    var stats = r.stats || ((typeof NSO_edgeStats === 'function') ? NSO_edgeStats(r.soup) : null);
+    if (stats && (stats.open > 0 || stats.nm > 0)) return { ok: false, reason: name + ': the result came back open (' + stats.open + ' open, ' + stats.nm + ' non-manifold edges)' };
+    var vh = Math.abs(soupVolume(hull)), vt = Math.abs(soupVolume(raw)), vr = Math.abs(soupVolume(r.soup));
+    /* A key that bites the piece shares volume with it; one that does not is
+       a loose body beside it. A socket that removes nothing missed. */
+    if (op === 'union' && vr > vh + vt - 1e-4) return { ok: false, reason: words.noJoin ? words.noJoin(name) : 'it would not be joined to ' + name + ' there - there is nothing under it to stand on' };
+    if (op !== 'union' && vr > vh - 1e-4) return { ok: false, reason: words.noCut ? words.noCut(name) : 'it misses ' + name + ' there - nothing would be cut' };
+    var box = new THREE.Box3();
+    for (i = 0; i < r.soup.length; i += 3) {
+      var lp = nsoLocalPointFromRaw(f, [r.soup[i], r.soup[i + 1], r.soup[i + 2]]);
+      box.expandByPoint(v.set(lp[0], lp[1], lp[2]).applyMatrix4(mesh.matrixWorld));
+    }
+    return { ok: true, piece: piece, model: m, soup: r.soup, box: box, op: op, tris: r.soup.length / 9, removed: vh - vr, merged: sol.merged ? sol.note : '' };
+  }
+
+  /* Commit one share and put the piece back where its body was. */
+  function commitShare(w, undoType) {
+    var placed = w.piece.placed, idx = state.placed.indexOf(placed);
+    var pose = (typeof snapshotPlacedPose === 'function') ? snapshotPlacedPose(idx) : null;
+    if (!NSO_sculptCommitRaw(w.model, w.soup, undoType, null)) return false;
+    var top = state.undoStack[state.undoStack.length - 1];
+    if (top && top.type === undoType && top.modelId === w.model.id) top.prevPose = pose;
+    placed.liftY = 0;
+    applyPlacedXZ(placed, placed.x, placed.z);
+    placed.mesh.updateMatrixWorld(true);
+    var b = new THREE.Box3().setFromObject(placed.mesh);
+    var lift = w.box.min.y - b.min.y;
+    w.raise = lift < -1e-6 ? -lift : 0;                          // the result reaches under the plate: it rests on it instead
+    placed.liftY = Math.max(0, lift);
+    placed.x += (w.box.min.x + w.box.max.x) / 2 - (b.min.x + b.max.x) / 2;
+    placed.z += (w.box.min.z + w.box.max.z) / 2 - (b.min.z + b.max.z) / 2;
+    applyPlacedXZ(placed, placed.x, placed.z);
+    if (typeof refreshOutline === 'function') refreshOutline(placed);
+    placed.mesh.updateMatrixWorld(true);
+    return true;
+  }
+
+  function soupVolume(s) {
+    var v = 0;
+    for (var i = 0; i < s.length; i += 9) {
+      v += s[i] * (s[i + 4] * s[i + 8] - s[i + 5] * s[i + 7])
+         - s[i + 1] * (s[i + 3] * s[i + 8] - s[i + 5] * s[i + 6])
+         + s[i + 2] * (s[i + 3] * s[i + 7] - s[i + 4] * s[i + 6]);
+    }
+    return v / 6;
+  }
+
   window.NSO_AsmEditor = {
     open: open, close: close, isOpen: function () { return !!E; }, info: info, screenOf: screenOf, view: view,
     /* Register a mode (see MODES). `kit` is what a mode needs of this file's
@@ -1153,6 +1246,7 @@
         h: h, $: $, V: V, nameOf: nameOf, faceOf: faceOf, triData: triData, faceWord: faceWord, markFor: markFor,
         disposeObj: disposeObj, frameBox: frameBox, stageBox: stageBox, buildPieces: buildPieces,
         say: say, syncPanel: syncPanel, asOneStep: asOneStep, appStatus: appStatus, restart: restart,
+        toolShare: toolShare, commitShare: commitShare, soupVolume: soupVolume, close: close,
         FACE_COS: FACE_COS
       };
     }

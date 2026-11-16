@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=191be2da" />
+  <link rel="stylesheet" href="styles.css?v=aa859515" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -870,6 +870,43 @@
               </div>
               <button id="btn-scale-fit" class="btn btn-secondary" type="button"
               title="Scale uniformly by the largest factor that fits the printer the plate is set to, and say the factor. If it already fits, nothing changes.">Fit to plate</button>
+              <!-- FEATURE SIZE (app-scale-feature.js, nso_feature_size.js; docs/FEATURE-SIZE.md):
+                   one feature of the piece - a tab, boss, slot or pocket - resized on its own,
+                   the rest of the piece left where it was. Ghost while the numbers move; Set bakes. -->
+              <div class="scale-feature" id="scale-feature">
+              <button id="btn-scale-feature" class="btn btn-secondary" type="button" aria-pressed="false" aria-controls="scale-feature-panel"
+              title="Resize ONE feature of the piece - a tab, a boss, a rib, a slot or a pocket - and leave the rest where it is. Press, then click the feature on the piece (Shift-click adds another, sized with it). Type its Length, Width or Height: a ghost shows it on the piece, Set bakes it as one Undo.">Feature size</button>
+              <div id="scale-feature-panel" class="scale-feature-panel" hidden>
+              <p id="scale-feature-readout" class="hint" aria-live="polite">Resize one feature - a tab, boss, slot or pocket - and leave the rest of the piece alone.</p>
+              <div class="scale-unit scale-feature-mode" role="group" aria-label="How the feature resizes">
+              <button id="btn-scale-feature-keep" class="scale-unit-btn" type="button" aria-pressed="true" title="Move the ends: each end of the feature moves out or in by half the change and keeps its corners, eases and rounded tip; the middle stretches to meet it. For tabs, ribs, slots.">Keep ends</button>
+              <button id="btn-scale-feature-stretch" class="scale-unit-btn" type="button" aria-pressed="false" title="Scale the whole feature about its middle (Height about its foot). A round pin or boss stays round this way.">Stretch</button>
+              </div>
+              <div class="edit-row scale-row" id="scale-feature-length-row">
+              <label for="scale-feature-length">Length</label>
+              <input id="scale-feature-length" type="number" min="0.01" max="2000" step="0.01" disabled title="The feature's length - the long side of the smallest rectangle round it, on the face it stands on" aria-label="Feature length" />
+              <span class="hint" id="scale-feature-length-unit">mm</span>
+              <input type="range" id="scale-feature-length-slider" class="scale-slider" disabled aria-label="Feature length slider - previews on the piece, Set bakes it" />
+              </div>
+              <div class="edit-row scale-row" id="scale-feature-width-row">
+              <label for="scale-feature-width">Width</label>
+              <input id="scale-feature-width" type="number" min="0.01" max="2000" step="0.01" disabled title="The feature's width - across it, on the face it stands on" aria-label="Feature width" />
+              <span class="hint" id="scale-feature-width-unit">mm</span>
+              <input type="range" id="scale-feature-width-slider" class="scale-slider" disabled aria-label="Feature width slider - previews on the piece, Set bakes it" />
+              </div>
+              <div class="edit-row scale-row" id="scale-feature-height-row">
+              <label for="scale-feature-height" id="scale-feature-label-height">Height</label>
+              <input id="scale-feature-height" type="number" min="0.01" max="2000" step="0.01" disabled title="How far the feature stands out of the face it is on (a recess: how deep it goes in). Its foot stays on the face." aria-label="Feature height" />
+              <span class="hint" id="scale-feature-height-unit">mm</span>
+              <input type="range" id="scale-feature-height-slider" class="scale-slider" disabled aria-label="Feature height slider - previews on the piece, Set bakes it" />
+              </div>
+              <p id="scale-feature-note" class="hint scale-preview-note" aria-live="polite"></p>
+              <div class="scale-actions">
+              <button id="btn-scale-feature-set" class="btn" type="button" disabled title="Bake the feature size the ghost shows: one Undo step. Enter in a box does the same.">Set</button>
+              <button id="btn-scale-feature-cancel" class="btn btn-secondary" type="button" disabled title="Put Feature size away; the piece was never changed (Esc does the same).">Cancel</button>
+              </div>
+              </div>
+              </div>
             </div>
           </details>
           <!-- Cut: the card is the switch - open it and the cutter is live,
@@ -1711,7 +1748,7 @@
           <!-- ADD: what builds material onto a piece - Fill / Densify, Foam, Thicken,
                Extend, Bridge - out of the old Shape card, unchanged; and Close. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-add" data-sec="add">
-            <summary class="vp-bar-btn" title="Fill / Densify, Foam, Thicken out and in, Extend, Bridge, Close, Patch">Add</summary>
+            <summary class="vp-bar-btn" title="Fill / Densify, Foam, Thicken out and in, Extend, Step / Boss, Bridge, Close, Patch">Add</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-triple">
               <button id="btn-fill" class="btn btn-secondary" type="button"
@@ -1774,6 +1811,13 @@
                       title="Lengthen the piece along its one dominant straight axis, holding the cross-section perpendicular to that axis exactly fixed. Detects the axis itself; refuses a tapered, curved or ambiguous piece by name. Leave the box blank and press once to read the current length.">Extend</button>
               <input type="number" id="inp-extend-mm" min="0.1" max="2000" step="0.1"
                      placeholder="mm" aria-label="Extend to length, mm">
+            </div>
+            <!-- STEP / BOSS (app-boss.js, nso_boss.js; docs/BOSS.md): opens its own editor on the
+                 assembly editor's stage - click a face, shape the outline, drag it into place,
+                 see the ghost, Apply. -->
+            <div class="vp-row vp-row-full vp-row-boss">
+              <button id="btn-boss" class="btn btn-secondary" type="button" data-asm-mode="boss"
+                      title="Stand an outline out of a face: a step, a pad, a boss, a ledge with a sloped underside, or a wedge that thickens a wall at an angle. Opens an editor: click the face, pick Rectangle, Round or draw the outline on the face, set Height and Ramp, drag it into place or type its distances from the face's edges. The ghost shows it before anything changes; Apply adds it as one Undo.">Step / Boss</button>
             </div>
             <!-- BRIDGE: one button beside Extend and Mirror, and the card it
                  opens (app-bridge.js, nso_bridge.js). docs/BRIDGE.md. -->
@@ -3114,7 +3158,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=3f1e8256"></script>
+  <script src="app-core.js?v=7a1fce74"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=5b4ec154"></script>
 
@@ -3188,6 +3232,8 @@
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=3686d69c"></script>
   <script src="app-scale.js?v=68c344d3"></script>
+  <script src="nso_feature_size.js"></script>
+  <script src="app-scale-feature.js"></script>
   <script src="app-brush.js?v=2aff434b"></script>
   <!-- Pull: nso_densify.js is the shared subdivision (the gun will use it too), nso_pull.js the field and its guards, app-pull.js the pointer session. docs/PULL.md -->
   <script src="nso_densify.js?v=0b7748d1"></script>
@@ -3236,9 +3282,11 @@
   <script src="app-thicken-live.js?v=dab1b45f"></script>
   <script src="app-soften-live.js?v=d13157a0"></script>
   <script src="app-seat-surface.js?v=4b0f2e5d"></script>
-  <script src="app-asm-editor.js?v=d2bafe96"></script>
+  <script src="app-asm-editor.js?v=6c3457c9"></script>
   <script src="nso_interlock.js?v=d3c3b968"></script>
-  <script src="app-asm-interlock.js?v=ed5c1051"></script>
+  <script src="app-asm-interlock.js?v=0c5cbf8f"></script>
+  <script src="nso_boss.js"></script>
+  <script src="app-boss.js"></script>
   <script src="app-skin.js?v=cb03e88b"></script>
   <script src="app-skin-patch.js?v=42ac8ff6"></script>
   <script src="app-raster.js?v=2f85efde"></script>

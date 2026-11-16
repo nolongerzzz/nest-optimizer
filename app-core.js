@@ -306,6 +306,8 @@ const UNDO_REPLACE_LABEL = {
   fattenReplace: 'Undo: Fatten reverted',
   attachReplace: 'Undo: Attach reverted',
   interlockReplace: 'Undo: Interlock reverted',
+  bossReplace: 'Undo: Step / Boss reverted',
+  featureSizeReplace: 'Undo: Feature size reverted',
   detachReplace: 'Undo: Detach reverted',
   reattachReplace: 'Undo: Reattach reverted',
   stockReplace: 'Undo: Stock adjustment reverted',

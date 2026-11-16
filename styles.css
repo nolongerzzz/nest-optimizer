@@ -533,6 +533,25 @@ select:focus, input:focus {
   background: rgba(56, 189, 248, 0.15);
 }
 #scale-card .scale-unit-btn:last-child[aria-pressed="true"] { border-left: 1px solid #38bdf8; }
+/* Feature size (app-scale-feature.js): one feature of the piece, under Fit to
+   plate. Its rows are laid out as the card's own; its mode toggle sits left. */
+#scale-card .scale-feature { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+#scale-card #btn-scale-feature[aria-pressed="true"] { border-color: #38bdf8; color: #fff; background: rgba(56, 189, 248, 0.15); }
+#scale-card .scale-feature-panel[hidden] { display: none; }
+#scale-card .scale-feature-panel > .hint { margin: 4px 0; }
+#scale-card .scale-feature-mode { justify-content: flex-start; margin: 4px 0; }
+#scale-feature-panel .scale-row {
+  display: grid;
+  grid-template-columns: 4.2rem 5.4rem 1fr;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+#scale-feature-panel .scale-row label { margin: 0; white-space: nowrap; }
+#scale-feature-panel .scale-row input[type="number"] { width: 100% !important; margin: 0; padding-top: 4px; padding-bottom: 4px; }
+#scale-feature-panel .scale-row .hint { margin: 0; white-space: nowrap; }
+#scale-feature-panel .scale-row .scale-slider { grid-column: 1 / -1; margin: 0; padding: 0; }
+#scale-feature-panel .scale-row .scale-slider:disabled { opacity: 0.4; }
 
 .library-list {
   position: absolute;
@@ -5432,3 +5451,12 @@ body.sup-card-open #adjust-status { display: none; }
 .asm-ed-panel, .asm-ed-banner, .asm-ed-return, .asm-ed-status { z-index: 3; }
 .asm-il-tag { z-index: 1; }
 .asm-il-turn .btn { flex: 0 0 auto; width: auto; text-align: center; }
+
+/* Step / Boss (app-boss.js) borrows the assembly editor's panel classes; its
+   drawn-outline block and the thin-end row hide with [hidden]. */
+.boss-drawn { display: flex; flex-direction: column; gap: 6px; }
+.boss-drawn[hidden], #asm-boss-body .asm-il-seg[hidden], #asm-boss-body .asm-ed-label[hidden] { display: none; }
+.boss-drawn .asm-il-turn .btn { flex: 0 0 auto; width: auto; padding: 4px 8px; }
+.boss-drawn .asm-ed-row .btn { flex: 1 1 0; width: auto; }
+
+.asm-ed-tabs[hidden] { display: none; }

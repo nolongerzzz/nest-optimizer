@@ -144,8 +144,9 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. the buttons and the sliders ===');
   const btns = await page.evaluate(() => Array.from(document.querySelectorAll('#scale-card button')).map(b => b.id));
   console.log('   buttons: ' + btns.join(', '));
-  check('the card\'s buttons are the mm | in toggle, Set, Cancel and Fit to plate',
-    btns.join() === 'btn-scale-unit-mm,btn-scale-unit-in,btn-scale-set,btn-scale-cancel,btn-scale-fit', btns.join());
+  check('the card\'s buttons are the mm | in toggle, Set, Cancel and Fit to plate, then the Feature size section\'s (docs/FEATURE-SIZE.md)',
+    btns.join() === 'btn-scale-unit-mm,btn-scale-unit-in,btn-scale-set,btn-scale-cancel,btn-scale-fit,' +
+      'btn-scale-feature,btn-scale-feature-keep,btn-scale-feature-stretch,btn-scale-feature-set,btn-scale-feature-cancel', btns.join());
   const ui = await page.evaluate(() => {
     const rows = Array.from(document.querySelectorAll('#scale-rows .scale-row')).filter(r => !r.hidden);
     return {
