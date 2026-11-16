@@ -518,6 +518,8 @@ async function twoPoints(page, which) {
 
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 880 });
+  /* The card is DRAW now (docs/DRAW.md): Connect's anchors are its "Anchors on the plate" section, armed while it is open. Open it once; it stays open. */
+  await page.evaluate(() => { const s = document.getElementById('connect-sec-classic'); if (s) s.open = true; });
 
   /* The baseline the rest are read against: nothing armed. */
   console.log('\n=== 0. nothing armed: the reading itself works ===');

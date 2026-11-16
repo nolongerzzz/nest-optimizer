@@ -231,6 +231,8 @@ const sameSnap = (a, b) => a.length === b.length && a.every(x => b.some(y => y.i
 
 withApp(async (page, logs) => {
   await page.evaluate(installHelpers);
+  /* The card is DRAW now (docs/DRAW.md): Connect's anchors are its "Anchors on the plate" section, armed while it is open. Open it once; it stays open. */
+  await page.evaluate(() => { const s = document.getElementById('connect-sec-classic'); if (s) s.open = true; });
 
   /* used by more than one group (sections 2-3 and 11; 8 and 11), so declared above them */
   const cp = Math.cos(50 * Math.PI / 180), sp = Math.sin(50 * Math.PI / 180);
@@ -250,7 +252,7 @@ withApp(async (page, logs) => {
              title: m.querySelector('summary').textContent.trim(), wired: m.dataset.nsoWired === '1', noGate: !document.getElementById('btn-connect') && !m.querySelector('.vp-menu-body > button'), hidden: document.getElementById('connect-panel').hidden,
              sameLook: document.getElementById('connect-panel').className === document.getElementById('bridge-panel').className };
   });
-  check('#menu-connect is a column drop-down named Connect, right after Crop and right before Join', ui.menu && ui.between && ui.title === 'Connect', ui.title);
+  check('#menu-connect is a column drop-down named Draw (Connect is its second step), right after Crop and right before Join', ui.menu && ui.between && ui.title === 'Draw', ui.title);
   check('...it is wired, its card shut, and the card has Bridge\'s look', ui.wired && ui.hidden && ui.sameLook);
   check('...no gate button inside it: #btn-connect is gone and the card is the drop-down\'s body', ui.noGate);
 

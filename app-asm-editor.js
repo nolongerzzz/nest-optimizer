@@ -412,6 +412,7 @@
       if (a.min.x - r <= b.max.x && b.min.x - r <= a.max.x && a.min.y - r <= b.max.y && b.min.y - r <= a.max.y &&
           a.min.z - r <= b.max.z && b.min.z - r <= a.max.z) parent[find(i)] = find(j);
     }
+    if (E.together) list.forEach(function (_, k) { parent[find(k)] = find(0); });
     var groups = {};
     list.forEach(function (p, k) {
       var g = find(k);
@@ -931,6 +932,9 @@
     else if (MODES[E.mode].leave) MODES[E.mode].leave();
     E.mode = name;
     E.apart = name !== 'mate' && !!MODES[name].apart;
+    /* A mode that works ACROSS pieces (Draw > Connect: one drawing welded into
+       two of them) asks for the plate as it stands - every piece where it is. */
+    E.together = name !== 'mate' && !!MODES[name].asPlaced;
     buildPieces();
     if (name === 'mate') toStep('part');
     else if (MODES[name].enter) MODES[name].enter();
@@ -1055,6 +1059,7 @@
 
   function onKey(e) {
     if (!E) return;
+    if (document.body.classList.contains('draw-editor-open')) return;     // the Draw editor is over the stage: its keys
     var tag = (e.target && e.target.tagName) || '';
     var typing = (tag === 'INPUT' && e.target.type !== 'checkbox' && e.target.type !== 'range') || tag === 'TEXTAREA';
     /* the plate's shortcuts (Delete, the arrows, Ctrl+Z...) must not act on a plate that cannot be seen */
@@ -1069,6 +1074,7 @@
       return;
     }
     if (typing) return;
+    if (E.mode !== 'mate' && MODES[E.mode].key && !E.busy && MODES[E.mode].key(e)) { e.preventDefault(); return; }
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
   }
 
@@ -1083,7 +1089,7 @@
     if (menu && menu.open && !(mode && MODES[mode] && MODES[mode].solo)) menu.open = false;
     if (typeof clearJoinSlots === 'function' && state.joinSession) clearJoinSlots();
     buildDom(); buildStage();
-    E = { mode: 'mate', apart: false, opener: mode || 'mate',
+    E = { mode: 'mate', apart: false, together: false, opener: mode || 'mate',
           step: 'part', pieces: [], part: null, target: null, anchor: { mode: 'click' }, nudge: { u: 0, v: 0 }, spin: 0,
           solution: null, busy: false, ghost: null, hoverMark: null, partMark: null, targetMark: null, hoverFace: null, last: null };
     root.hidden = false;

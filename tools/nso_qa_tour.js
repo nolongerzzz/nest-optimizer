@@ -106,7 +106,7 @@ function findLarge() {
 const PLAN = [];
 const MENU = { 'Import': 'menu-import', 'Measure': 'menu-measure', 'Move': 'menu-move', 'Rotate': 'menu-rotate', 'Tip': 'menu-tip',
   'Align': 'menu-assemble', 'Gen+': 'menu-gen', 'Export': 'menu-export', 'Scale': 'menu-scale', 'Cut': 'menu-cut', 'Crop': 'menu-crop',
-  'Connect': 'menu-connect', 'Join': 'menu-assemble', 'Seat': 'menu-assemble', 'Supports': 'menu-supports', 'Add': 'menu-add',
+  'Connect': 'menu-connect', 'Draw': 'menu-connect', 'Join': 'menu-assemble', 'Seat': 'menu-assemble', 'Supports': 'menu-supports', 'Add': 'menu-add',
   'Subtract': 'menu-bit', 'Shape': 'menu-shape', 'Paint': 'menu-paint', 'Surface & edges': 'menu-surface', 'Sculpt': 'menu-sculpt',
   'Check & repair': 'menu-repair' };
 function V(sec, card, id, label, o) {
@@ -243,7 +243,7 @@ function buildPlan() {
   for (const sh of ['String', 'Ribbon', 'Tube', 'Tapered']) V(COL, 'Connect', 'btn-connect-go', sh + ': pick two anchors, Set', { setup: 'two', run: conn(sh) });
   V(COL, 'Connect', 'btn-connect-go', 'String, ends: Ball', { setup: 'two', run: conn('String', 'Ball') });
   V(COL, 'Connect', 'btn-connect-go', 'String, kept as its own piece', { setup: 'two', run: async x => { await x.flag('input[value="separate"]'); await conn('String')(x); } });
-  V(COL, 'Connect', 'btn-connect-cancel', 'Cancel', { setup: 'two', run: async x => { await x.pick(0, 0); await x.wait(200); await x.click('btn-connect-cancel'); } });
+  V(COL, 'Connect', 'btn-connect-cancel', 'Cancel', { setup: 'two', run: async x => { await x.select('sel-connect-shape', { label: 'String' }); await x.pick(0, 0); await x.wait(200); await x.click('btn-connect-cancel'); } });
   V(COL, 'Connect', 'btn-stock-attach', 'Attach (a Stock blank, click a face)', { pre: async x => { await x.click('btn-stock-cylinder'); await x.wait(400); await x.pick(0, 0); }, run: arm('btn-stock-attach', [1]) });
   V(COL, 'Connect', 'btn-reattach', 'Reattach', { run: press(['btn-reattach']) });
   V(COL, 'Join', 'join-slot-a', 'Pick piece A (a side wall)', { setup: 'two', run: async x => { await x.click('join-slot-a'); await x.pick(0, 0, false); } });

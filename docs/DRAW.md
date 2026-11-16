@@ -1,0 +1,186 @@
+# Draw — draw on a flat sheet, then connect it to a piece
+
+The column card that was **CONNECT** is **DRAW**. Draw is its main tool and
+Connect its second step:
+
+```
+DRAW
+[ Draw editor ]            a flat millimetre sheet: Pencil, Line, Rectangle, Ellipse
+[ Connect to a piece ]     the drawing on a face, as a ghost, moved freely; Weld in / Cut in / Own piece
+▸ Anchors on the plate     Connect as it was (docs/CONNECT.md), id for id
+[ Reattach ]
+```
+
+| | |
+|---|---|
+| geometry | `nso_sketch.js` (`window.NSO_Sketch`, headless) — outlines, solids |
+| editor | `app-draw-editor.js` (`window.NSO_DrawEditor`) |
+| connect | `app-draw-connect.js` — a SOLO mode on the Assemble editor's stage (`NSO_AsmEditor.mode('drawconnect')`), as Step / Boss is |
+| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`, screenshots to `tools/draw-out/`) |
+
+## Why
+
+The owner's request (2026-11-16), with a Bambu Suite pencil and the current
+Connect stroke side by side:
+
+> Rename the CONNECT card to DRAW. Draw the main tool of the card, connect a
+> second step. Utilize an editor like Bambu Suite uses for their pencil vs the
+> current draw on the plate/piece so there is more freedom to the lines I can
+> draw. Drawing line and Drawing fill … draw/fill different wall faces …
+> Connect similar to the new assemble flow: apply drawing to piece(s), in
+> isolation with ghost render before bake, with free movement for ease of
+> placement, without being limited by plate clicks and orbit limitations.
+
+Connect's freehand Draw drew where a ray from the pointer landed on the plate
+or a piece, so a stroke could only go where the view reached, and orbiting
+fought every stroke. Drawing now happens on a flat sheet; placing it happens
+on a stage with the pieces alone and a ghost.
+
+## The Draw editor
+
+Laid out the way the pencil in a laser / pen tool is: settings along the top,
+tools down the left, the objects on the right, a grid with rulers in the
+middle. Millimetres, y up.
+
+| tool | key | |
+|---|---|---|
+| Select | V | click to pick (Shift adds), drag to move, drag on empty sheet for a box, corner handles scale (aspect kept while the lock is on), arrows nudge 0.1 mm (Shift 1) |
+| Pencil | P | press and drag: freehand, smoothed on release (thinned 0.35 mm, Chaikin twice with turns over 60° kept as corners, RDP to 0.03 mm). Ending where it began closes it |
+| Line | L | click point after point; double-click or Enter ends it; a click on the first point closes it; Shift: 15° steps |
+| Rectangle | R | drag (Shift: square) |
+| Ellipse | E | drag (Shift: circle) |
+
+Wheel zooms about the pointer, right/middle drag or Space+drag pans, F fits.
+
+**Process type** — every object is a **Drawing Line** (the stroke given a
+*Width*: a bead, a rib; a closed one is a ring) or a **Drawing Fill** (the area
+the stroke goes round, solid). It applies to what is picked; with nothing
+picked it is what the next object becomes. **Height** is how far an object
+stands out of the face (blank: the drawing's own Height, on the right).
+
+**Size and place** — W / H (lock: keep aspect), Rotate by (Enter), X / Y of the
+pick's centre, Mirror ⇋ ⇵, Duplicate (Ctrl+D), Delete, Ctrl+A. *Scale line
+widths* makes a resize scale widths too.
+
+An object that cannot be made is **drawn red** and the readout says why: a fill
+that crosses itself, a line folded onto itself tighter than its width. Connect
+and Add to plate stay off until it is fixed.
+
+The editor's history is its own (Ctrl+Z / Ctrl+Shift+Z); nothing on the plate
+changes until **Connect** or **Add to plate**. The drawing is kept in this
+browser (`localStorage` `nso.sketch.v1`, a convenience).
+
+**Add to plate** makes the drawing a piece of its own, flat on the plate.
+
+## Connect
+
+The Assemble editor's stage, with the plate's pieces **as they stand** (the
+mode asks `asPlaced`: one offset for every piece, so a drawing can run from one
+piece onto the next).
+
+1. **Click the face it goes on** — any face: a top, a wall, an underside.
+2. The drawing stands on it as a **ghost** (green Weld, red Cut, amber Own
+   piece), each object its own height out of the face; on a wall, up the sheet
+   is up the wall (Step / Boss's upright frame). Move it freely:
+   - **drag the ghost** anywhere on the face's plane — past the face's edge
+     too, onto the next piece. A 0.1 mm step; Shift snaps to the face's centre
+     lines and flush with its edges;
+   - **arrows** nudge (Shift ×10), **[ ]** turn 15° (Shift 1°);
+   - type **Offset** (from the face's centre), **Turn**, **Scale %**,
+     **Height** (overrides every object's), **Lift** (off the face; negative
+     sinks it);
+   - a click on **another face** moves the drawing there, settings kept;
+   - **Edit drawing** reopens the editor with this face's rectangle drawn on
+     the sheet as a size reference; closing it comes back to the stage.
+   The pieces it would reach are lit orange; the rest are dimmed, not hidden.
+3. **Apply** — one Undo:
+   - **Weld in** — unioned into every piece it reaches, sunk 0.4 mm into the
+     face so the boolean bites solid. One piece: Step / Boss's
+     `toolShare` / `commitShare`, the piece keeps its identity and does not
+     move. Two or more: each piece's world soup is unioned with the drawing in
+     turn (each step must shrink the sum — a drawing that does not reach a lit
+     piece is refused by name) and one new piece takes their place through
+     Connect's own `NSO_connectCommit` (`supportSwap`: one Undo puts them all
+     back). **That is the connection.**
+   - **Cut in** — the solid turned into the face (from 0.4 mm above it to its
+     height below) and subtracted from every piece it reaches; the picked one
+     must be cut.
+   - **Own piece** — no boolean; the drawing as a piece of its own where the
+     ghost is.
+
+Escape steps back to the face pick; again returns to the plate. Return leaves.
+
+## How a drawing becomes a solid (`nso_sketch.js`)
+
+- **A line's outline** is its two sides, the stroke moved out by half the
+  width: round arcs round the outside of each turn (15° steps), and inside a
+  turn the two moved segments are cut where they cross (the little loop is
+  removed — only loops shorter than `6r + 2` mm, so a real self-crossing is
+  not mistaken for one). Round ends close it. A **closed line** is a ring: the
+  outer side and the inner side as a hole; narrower than its width, it is the
+  outer side filled.
+- **A line that crosses itself** cannot be one outline: it is halved (more
+  corners put on first when it has few) until each run is simple, the runs
+  overlapping by about a width, and the caller unions them. A hairpin whose
+  legs lie on each other is refused in words.
+- **A fill** is the stroke closed; one that crosses itself is refused.
+- **Solids**: each outline (holes by even-odd) triangulated by `NSO_CDT` and
+  stood up from `lift − embed` to `lift + height`: bottom, top, a wall round
+  every loop. Outline edges are cut to at most **2 mm** first — a long thin
+  triangle is what the boolean slices into slivers (CONNECT.md's stations
+  note). Closed and outward by construction, checked by signed volume.
+- Objects whose boxes overlap are unioned together before anything else
+  (`overlapGroups`, then `NSO_unionSoups`); objects apart are two shells side
+  by side.
+
+## Measured
+
+`npm run sketch:test` — every kind (straight, bent, zigzag, hairpin, wave,
+self-looping, square and elliptical rings, fills) closed, wound, no
+degenerate triangle, from −embed to height exactly; a 40 × 2 line is
+`(L·w + disc)·h`, a 30 × 20 fill its area × h, a 30 × 20 ring of width 2 the
+outer square (round corners, to chords) less the inner; smoothing keeps a right
+angle; refusals in words; centring, scale, mirror, lift, per-object height.
+
+`npm run draw:drive` — two 30 × 30 × 10 boxes 16 mm apart, a 60 × 3 × 2 line
+typed across them: one piece in their place, volume **18393.176 mm³ = 2 × 9000
++ the line above the faces + the 16 mm span hanging 0.4 below them**, to the
+third decimal; `mesh_validate.py`: 0 open, 0 non-manifold, 0 degenerate, 0
+piercing; one Undo puts both boxes back. A 10 × 4 × 1 fill cut into a wall
+removes exactly 40 mm³ and the box does not move. Own piece adds 40 mm³ on the
+box's top, the boxes untouched.
+
+## PAINT SCOPE
+
+The editor: none. Connect: **WHOLE-PIECE** on every piece a Weld or a Cut
+changes (a boolean replaces every triangle); a painted piece is refused in
+words (`toolShare`'s check for one piece, `painted()` for several). Own piece
+touches none.
+
+## What changed elsewhere
+
+- `index.html` — `#menu-connect`'s summary reads **Draw**; the card's body is
+  `#draw-card`: `#btn-draw-editor`, `#btn-draw-connect`, then the old card
+  inside `<details id="connect-sec-classic">` ("Anchors on the plate"), every
+  id kept; Reattach stays the last row.
+- `app-connect.js` — the anchor picks are armed while the card **and** the
+  "Anchors on the plate" section are open (was: the card); `NSO_connectCommit`
+  takes an optional name.
+- `app-asm-editor.js` — a mode may ask `asPlaced` (every piece where it stands)
+  and handle keys (`key(e)`); the stage's keys stand down while the Draw editor
+  is over it.
+- `app-core.js` — undo label `drawConnectReplace`.
+- Tests that drive the old card open its section first
+  (`nso_connect_drive.js`, `nso_pick_release_test.js`; `nso_qa_tour.js`'s
+  Cancel selects the shape first, which opens it).
+
+## Not here (yet)
+
+- **Curved faces.** The drawing lies on the clicked face's plane; on a curved
+  face that is the clicked triangle's plane, so it stands off or sinks in
+  away from that point. Wrapping a drawing round a curve is a later ticket.
+- **Text and imported SVG** as drawing objects.
+- **Node editing** of a drawn stroke (move one point of it); for now redraw it,
+  or scale / rotate / mirror the whole object.
+- **The old on-plate freehand Draw** (the Draw switch in "Anchors on the
+  plate") is still there, unchanged; it may be retired once this has been used.

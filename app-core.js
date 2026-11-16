@@ -307,6 +307,7 @@ const UNDO_REPLACE_LABEL = {
   attachReplace: 'Undo: Attach reverted',
   interlockReplace: 'Undo: Interlock reverted',
   bossReplace: 'Undo: Step / Boss reverted',
+  drawConnectReplace: 'Undo: Draw > Connect reverted',
   featureSizeReplace: 'Undo: Feature size reverted',
   detachReplace: 'Undo: Detach reverted',
   reattachReplace: 'Undo: Reattach reverted',
