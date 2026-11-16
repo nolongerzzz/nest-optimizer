@@ -213,7 +213,7 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null,   /* the filament's own */
+        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null,   /* the filament's own */
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true }), JSON.stringify(base));
@@ -496,6 +496,18 @@ async function main() {
       const off = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 0 }) });
       const on = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 212 }) });
       check('CR-TPU slices with a bridge temperature of 212', off.ok && on.ok, on.reason);
+      {
+        /* FROM A LAYER ON: every layer from the row's to the top at the bridge temperature - one change in, none out */
+        const fr = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 212, bridgeTempFrom: 5 }) });
+        const gf = fr.ok ? L.text(await L.R.openZip(fr.bytes).read('Metadata/plate_1.gcode')).split('\n') : [];
+        const pk = gf.map((l, i) => /^; NSO bridge temperature/.test(l) ? i : -1).filter(i => i >= 0);
+        const zOf = i => { for (let j = i; j >= 0; j--) if (/^; Z_HEIGHT: /.test(gf[j])) return +gf[j].slice(11); return null; };
+        check('Bridge temp from layer 5: one change at the park, to 212, before layer 5 (z 1.0), and none after it; the readout says so',
+          fr.ok && pk.length === 1 && gf[pk[0]] === '; NSO bridge temperature: 212 for the bridges' && Math.abs(zOf(pk[0]) - 1.0) < 1e-6 &&
+            fr.stats.bridgeTemp.fromLayer === 5 && /^212 \u00b0C from layer 5 to the top/.test(PRINT.bridgeTempWords(fr.stats.bridgeTemp)) &&
+            PRINT.cleanSettings({ bridgeTempFrom: '1' }).bridgeTempFrom === null && PRINT.cleanSettings({ bridgeTempFrom: '36' }).bridgeTempFrom === 36,
+          JSON.stringify([fr.reason, pk.map(i => gf[i] + ' @' + zOf(i)), fr.stats && fr.stats.bridgeTemp]));
+      }
       if (off.ok && on.ok) {
         const g = L.text(await L.R.openZip(on.bytes).read('Metadata/plate_1.gcode')).split('\n'), g0 = L.text(await L.R.openZip(off.bytes).read('Metadata/plate_1.gcode')).split('\n');
         const body = g.slice(g.indexOf('; MACHINE_START_GCODE_END'), g.indexOf('; MACHINE_END_GCODE_START')).filter(l => !/^M73 /.test(l));   /* (the progress marks fall where they fall) */

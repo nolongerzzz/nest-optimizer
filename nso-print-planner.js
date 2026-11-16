@@ -967,6 +967,7 @@
    *   filamentStart  the filament's own start G-code, expanded (lines): it replaces the template filament's, which opens afterStart
    *   tempSteps   { stepC, bandMm }: the nozzle temperature changes by stepC at every bandMm of height (see the head of this file)
    *   bridgeTemp  the nozzle temperature a layer's bridges print at, changed at the printer's park (see the head of this file)
+   *   bridgeTempFrom  a layer number (the first is 1): from it to the top every layer prints at bridgeTemp
    * @returns {{ok, reason, gcode, layers, stats, settings, labels}}
    */
   function plan(res, opts) {
@@ -1043,6 +1044,11 @@
         }
         coldLayer[pj0] = hb || pj0 - lastB <= BRIDGE_TEMP_COVER;
       });
+      /* FROM A LAYER ON (opts.bridgeTempFrom, the card's "from layer"; Bambu's layer numbers, the first is 1): every layer from there to the
+         top prints at the bridge temperature - one change in, none out. The owner's CR-TPU tower level (2026-11-15): 235 for the walls under
+         the roof, 215 from the layer after the cone's tip through the bridge and the roof. */
+      var fromL = +opts.bridgeTempFrom;
+      if (fromL >= 2) for (var fl = fromL - 1; fl < printing.length; fl++) coldLayer[fl] = true;
     }
     var bands = [];
     if (steps) {
@@ -1439,7 +1445,7 @@
       stats: {
         layers: totalLayers, maxZ: top, filamentMm: lengthMm, bodyFilamentMm: st.extruded, volumeMm3: volume,
         grams: volume / 1000 * density, box: box,
-        bridgeTemp: bridgeT != null ? { temp: bridgeT, changes: bridgeStat.changes, layers: bridgeStat.layers, secondsEach: BRIDGE_TEMP_SECONDS } : null,
+        bridgeTemp: bridgeT != null ? { temp: bridgeT, changes: bridgeStat.changes, layers: bridgeStat.layers, secondsEach: BRIDGE_TEMP_SECONDS, fromLayer: +opts.bridgeTempFrom >= 2 ? +opts.bridgeTempFrom : null } : null,
         tempBands: steps ? bands : null,                       // the temperature steps as written: [{ temp, fromZ, layer }]
         seconds: { start: startS, body: bodySeconds, end: Pr.timing.endSeconds, total: totalSeconds }
       }

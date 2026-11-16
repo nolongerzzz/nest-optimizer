@@ -178,6 +178,12 @@ then the travel to the layer's first path, the nozzle down, and the filament for
   it used to cost a pair of waits near the top of every part.
 - The park is outside every object's M624 / M625, so skipping an object does not skip the change.
 - With temperature steps, "after the bridges" is the band's temperature.
+- **From a layer on** (the card's **Bridge temp from layer**, `opts.bridgeTempFrom`; the preview's
+  layer numbers, the first is 1): every layer from that one to the top prints at the bridge
+  temperature - one change at the park going in, none coming out. For a part whose walls want it
+  hot and whose roof wants it cool: the owner's CR-TPU tower level of 2026-11-15, 235 C (240 the
+  first layer) for the walls under the roof and 215 from layer 36, the layer after the cone's tip,
+  through the bridge and the roof. Empty: only the bridges' own stretches. It needs a Bridge temp.
 - Refused, in words: a bridge temperature outside the filament's range; any printer but the A1 mini
   (`PARK` holds each printer's own moves, and the P1S's chute, behind the bed, is not written).
 - The print's time counts 15 s a change: the owner timed the wait at 10-12 s on the A1 mini (235 to 215 and back), and the moves are added.

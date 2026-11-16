@@ -120,6 +120,9 @@
                            /* the bridges' own nozzle temperature, changed at the printer's park: null is the filament's own (none for the
                               profile's PLA, 215 for CR-TPU on the A1 mini), 0 is none whatever the filament */
                            bridgeTemp: null,
+                           /* the layer (Bambu's numbers, the first is 1) from which every layer to the top prints at the bridge temperature: null is
+                              only the bridges' own stretches */
+                           bridgeTempFrom: null,
                            /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). They start at the printer profile's values (settingsFromConfig);
                               these are Bambu's own defaults, for a card with no profile. NSO's old numbers (top 0.18, first layer solid, a bridge of
                               5 mm not held) are the Print card's built-in saved setting "NSO classic" */
@@ -243,7 +246,7 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null,
+      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null,
       /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
          keys; a key the profile does not hold is this slicer's own default */
       supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
@@ -287,6 +290,7 @@
       bridgeSpeed: opt(s.bridgeSpeed, 1, 300, 1), bridgeFlow: opt(s.bridgeFlow, 0.5, 1.5, 2), hangSpeed: opt(s.hangSpeed, 1, 300, 1), bridgeFirst: s.bridgeFirst === true || s.bridgeFirst === 'on' ? true : s.bridgeFirst === false || s.bridgeFirst === 'off' ? false : null,
       flowRatio: opt(s.flowRatio, 0.8, 1.2, 3), retractLen: opt(s.retractLen, 0, 3, 2), retractSpeed: opt(s.retractSpeed, 5, 80, 0), retractBefore: opt(s.retractBefore, 0, 100, 0), zHop: opt(s.zHop, 0, 2, 2),
       bridgeTemp: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.max(170, Math.min(300, v))); })(s.bridgeTemp),   /* 0: none */
+      bridgeTempFrom: (function (v) { v = parseFloat(v); return !isFinite(v) || v < 2 ? null : Math.round(Math.min(100000, v)); })(s.bridgeTempFrom),   /* under 2: none */
       supDensity: Math.round(n(s.supDensity, D.supDensity, 10, 100)),
       supExpand: (function (v) { return v < 0 ? -1 : r2(v); })(n(s.supExpand, D.supExpand, -1, 10)),
       supWalls: Math.round(n(s.supWalls, D.supWalls, -1, 5)),
@@ -394,7 +398,7 @@
 
   /** What the planner is told beside the config: the filament's cooling (undefined: NSO's default profile), its start G-code, the temperature steps. */
   function plannerExtras(config, settings) {
-    if (!settings) return { cooling: undefined, filamentStart: undefined, tempSteps: undefined, bridgeTemp: undefined, hangSpeed: undefined };
+    if (!settings) return { cooling: undefined, filamentStart: undefined, tempSteps: undefined, bridgeTemp: undefined, bridgeTempFrom: undefined, hangSpeed: undefined };
     var f = filamentOf(settings.filament), PL = lazy('nso-print-planner.js', 'NSOPrintPlanner'), CP = lazy('nso-cooling-profiles.js', 'NSOCoolingProfiles');
     var S = PL.settingsFrom(config);
     return {
@@ -402,6 +406,7 @@
       filamentStart: f.start ? f.start(Math.max(S.temp.bed, S.temp.bedInitial), config) : undefined,
       tempSteps: settings.tempStep ? { stepC: settings.tempStep, bandMm: settings.tempBand } : undefined,
       bridgeTemp: bridgeTempOf(config, settings) || undefined,
+      bridgeTempFrom: bridgeTempOf(config, settings) && settings.bridgeTempFrom ? settings.bridgeTempFrom : undefined,
       hangSpeed: hangSpeedOf(config, settings) || undefined
     };
   }
@@ -581,7 +586,7 @@
       if (!res.ok) return { ok: false, reason: 'Slice refused: ' + res.reason };
       stage('writing', { layers: res.planes.length });
       var ex = plannerExtras(config, settings);
-      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps, bridgeTemp: ex.bridgeTemp, hangSpeed: ex.hangSpeed }).then(function (out) {
+      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps, bridgeTemp: ex.bridgeTemp, bridgeTempFrom: ex.bridgeTempFrom, hangSpeed: ex.hangSpeed }).then(function (out) {
         var seen = {};
         out.plan.layers.forEach(function (l) { l.features.forEach(function (f) { seen[f] = 1; }); });
         var st = out.plan.stats;
@@ -671,6 +676,8 @@
   function bridgeTempWords(b) {
     if (!b) return '';
     if (!b.changes) return 'bridge temp ' + b.temp + ' \u00b0C set, but no layer has enough bridge for it';
+    if (b.fromLayer) return b.temp + ' \u00b0C from layer ' + b.fromLayer + ' to the top' + (b.layers ? ' (bridges on ' + b.layers + ' layer' + (b.layers === 1 ? '' : 's') + ')' : '') +
+      ': ' + b.changes + ' nozzle temperature change' + (b.changes === 1 ? '' : 's') + ' at the park, about ' + fmtTime(b.changes * b.secondsEach);
     return 'bridges at ' + b.temp + ' \u00b0C on ' + b.layers + ' layer' + (b.layers === 1 ? '' : 's') + ': ' + b.changes + ' nozzle temperature change' + (b.changes === 1 ? '' : 's') +
       ' at the park, about ' + fmtTime(b.changes * b.secondsEach);
   }
@@ -775,7 +782,7 @@
                  'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface-angle', 'slice-set-iface',
                  'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow',
                  'slice-set-temp-step', 'slice-set-temp-band',
-                 'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-hang-speed', 'slice-set-bridge-temp', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-retract-before', 'slice-set-zhop',
+                 'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-hang-speed', 'slice-set-bridge-temp', 'slice-set-bridge-temp-from', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-retract-before', 'slice-set-zhop',
                  /* Bambu's Advanced support rows, on the Supports card (docs/SUPPORT-ADVANCED.md) */
                  'slice-set-sup-density', 'slice-set-sup-expand', 'slice-set-sup-walls', 'slice-set-sup-topz', 'slice-set-sup-bottomz', 'slice-set-sup-base',
                  'slice-set-sup-base-spacing', 'slice-set-sup-angle', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion',
@@ -856,7 +863,7 @@
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
       bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band'),
-      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'),
+      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'),
       flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), retractBefore: v('slice-set-retract-before'), zHop: v('slice-set-zhop')
     }));
   }
@@ -882,6 +889,7 @@
     set('slice-set-iface', interfaceRule() || '');
     /* the filament: a null row shows the filament's own value (empty until the template is fetched) */
     set('slice-set-filament', filamentOf(st.filament).id); set('slice-set-temp-step', st.tempStep == null ? 0 : st.tempStep); set('slice-set-temp-band', st.tempBand == null ? 10 : st.tempBand);
+    set('slice-set-bridge-temp-from', st.bridgeTempFrom == null ? '' : st.bridgeTempFrom);
     showFilamentRows();
     FILAMENT_ROWS.forEach(function (r) { if (st[r[1]] != null) set(r[0], st[r[1]]); });
     filamentNote(); bridgeNote();
