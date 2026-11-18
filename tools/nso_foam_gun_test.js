@@ -19,6 +19,8 @@
      8. fixtures/welded_gaps.stl (a welded part: float-noise faces, needles, a
         wall pinched to nothing, a hairline crack): its four gaps, shot one after
         another, each closed, ending with no hole through it (genus 0)
+     9. the hairline slit left where the crack reached the outside: a click on the
+        top face beside it (reach) fills it out to its flared mouth
 */
 'use strict';
 const path = require('path');
@@ -103,7 +105,7 @@ function bounds(s) {
   const notched = minus(block(), chamber, mouth);
   const r4 = await shot(notched, -4, 5, 10);
   gateSolid('the chamber', notched, r4, 20 * (10 * 4 + 0.4 * 8), 0.01);
-  check('...its mouth closed flush with the outside (bridge > 0, said so)', r4.bridge > 0 && /mouth closed flush/.test(r4.reason), r4.reason);
+  check('...its mouth closed flush with the outside (bridge > 0, said so)', r4.bridge > 0 && /mouth \(under [0-9.]+ mm\) closed flush/.test(r4.reason), r4.reason);
   check('...the piece is a plain block again (volume 40 x 30 x 20)', r4.ok && rel(vol(r4.mesh), 24000) < 0.002, r4.ok && vol(r4.mesh).toFixed(2));
 
   console.log('\n== 4. amount 50 ==');
@@ -154,6 +156,21 @@ function bounds(s) {
     if (r.ok && r.changed) soup = r.mesh;
   }
   check('the welded part: two holes through it before (genus ' + g0 + '), none after', g0 === 2 && genus(soup) === 0, genus(soup));
+
+  console.log('\n== 9. the hairline slit the crack left to the outside (welded_gaps.stl, after the four shots) ==');
+  /* About 0.9 mm long and 0.01-0.05 mm wide, flaring to the outside at (2.25, -18.8):
+     thinner than the seed's step off its wall, and shut by a 0.01 mm closing at its
+     narrowest. Seen from above, a click lands on the top face beside it. */
+  const t9 = Date.now();
+  const r9b = await GUN.spray({ rawTris: soup, skipList: [] }, { point: [2.14, -18.2, 13.55], dir: [0, 0, -1], reach: 0.05 }, { wasm: W });
+  const cs9 = r9b.ok && r9b.changed ? FOAM.census(r9b.mesh) : null;
+  check('a click on the top face 0.05 mm from it finds it, and fills it plate to face, closed (' + (Date.now() - t9) + ' ms)',
+        r9b.ok && r9b.changed && cs9.closed && !cs9.degen && r9b.reachesPlate && r9b.reachesFace, r9b.reason);
+  check('...out to its flared mouth, not just its narrowest point: 0.6 mm³ (0.023 mm² x 27.1 mm)', r9b.ok && r9b.addedVolume > 0.5 && r9b.addedVolume < 0.75,
+        r9b.ok && r9b.addedVolume.toFixed(3));
+  check('...and says so in numbers that are not 0', /0\.6\d mm³/.test(r9b.reason) && /under 0\.1 mm/.test(r9b.reason), r9b.reason);
+  const r9c = await GUN.spray({ rawTris: soup, skipList: [] }, { point: [2.6, -18.2, 13.55], dir: [0, 0, -1], reach: 0.1 }, { wasm: W });
+  check('a click on the top face 0.4 mm from it is not a gap', !r9c.ok && r9c.kind === 'air', r9c.reason);
 
   console.log('\npassed ' + pass + ' check(s), ' + fail + ' failure(s)');
   if (fail) { FAILED.forEach(n => console.log('  FAILED: ' + n)); process.exit(1); }

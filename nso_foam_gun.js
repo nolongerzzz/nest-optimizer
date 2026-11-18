@@ -63,8 +63,10 @@
                                           span, reachesPlate, reachesFace, bridge,
                                           slabs, reason, kind }
        piece { rawTris }   the soup in raw axes
-       aim   { point, dir } the click's hit on the piece and the ray's direction,
-                            both raw
+       aim   { point, dir, reach } the click's hit on the piece and the ray's
+                            direction, both raw; reach (mm, default 0.05): a gap
+                            this near the seed counts as aimed at - a hairline
+                            slit is narrower than the seed's step off the wall
        opts  { up, amount (default 100), wasm (manifold-3d, else NSO_CSG.load()),
                preview (default true: also hand back `foam`, the foam alone, raw),
                skipList (paint: a painted face the foam would reach stands it
@@ -87,14 +89,18 @@
   'use strict';
 
   var EPS_SEED = 0.02;        // mm: the seed is this far back along the ray from the hit
+  var REACH = 0.05;           // mm: a gap this near the seed counts as aimed at (the page passes a few pixels' worth)
   var WELD = 1e-4;            // mm: the weld radius - heights this close are one
   var STEP = 0.5;             // mm: the tallest slab
   var GROW = 0.03;            // mm: the foam reaches this far into the walls it fills against
   var OVER = 0.05;            // mm: overshoot at the plate and the face, trimmed back
-  var R_LADDER = [0, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4];
+  var R_LADDER = [0, 0.005, 0.01, 0.02, 0.035, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4];   // fine at the small end: a hairline slit a weld leaves needs its own r
   var MIN_AREA = 1e-6;        // mm^2: a gap smaller than this is no gap
   var FOAM_SIMPLIFY = 0.005;  // mm: the foam's outline - it reaches GROW into the walls, so this is plenty
   var SIMPLIFY = 1e-4;        // mm: a section's corners this close to a straight run are dropped
+  var FLUSH = 2.5;            // a gap found at r is taken out to the outside with closings up to this x r ...
+  var FLUSH_MAX = 0.1;        // ... but no wider than this: a weld's hairline crack flares to the outside within a
+                              // tenth of a mm; a wider closing would bridge the outline's own V's (a notch's arms)
   var POCKET_MIN = 8;         // a pocket behind a mouth of 2r holds at least this x r^2
   var PLATE_REACH = 0.5;      // mm: a gap whose bottom is this close to the plate, over air, drops to it
 
@@ -345,25 +351,65 @@
     if (P.bad) return { ok: false, kind: 'notSolid', reason: P.bad };
     var d = norm(aim.dir || []), p = aim.point;
     if (!d || !p) return { ok: false, kind: 'air', reason: 'no aim - click on the piece, into a gap' };
+    var reach = Math.max(0, +aim.reach || REACH);
     var sp = [p[0] - d[0] * EPS_SEED, p[1] - d[1] * EPS_SEED, p[2] - d[2] * EPS_SEED];
     var seed = P.F.identity ? sp : toF(P.F, sp);
+    /* A click on the top (or bottom) face beside a gap: the seed is pulled just
+       inside the face, and the gap is looked for within reach of it there. */
+    var edge = Math.max(EPS_SEED, 1e-3);
+    if (seed[2] >= P.zmax && seed[2] - P.zmax <= EPS_SEED + reach) seed[2] = P.zmax - edge;
+    else if (seed[2] <= P.zmin && P.zmin - seed[2] <= EPS_SEED + reach) seed[2] = P.zmin + edge;
     if (!(seed[2] > P.zmin && seed[2] < P.zmax)) return { ok: false, kind: 'air', reason: 'that is above or below the piece - aim into a gap, at its wall' };
     var js = -1, i;
     for (i = 0; i < P.nS; i++) if (seed[2] >= P.cuts[i] && seed[2] <= P.cuts[i + 1]) { js = i; break; }
     if (js < 0) js = 0;
     var S = sectionAt(P, js), rMax = Math.max(0.05, P.w / 4);
+    var near = reach > 0 ? W.CrossSection.circle(reach, 24).translate([seed[0], seed[1]]) : null;
     for (i = 0; i < R_LADDER.length && R_LADDER[i] <= rMax; i++) {
-      var G = gapsAt(W, S, R_LADDER[i]), hit = null;
+      var G = gapsAt(W, S, R_LADDER[i]), hit = null, hitNear = null, best = 0;
       for (var g = 0; g < G.gaps.length; g++) {
         /* A closing also rounds every inside corner by r - about 0.21 r^2 of
            "gap" in a corner that is not one. A pocket behind a mouth is far
            bigger than its mouth: less than POCKET_MIN x r^2 is a corner. */
-        var ok = !hit && csHas(G.gaps[g], seed[0], seed[1]) && (R_LADDER[i] === 0 || G.gaps[g].area() >= POCKET_MIN * R_LADDER[i] * R_LADDER[i]);
-        if (ok) hit = G.gaps[g]; else G.gaps[g].delete();
+        var big = R_LADDER[i] === 0 || G.gaps[g].area() >= POCKET_MIN * R_LADDER[i] * R_LADDER[i], keep = false;
+        if (big && !hit && csHas(G.gaps[g], seed[0], seed[1])) { hit = G.gaps[g]; keep = true; }
+        else if (big && near) {
+          /* Not under the seed, but within reach of it: a hairline slit is
+             narrower than the step back off the wall. The nearest wins. */
+          var x = G.gaps[g].intersect(near), xa = x.area();
+          x.delete();
+          if (xa > best) { if (hitNear) hitNear.delete(); hitNear = G.gaps[g]; best = xa; keep = true; }
+        }
+        if (!keep) G.gaps[g].delete();
       }
-      if (hit) { if (lap) lap('bridge'); return { ok: true, P: P, seed: seed, js: js, r: R_LADDER[i], first: hit, held0: G.held }; }
+      if (hit && hitNear) { hitNear.delete(); hitNear = null; }
+      if (!hit && hitNear) hit = hitNear;
+      if (hit) {
+        /* Out to the outer surface: the smallest r shuts the mouth at its
+           narrowest, and a mouth that flares leaves a wedge outside that. Wider
+           closings, each up to FLUSH x the last, take the gap out to where the mouth meets
+           the outside - while the gap they give still holds this one and is
+           still a pocket, not a corner - and only up to FLUSH_MAX, the flare
+           of a hairline; past that the outline's own shapes would be bridged. */
+        var r0 = R_LADDER[i], held = G.held;
+        for (var k = i + 1; r0 > 0 && k < R_LADDER.length && R_LADDER[k] <= FLUSH * R_LADDER[i] + 1e-12 && R_LADDER[k] <= Math.min(rMax, FLUSH_MAX); k++) {
+          var Gk = gapsAt(W, S, R_LADDER[k]), wider = null;
+          for (g = 0; g < Gk.gaps.length; g++) {
+            var ok = !wider && Gk.gaps[g].area() >= POCKET_MIN * R_LADDER[k] * R_LADDER[k];
+            if (ok) { var xx = Gk.gaps[g].intersect(hit), xa2 = xx.area(); xx.delete(); ok = xa2 >= 0.9 * hit.area(); }
+            if (ok) wider = Gk.gaps[g]; else Gk.gaps[g].delete();
+          }
+          if (!wider) { Gk.held.delete(); break; }
+          hit.delete(); held.delete();
+          hit = wider; held = Gk.held; i = k;
+        }
+        if (near) near.delete();
+        if (lap) lap('bridge');
+        return { ok: true, P: P, seed: seed, js: js, r: R_LADDER[i], first: hit, held0: held };
+      }
       G.held.delete();
     }
+    if (near) near.delete();
     return { ok: false, kind: 'air', reason: 'that is not in a gap - the space there is open to the outside wider than ' +
              f1(2 * Math.min(rMax, R_LADDER[R_LADDER.length - 1])) + ' mm. Aim into a slot, a crack or a notch, at its wall' };
   }
@@ -583,10 +629,13 @@
                r.reachesPlate ? 'from the plate up to the gap\'s ceiling' :
                r.reachesFace ? 'from the gap\'s floor up to the face' : 'from the gap\'s floor to its ceiling';
     var full = r.amount >= 100 ? ', ' + ends : ' (' + Math.round(r.amount) + '% of the way, ' + ends.replace(/^from /, 'rising from ') + ')';
-    return 'Foam sprayed - ' + grouped(r.addedVolume) + ' mm³ into the gap' + full +
-           (r.bridge > 0 ? '; its ' + f1(2 * r.bridge) + ' mm mouth closed flush with the outside' : '') + '.';
+    return 'Foam sprayed - ' + vol(r.addedVolume) + ' mm³ into the gap' + full +
+           (r.bridge > 0 ? '; its mouth (under ' + mm(2 * r.bridge) + ' mm) closed flush with the outside' : '') + '.';
   }
-  function readout(added) { return '+' + grouped(added) + ' mm³'; }
+  /* Volumes and widths a hairline gap has: enough digits to be more than 0. */
+  function vol(v) { return v >= 10 ? grouped(v) : (v >= 1 ? v.toFixed(1) : v.toPrecision(2)); }
+  function mm(x) { return x >= 1 ? f1(x) : String(+x.toPrecision(2)); }
+  function readout(added) { return '+' + vol(added) + ' mm³'; }
 
   var api = { spray: spray, probe: probe, prepare: prepare, pocket: pocket, forget: forget, readout: readout, frameFor: frameFor,
               STEP: STEP, GROW: GROW, OVER: OVER, R_LADDER: R_LADDER };

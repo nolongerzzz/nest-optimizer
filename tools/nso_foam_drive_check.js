@@ -575,10 +575,10 @@ withApp(async (page, logs) => {
         cur0.kind === 'plain' && /^url\("data:image\/svg\+xml;utf8,.*"\) 1 10, crosshair$/.test(cur0.css), cur0.kind + ' ' + cur0.css.slice(0, 40));
   const offPiece = await page.evaluate(() => { const r = state.renderer.domElement.getBoundingClientRect(); return [r.left + 8, r.top + 8]; });
   check('...off the piece the cursor is the plain gun (a press there orbits)', (await page.evaluate(p => window.nsoFoamGun.hoverAt(p[0], p[1]), offPiece)) === 'plain');
-  const topSpot = await pieceSpot(page);
+  const topSpot = await screenOfRaw(page, [-16, -5, 13.55]);   // the left body's top face, 4 mm from any gap
   check('...over the top face, not into a gap, it shows the red bar', (await page.evaluate(p => window.nsoFoamGun.hoverAt(p.x, p.y), topSpot)) === 'no');
-  /* A real press on the piece's top face: the ray meets the top, not a gap. */
-  await hold(page, 600, await pieceSpot(page));
+  /* A real press on the piece's top face, well clear of any gap. */
+  await hold(page, 600, topSpot);
   await page.waitForTimeout(1500);
   const giTop = await page.evaluate(() => window.nsoFoamGun.info());
   check('a press on the top face, not into a gap: refused in words, nothing changed, no undo entry',

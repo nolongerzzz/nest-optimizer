@@ -855,6 +855,7 @@
 
   var TAP_MS = 250;               // let go before this much foam has risen (this long a hold) and nothing is set
   var GLOW_MS = 1400;             // the foam just set glows this long
+  var REACH_PX = 6;               // a gap this many pixels from the cursor counts as aimed at
   var PREFETCH_MS = 120;          // the cursor rests this long on a gap before its foam is built ahead
   var P = {
     on: false, m: null, ms: null, base: null, skip: null, up: null, aim: null,
@@ -1017,7 +1018,13 @@
     var f = (typeof nsoRawFrameOf === 'function') ? nsoRawFrameOf(P.m) : null;
     var point = f ? nsoRawPointFromLocal(f, [lp.x, lp.y, lp.z]) : [lp.x, -lp.z, lp.y];
     var dir = (typeof nsoRawDirFromLocal === 'function') ? nsoRawDirFromLocal([ld.x, ld.y, ld.z]) : [ld.x, -ld.z, ld.y];
-    return { point: point, dir: dir, ms: ms, through: through };
+    /* Reach: a gap within REACH_PX of the cursor counts as aimed at - a
+       hairline slit is thinner than a pixel. In mm at the hit's depth. */
+    var wp = ms.localToWorld(lp.clone()), cam = state.camera, perPx = 0;
+    if (cam.isPerspectiveCamera) perPx = 2 * wp.distanceTo(cam.position) * Math.tan(cam.fov * Math.PI / 360) / r.height;
+    else if (cam.isOrthographicCamera) perPx = (cam.top - cam.bottom) / cam.zoom / r.height;
+    var reach = Math.min(0.5, Math.max(0.02, REACH_PX * perPx));
+    return { point: point, dir: dir, ms: ms, through: through, reach: reach };
   }
   function sameSpot(a, b) {
     return !!(a && b) && Math.hypot(a.point[0] - b.point[0], a.point[1] - b.point[1], a.point[2] - b.point[2]) < 0.05 &&
@@ -1039,7 +1046,7 @@
     return { base: model.rawTris, skip: skip, ms: ms, up: upRaw(ms) };
   }
   function gunAsk(pc, aim, amount) {
-    return GM().spray({ rawTris: pc.base, skipList: pc.skip }, { point: aim.point, dir: aim.dir }, { up: pc.up, amount: amount, preview: amount >= 100 })
+    return GM().spray({ rawTris: pc.base, skipList: pc.skip }, { point: aim.point, dir: aim.dir, reach: aim.reach }, { up: pc.up, amount: amount, preview: amount >= 100 })
       .catch(function (err) {
         return { ok: false, changed: false, addedVolume: 0, reason: 'GUN: ' + ((err && err.message) || err) + '. Nothing changed.' };
       });
@@ -1265,7 +1272,7 @@
   function gunSprayAt(aim, amount) {
     if (!P.on) return Promise.resolve({ ok: false, reason: 'GUN is not armed' });
     var ms = meshOf(P.m);
-    if (!gunFire({ point: aim.point, dir: aim.dir, ms: ms })) return Promise.resolve(P.last || { ok: false });
+    if (!gunFire({ point: aim.point, dir: aim.dir, reach: aim.reach, ms: ms })) return Promise.resolve(P.last || { ok: false });
     var seq = P.seq;
     return new Promise(function (done) {
       (function wait() {

@@ -32,11 +32,22 @@ FOAM and GUN share nothing but the orange: the GUN's engine is its own file, and
   section's outline is **closed** by a radius r (grown by r, shrunk by r) and its
   holes filled; what that holds that is not material is the gaps. r = 0 is a gap
   closed all round (a slot). A gap open to the side - a notch - needs the r its
-  mouth needs: the smallest of 0, 0.05, 0.1, 0.2, 0.4 ... 6.4 mm (and no more than
-  a quarter of the piece's smaller width) that puts the seed in a gap at least
-  8 r² in area. Closing also rounds every inside corner by about 0.21 r², and a
-  corner is not a gap - a wide shallow groove is refused, not filled. Past the
-  ladder the seed is in open air: refused, in words.
+  mouth needs: the smallest of 0, 0.005, 0.01, 0.02, 0.035, 0.05, 0.1, 0.2, 0.4 ...
+  6.4 mm (and no more than a quarter of the piece's smaller width) that puts the
+  seed in a gap at least 8 r² in area. Closing also rounds every inside corner by
+  about 0.21 r², and a corner is not a gap - a wide shallow groove is refused, not
+  filled. Past the ladder the seed is in open air: refused, in words.
+- **out to the outside**: the smallest r shuts a mouth at its narrowest; a mouth
+  that flares leaves a wedge outside that (a weld's hairline crack does). Wider
+  closings, each up to 2.5 x the last and no wider than 0.1 mm, take the gap out to
+  where its mouth meets the outside, while the gap they give still holds the first
+  and is still a pocket. 0.1 mm is the flare of a hairline; wider, the outline's own
+  shapes would be bridged (a notch's arms - welded_gaps.stl's notch stays 151 mm³).
+- **reach**: a hairline slit is narrower than the seed's 0.02 mm step back off the
+  wall, and seen from above a click lands on the top face beside it. A gap within
+  `reach` of the seed counts as aimed at (the nearest wins), and a click on the top
+  or bottom face is taken just inside it. The page passes 6 pixels' worth of mm at
+  the hit's depth (0.02 - 0.5 mm): a gap is aimed at when the cursor is within 6 px.
 - **slabs**: the piece's height is cut at every height a corner of it lies on -
   heights within 1e-4 mm of each other are one (float noise on a flat face is one
   level) - and no slab is taller than 0.5 mm. A slab's gap is read at its middle.
@@ -120,4 +131,5 @@ slot: 1 prism, not 58).
 | a chamber behind a 0.4 mm mouth | 863 mm³ of 864 (the mouth's closing arc), the block whole again |
 | amount 50 | 400 mm³, level half way |
 | float noise (2e-5 mm) on the faces | 799.999 mm³, plate to face |
-| fixtures/welded_gaps.stl, four shots | 1,044 + 140 + 1 + 151 mm³, each closed, genus 2 -> 0, 0.1-0.8 s each |
+| fixtures/welded_gaps.stl, four shots | 1,044 + 140 + 1.2 + 151 mm³, each closed, genus 2 -> 0, 0.1-0.8 s each |
+| ...then its hairline slit to the outside, clicked on the top face beside it | 0.62 mm³, out to its flared mouth; a click 0.4 mm away is refused |
