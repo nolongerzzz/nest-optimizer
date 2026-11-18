@@ -35,6 +35,9 @@
    THE GUN (docs/FOAM-GUN.md), section 16: armed with no box; a press on the
    top face is refused in words; a spray into fixtures/welded_gaps.stl's long
    slot fills it plate to face, one Undo, closed; Escape puts it away.
+   FLOAT, section 17: armed with the crosshair; a click drops a point, Escape
+   drops it; fixtures/welded_step.stl's seam floats, one Undo, closed; the
+   card closing puts it away.
    Screenshots (box placed, mid-spray, set) go to tools/foam-gun-out/.
 */
 'use strict';
@@ -624,6 +627,41 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(200);
   check('another card opening puts Foam\'s box away too', await page.evaluate(() => !window.nsoFoamBox.on() && !window.NSO_CropCard.lent()));
   await page.evaluate(() => { document.getElementById('menu-add').open = false; });
+
+  console.log('\n=== 17. FLOAT: two points, the dip between them floated ===');
+  const idF = await loadSTL(page, path.join(ROOT, 'fixtures', 'welded_step.stl'));
+  await selectModel(page, idF);
+  await page.evaluate(i => { const k = state.placed.findIndex(p => p.sourceId === i); if (k >= 0) selectPlaced(k); }, idF);
+  await frameOn(page);
+  await openFinishMenu(page);
+  await page.evaluate(() => { document.getElementById('menu-fillfix').open = true; });
+  const rawF = await raw(page), depthF = await undoDepth(page);
+  await page.click('#btn-foam-float');
+  await page.waitForTimeout(150);
+  check('Float: armed, its panel up, the crosshair, the other Foam tools away', await page.evaluate(() => window.nsoFoamFloat.on() &&
+        !document.getElementById('foam-float-panel').hidden && state.renderer.domElement.style.cursor === 'crosshair' &&
+        !window.nsoFoamGun.on() && !window.nsoFoamBox.on() && !window.nsoFoam.on()));
+  const spotF = await screenOfRaw(page, [-6, -15.09, 19.24]);
+  await page.mouse.click(spotF.x, spotF.y);
+  await page.waitForTimeout(150);
+  check('...a click on the piece puts the first point down, and says to click the second', await page.evaluate(() =>
+        window.nsoFoamFloat.info().pointDown && /click the second/.test(window.nsoFoamFloat.info().readout)));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(100);
+  check('...Escape drops the point, and Float stays armed', await page.evaluate(() => window.nsoFoamFloat.on() && !window.nsoFoamFloat.info().pointDown));
+  const rF = await page.evaluate(() => window.nsoFoamFloat.floatAt({ point: [-12, -15.036, 5], normal: [0, -1, 0] }, { point: [-8, -15.09, -3], normal: [0, -1, 0] })
+    .then(r => ({ ok: r.ok, changed: r.changed, reason: r.reason, added: r.addedVolume, glow: window.nsoFoamFloat.info().glow })));
+  const afterF = await raw(page), stF = await statusOf(page);
+  check('the seam between the two welded fronts floats, in the engine\'s words', rF.ok && rF.changed && /^Floated - 1\.9 mm³ .* along the dip\./.test(stF), stF);
+  check('...one undo entry, the piece closed, the readout the volume, the foam glowing', (await undoDepth(page)) === depthF + 1 && (await census(page, afterF)).closed &&
+        (await page.evaluate(() => window.nsoFoamFloat.info().readout)) === '+1.9 mm³ floated' && rF.glow);
+  await page.click('#btn-undo');
+  await page.waitForTimeout(400);
+  check('...Undo puts the piece back bit for bit', (await raw(page)).every((x, i) => Object.is(x, rawF[i])));
+  await page.click('#menu-fillfix > summary');
+  await page.waitForTimeout(200);
+  check('closing the Fill & fix card puts Float away, the cursor back', await page.evaluate(() => !window.nsoFoamFloat.on() &&
+        state.renderer.domElement.style.cursor === '' && document.getElementById('foam-float-panel').hidden));
 
   const errs = logs.filter(l => /pageerror|Uncaught|TypeError|ReferenceError/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

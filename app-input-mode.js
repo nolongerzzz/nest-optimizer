@@ -245,6 +245,10 @@
       window.nsoFoamBox.cancel();
       left.push('foam box');
     }
+    if (window.nsoFoamFloat && window.nsoFoamFloat.on()) {
+      window.nsoFoamFloat.cancel();
+      left.push('float');
+    }
     if (state.measureOn) {
       press('btn-measure');
       if (state.measureOn) state.measureOn = false;

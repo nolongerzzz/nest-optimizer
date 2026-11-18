@@ -4034,7 +4034,7 @@ button.ms-legend-btn:disabled { opacity: 0.4; cursor: default; }
 .foam-panel[hidden] { display: none; }
 .foam-panel .hint { margin: 0; }
 /* The GUN's and the box's rows: buttons at full width, not squeezed into vp-row's 36px label column. */
-#foam-gun-panel .vp-row, #foam-box-panel .vp-row { grid-template-columns: 1fr 1fr; gap: 4px; }
+#foam-gun-panel .vp-row, #foam-box-panel .vp-row, #foam-float-panel .vp-row { grid-template-columns: 1fr 1fr; gap: 4px; }
 .foam-hollows { display: flex; flex-direction: column; gap: 2px; }
 .foam-hollows-head { font-size: 11px; opacity: 0.8; }
 .foam-hollow { text-align: left; }

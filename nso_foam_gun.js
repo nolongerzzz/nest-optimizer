@@ -118,6 +118,7 @@
     return (neg ? '-' : '') + s;
   }
   function norm(a) { var l = Math.hypot(a[0], a[1], a[2]); return l > 0 ? [a[0] / l, a[1] / l, a[2] / l] : null; }
+  function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
   function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
 
   /* A right-handed frame (e1, e2, n) with n = up; a raw axis gives a signed
@@ -582,6 +583,102 @@
     });
   }
 
+  /* The foam from a reading R (its pockets slab by slab, each clipped to its
+     held outline), up to `amount`, welded in. Shared by the GUN and Float;
+     T names the tool in its words: { name, verb, nothing, words }. R is
+     released here. */
+  function fillPockets(W, soup, R, amount, skip, opts, T) {
+    var made = [], result = null;
+    try {
+      var zlo = R.cuts[R.lo], zhi = R.cuts[R.hi + 1], level = zlo + amount / 100 * (zhi - zlo);
+      var base = { ok: true, changed: false, kind: 'nothing', mesh: soup, addedVolume: 0, level: level, span: [zlo, zhi],
+                   reachesPlate: R.reachesPlate, reachesFace: R.reachesFace, bridge: R.r, mouth: 2 * R.r0, slabs: R.hi - R.lo + 1, amount: amount };
+      if (amount <= 0 || level <= zlo + WELD) { base.reason = T.name + ': the amount is 0 - nothing to set. Nothing changed.'; return base; }
+      var pa = paintedReached(soup, skip, R);
+      if (pa) {
+        return Object.assign(refusal(soup, 'painted', T.name + ' stood down - a painted face is one the foam would fill against. ' +
+               'Paint elsewhere does not matter; clear this face\'s paint to ' + T.verb + ' here. Nothing changed.'), { painted: pa });
+      }
+
+      /* The foam: each slab's pocket, grown into the walls but kept inside
+         the closed outline, stood up its slab's height. */
+      /* Each slab's foam outline: its pocket grown GROW into the walls, never
+         past the closed outline, simplified. Slabs whose outlines are the same
+         shape go up as one prism: a gap with straight walls is one
+         extrusion, plate to face. */
+      var areas = {}, prevPocket = null, prevArea = null;
+      for (var j = R.lo; j <= R.hi; j++) {
+        if (R.cuts[j] >= level) break;
+        if (prevPocket && sameShape(prevPocket, R.pockets[j])) {
+          /* Same pocket: the outline is the same unless the held outline
+             changed where the foam reaches. */
+          var grownJ = R.pockets[j].offset(GROW, 'Miter'), aJ0 = grownJ.intersect(R.helds[j]);
+          made.push(grownJ, aJ0);
+          var aJ = aJ0.simplify(FOAM_SIMPLIFY); made.push(aJ);
+          areas[j] = sameShape(prevArea, aJ, FOAM_SIMPLIFY) ? prevArea : aJ;   // outlines this close are one: the foam reaches GROW past both
+        } else {
+          var grown = R.pockets[j].offset(GROW, 'Miter'), area0 = grown.intersect(R.helds[j]), area = area0.simplify(FOAM_SIMPLIFY);
+          made.push(grown, area0, area);
+          areas[j] = area;
+        }
+        prevPocket = R.pockets[j]; prevArea = areas[j];
+      }
+      var runs = [];
+      for (j = R.lo; j <= R.hi && areas[j]; j++) {
+        var last = runs[runs.length - 1];
+        if (last && areas[last.j1] === areas[j]) last.j1 = j;
+        else runs.push({ j0: j, j1: j });
+      }
+      var slabs = [];
+      for (var ri = 0; ri < runs.length; ri++) {
+        var run = runs[ri], z0 = R.cuts[run.j0], z1 = R.cuts[run.j1 + 1];
+        if (run.j0 === R.lo) z0 -= R.reachesPlate ? OVER : GROW;
+        if (run.j1 === R.hi) z1 += R.reachesFace ? OVER : GROW;
+        else z1 += GROW;                                            // runs overlap: no shared face to weld
+        if (z1 > level && level < zhi - WELD) z1 = level;
+        var ex = areas[run.j0].extrude(z1 - z0).translate([0, 0, z0]);
+        made.push(ex);
+        slabs.push(ex);
+      }
+      if (opts.timings) opts.timings.prisms = slabs.length;
+      if (!slabs.length) { base.reason = T.name + ': the amount is too small to fill anything yet. Nothing changed.'; return base; }
+      var lap = lapper(opts.timings);
+      var foam = slabs.length === 1 ? slabs[0] : W.Manifold.union(slabs);
+      if (slabs.length > 1) made.push(foam);
+      var u = R.m.add(foam);
+      made.push(u);
+      /* Back to the piece's own ends: the overshoot goes. */
+      lap('union');
+      var t1 = u.trimByPlane([0, 0, -1], -R.zmax), t2 = t1.trimByPlane([0, 0, 1], R.zmin);
+      lap('trim');
+      made.push(t1, t2);
+      if (t2.status() !== 'NoError' || t2.isEmpty()) return refusal(soup, 'kernel', T.name + ': the kernel could not weld the foam in (' + t2.status() + '). Nothing changed.');
+      /* Corners closer than the weld radius - the input's own needles and
+         the kernel's cut corners beside them - fold together, so the piece
+         reads the same welded at 1e-4 mm as it does exactly. */
+      if (typeof t2.simplify === 'function') { var t3 = t2.simplify(WELD); made.push(t3); if (t3.status() === 'NoError' && !t3.isEmpty()) t2 = t3; }
+      var added = t2.volume() - R.m.volume();
+      if (!(added > 1e-9)) { base.reason = T.name + ': ' + T.nothing + ' Nothing changed.'; return base; }
+      lap('simplify');
+      var mesh = manifoldToSoup(t2, R.F), foamSoup = null;
+      if (opts.preview !== false) {
+        var f1 = foam.trimByPlane([0, 0, -1], -R.zmax), f2 = f1.trimByPlane([0, 0, 1], R.zmin);
+        made.push(f1, f2);
+        foamSoup = manifoldToSoup(f2, R.F);
+      }
+      lap('kernelOut');
+      result = { ok: true, changed: true, kind: 'set', mesh: mesh, foam: foamSoup, up: R.F.n.slice(), addedVolume: added, level: level, span: [zlo, zhi],
+                 reachesPlate: R.reachesPlate, reachesFace: R.reachesFace, bridge: R.r, mouth: 2 * R.r0, slabs: R.hi - R.lo + 1, amount: amount,
+                 genusBefore: R.m.genus(), genusAfter: t2.genus() };
+      result.reason = T.words(result);
+      return result;
+    } finally {
+      for (var i = 0; i < made.length; i++) { try { made[i].delete(); } catch (e) { /* already gone */ } }
+      release(R);
+    }
+  }
+
+  var GUN_T = { name: 'GUN', verb: 'spray', nothing: 'nothing was filled - the gap is already solid there.', words: words };
   function spray(piece, aim, opts) {
     opts = opts || {};
     var soup = piece && (piece.rawTris || piece.soup || piece);
@@ -591,94 +688,142 @@
     return wasmOf(opts).then(function (W) {
       var R = read(W, soup, aim || {}, opts);
       if (!R.ok) return refusal(soup, R.kind, 'GUN: ' + R.reason + '. Nothing changed.');
-      var made = [], result = null;
-      try {
-        var zlo = R.cuts[R.lo], zhi = R.cuts[R.hi + 1], level = zlo + amount / 100 * (zhi - zlo);
-        var base = { ok: true, changed: false, kind: 'nothing', mesh: soup, addedVolume: 0, level: level, span: [zlo, zhi],
-                     reachesPlate: R.reachesPlate, reachesFace: R.reachesFace, bridge: R.r, mouth: 2 * R.r0, slabs: R.hi - R.lo + 1, amount: amount };
-        if (amount <= 0 || level <= zlo + WELD) { base.reason = 'GUN: the amount is 0 - nothing to set. Nothing changed.'; return base; }
-        var pa = paintedReached(soup, skip, R);
-        if (pa) {
-          return Object.assign(refusal(soup, 'painted', 'GUN stood down - a painted face is one the foam would fill against. ' +
-                 'Paint elsewhere does not matter; clear this face\'s paint to spray here. Nothing changed.'), { painted: pa });
-        }
+      return fillPockets(W, soup, R, amount, skip, opts, GUN_T);
+    });
+  }
 
-        /* The foam: each slab's pocket, grown into the walls but kept inside
-           the closed outline, stood up its slab's height. */
-        /* Each slab's foam outline: its pocket grown GROW into the walls, never
-           past the closed outline, simplified. Slabs whose outlines are the same
-           shape go up as one prism: a gap with straight walls is one
-           extrusion, plate to face. */
-        var areas = {}, prevPocket = null, prevArea = null;
-        for (var j = R.lo; j <= R.hi; j++) {
-          if (R.cuts[j] >= level) break;
-          if (prevPocket && sameShape(prevPocket, R.pockets[j])) {
-            /* Same pocket: the outline is the same unless the held outline
-               changed where the foam reaches. */
-            var grownJ = R.pockets[j].offset(GROW, 'Miter'), aJ0 = grownJ.intersect(R.helds[j]);
-            made.push(grownJ, aJ0);
-            var aJ = aJ0.simplify(FOAM_SIMPLIFY); made.push(aJ);
-            areas[j] = sameShape(prevArea, aJ, FOAM_SIMPLIFY) ? prevArea : aJ;   // outlines this close are one: the foam reaches GROW past both
-          } else {
-            var grown = R.pockets[j].offset(GROW, 'Miter'), area0 = grown.intersect(R.helds[j]), area = area0.simplify(FOAM_SIMPLIFY);
-            made.push(grown, area0, area);
-            areas[j] = area;
-          }
-          prevPocket = R.pockets[j]; prevArea = areas[j];
-        }
-        var runs = [];
-        for (j = R.lo; j <= R.hi && areas[j]; j++) {
-          var last = runs[runs.length - 1];
-          if (last && areas[last.j1] === areas[j]) last.j1 = j;
-          else runs.push({ j0: j, j1: j });
-        }
-        var slabs = [];
-        for (var ri = 0; ri < runs.length; ri++) {
-          var run = runs[ri], z0 = R.cuts[run.j0], z1 = R.cuts[run.j1 + 1];
-          if (run.j0 === R.lo) z0 -= R.reachesPlate ? OVER : GROW;
-          if (run.j1 === R.hi) z1 += R.reachesFace ? OVER : GROW;
-          else z1 += GROW;                                            // runs overlap: no shared face to weld
-          if (z1 > level && level < zhi - WELD) z1 = level;
-          var ex = areas[run.j0].extrude(z1 - z0).translate([0, 0, z0]);
-          made.push(ex);
-          slabs.push(ex);
-        }
-        if (opts.timings) opts.timings.prisms = slabs.length;
-        if (!slabs.length) { base.reason = 'GUN: the amount is too small to fill anything yet. Nothing changed.'; return base; }
-        var lap = lapper(opts.timings);
-        var foam = slabs.length === 1 ? slabs[0] : W.Manifold.union(slabs);
-        if (slabs.length > 1) made.push(foam);
-        var u = R.m.add(foam);
-        made.push(u);
-        /* Back to the piece's own ends: the overshoot goes. */
-        lap('union');
-        var t1 = u.trimByPlane([0, 0, -1], -R.zmax), t2 = t1.trimByPlane([0, 0, 1], R.zmin);
-        lap('trim');
-        made.push(t1, t2);
-        if (t2.status() !== 'NoError' || t2.isEmpty()) return refusal(soup, 'kernel', 'GUN: the kernel could not weld the foam in (' + t2.status() + '). Nothing changed.');
-        /* Corners closer than the weld radius - the input's own needles and
-           the kernel's cut corners beside them - fold together, so the piece
-           reads the same welded at 1e-4 mm as it does exactly. */
-        if (typeof t2.simplify === 'function') { var t3 = t2.simplify(WELD); made.push(t3); if (t3.status() === 'NoError' && !t3.isEmpty()) t2 = t3; }
-        var added = t2.volume() - R.m.volume();
-        if (!(added > 1e-9)) { base.reason = 'GUN: nothing was filled - the gap is already solid there. Nothing changed.'; return base; }
-        lap('simplify');
-        var mesh = manifoldToSoup(t2, R.F), foamSoup = null;
-        if (opts.preview !== false) {
-          var f1 = foam.trimByPlane([0, 0, -1], -R.zmax), f2 = f1.trimByPlane([0, 0, 1], R.zmin);
-          made.push(f1, f2);
-          foamSoup = manifoldToSoup(f2, R.F);
-        }
-        lap('kernelOut');
-        result = { ok: true, changed: true, kind: 'set', mesh: mesh, foam: foamSoup, up: R.F.n.slice(), addedVolume: added, level: level, span: [zlo, zhi],
-                   reachesPlate: R.reachesPlate, reachesFace: R.reachesFace, bridge: R.r, mouth: 2 * R.r0, slabs: R.hi - R.lo + 1, amount: amount,
-                   genusBefore: R.m.genus(), genusAfter: t2.genus() };
-        result.reason = words(result);
-        return result;
-      } finally {
-        for (var i = 0; i < made.length; i++) { try { made[i].delete(); } catch (e) { /* already gone */ } }
-        release(R);
+  /* ===================================================================
+     FLOAT: two points, and the dip between them filled to the straight
+     line joining them - topping compound, floated with a straight edge.
+
+     a, b: { point, normal } on the piece, raw (normal: the face's outward
+     normal at the click). The straight edge is the line a-b, laid on the
+     surface (its part along the normal dropped). On a wall (|normal . up| <
+     0.7) it sweeps up the plate's vertical (opts.up), whatever height each
+     point was clicked at; on a face it sweeps across the face, s = edge x
+     normal, snapped to a raw axis when within 25 degrees of one. In each slab
+     along s, the straight edge rests on the high spots between the two
+     points - the convex hull of the piece within the strip between them (a
+     chord's length into the air and into the piece) and the two points - and
+     the dip is the open air inside that hull reached from outside (never a
+     hole in the piece, never its far side); slab by slab from the points'
+     own, out while the dip goes on, to the piece's ends where it reaches
+     them. Where the surface stands proud of the edge nothing is cut: Float
+     only fills. The foam is the GUN's (fillPockets), clipped to the edge.
+     =================================================================== */
+  var FLOAT_MIN = 0.05;       // mm: two points closer than this are one
+  var FLOAT_BAND = 0.01;      // mm: the strip's outer edge, for telling open air
+  var FLOAT_SNAP = 0.906;     // cos 25 deg: s this near a raw axis is that axis
+  var FLOAT_WALL = 0.7;       // a normal this far across the plate's vertical (|n.up| under it) is a wall
+  function floatRead(W, soup, a, b, opts) {
+    var lap = lapper(opts.timings);
+    var na = norm((a && a.normal) || []), nb = norm((b && b.normal) || []);
+    if (!a || !b || !a.point || !b.point || !na) return { ok: false, kind: 'aim', reason: 'two points on the piece are needed' };
+    var n = nb ? norm([na[0] + nb[0], na[1] + nb[1], na[2] + nb[2]]) || na : na;
+    var c = [b.point[0] - a.point[0], b.point[1] - a.point[1], b.point[2] - a.point[2]], cn = dot(c, n);
+    var ct = [c[0] - cn * n[0], c[1] - cn * n[1], c[2] - cn * n[2]];
+    if (Math.hypot(ct[0], ct[1], ct[2]) < FLOAT_MIN) return { ok: false, kind: 'aim', reason: 'the two points are too close together - pick them either side of the dip' };
+    /* A wall (its normal across the plate's vertical) floats up the
+       vertical, whatever height each point was clicked at; a face (its normal
+       along it) floats across itself, square to the edge. */
+    var up = norm(opts.up || [0, 0, 1]) || [0, 0, 1], sd;
+    if (Math.abs(dot(n, up)) < FLOAT_WALL) sd = up;
+    else {
+      sd = norm(cross(ct, n));
+      if (!sd) return { ok: false, kind: 'aim', reason: 'the two points do not lie across the surface' };
+      for (var k = 0; k < 3; k++) if (Math.abs(sd[k]) > FLOAT_SNAP) { var ax = [0, 0, 0]; ax[k] = sd[k] > 0 ? 1 : -1; sd = ax; break; }
+    }
+    var P = pieceOf(W, soup, sd, lap);
+    if (P.bad) return { ok: false, kind: 'notSolid', reason: P.bad };
+    var A2 = P.F.identity ? a.point.slice() : toF(P.F, a.point), B2 = P.F.identity ? b.point.slice() : toF(P.F, b.point);
+    var zs = (A2[2] + B2[2]) / 2, edge = Math.max(EPS_SEED, 1e-3);
+    if (zs >= P.zmax) zs = P.zmax - edge; else if (zs <= P.zmin) zs = P.zmin + edge;
+    var js = -1, i;
+    for (i = 0; i < P.nS; i++) if (zs >= P.cuts[i] && zs <= P.cuts[i + 1]) { js = i; break; }
+    if (js < 0) js = 0;
+    /* The straight edge in the slab's plane, and the strip on each side of it. */
+    var pa = [A2[0], A2[1]], pb = [B2[0], B2[1]], dx = pb[0] - pa[0], dy = pb[1] - pa[1], L = Math.hypot(dx, dy);
+    if (L < FLOAT_MIN) return { ok: false, kind: 'aim', reason: 'the two points are too close together across the surface - pick them either side of the dip' };
+    var v = [-dy / L, dx / L], D = Math.max(L, 0.5);
+    function strip(sg, h0, h1) {               // t from a to b, h from h0 to h1 along sg*v
+      var p = function (q, h) { return [q[0] + sg * v[0] * h, q[1] + sg * v[1] * h]; };
+      return new W.CrossSection([[p(pa, h0), p(pb, h0), p(pb, h1), p(pa, h1)]], 'NonZero');
+    }
+    /* The material side: where the piece is, past the edge. */
+    var S0 = sectionAt(P, js), Qp = strip(1, 0, D), Qm = strip(-1, 0, D), xp = Qp.intersect(S0), xm = Qm.intersect(S0);
+    var sg = xp.area() >= xm.area() ? 1 : -1;
+    xp.delete(); xm.delete(); Qp.delete(); Qm.delete();
+    /* The strip the straight edge works in: between the two points, from a
+       chord's length out in the air to a chord's length into the piece. */
+    var Wst = strip(sg, -D, D), far = strip(sg, -D, -D + FLOAT_BAND);
+    /* One slab: the straight edge rests on the high spots - the hull of the
+       piece in the strip (the points are on its surface, so the strip's ends
+       hold the edge there) - and the dip is what of that
+       hull is open air reached from outside (air in the strip connected to its
+       outer edge): never a hole inside the piece, never the piece's far side.
+       -> { dip, held } or null */
+    function dipAt(S) {
+      var m0 = S.intersect(Wst), H = m0.hull();
+      m0.delete();
+      var air = Wst.subtract(S), parts = air.decompose(), outside = [];
+      air.delete();
+      for (var q = 0; q < parts.length; q++) {
+        var x = parts[q].intersect(far), ok = x.area() > MIN_AREA * 1e-3;
+        x.delete();
+        if (ok) outside.push(parts[q]); else parts[q].delete();
       }
+      var O = unionAll(W, outside);
+      for (q = 0; q < outside.length; q++) outside[q].delete();
+      var d0 = H.intersect(O), dps = d0.decompose(), keep = [];
+      d0.delete(); O.delete();
+      for (q = 0; q < dps.length; q++) { if (dps[q].area() > MIN_AREA) keep.push(dps[q]); else dps[q].delete(); }
+      if (!keep.length) { H.delete(); return null; }
+      var dip = unionAll(W, keep);
+      for (q = 0; q < keep.length; q++) keep[q].delete();
+      return { dip: dip, held: H };
+    }
+    var f0 = dipAt(S0);
+    if (!f0) { Wst.delete(); far.delete(); return { ok: false, kind: 'flat', reason: 'nothing to float there - the surface between the two points is already straight or proud' }; }
+    lap('bridge');
+    var first = f0.dip, pockets = new Array(P.nS), helds = new Array(P.nS);
+    pockets[js] = first; helds[js] = f0.held;
+    var lo = js, hi = js, j;
+    for (var dir = -1; dir <= 1; dir += 2) {
+      var prev = first;
+      j = js + dir;
+      while (j >= 0 && j < P.nS) {
+        var dj = dipAt(sectionAt(P, j));
+        if (!dj || !overlaps(dj.dip, prev)) { if (dj) { dj.dip.delete(); dj.held.delete(); } break; }
+        pockets[j] = dj.dip; helds[j] = dj.held; prev = dj.dip;
+        if (dir < 0) lo = j; else hi = j;
+        j += dir;
+      }
+    }
+    Wst.delete(); far.delete();
+    lap('pocket');
+    return { ok: true, F: P.F, m: P.m, cuts: P.cuts, lo: lo, hi: hi, pockets: pockets, helds: helds, r: 0, r0: 0, zmin: P.zmin, zmax: P.zmax,
+             reachesPlate: lo === 0, reachesFace: hi === P.nS - 1, nS: P.nS, along: sd, length: L };
+  }
+  function floatWords(r) {
+    return 'Floated - ' + vol(r.addedVolume) + ' mm³ filled up to a straight edge resting on the high spots between the two points, along the dip' +
+           (r.amount < 100 ? ' (' + Math.round(r.amount) + '% of the way)' : '') + '.';
+  }
+  var FLOAT_T = { name: 'Float', verb: 'float', nothing: 'nothing to float - the surface between the two points is already straight or proud.', words: floatWords };
+  /* -> Promise of the GUN's result shape (kind 'set' ...), `along` the sweep. */
+  function float(piece, a, b, opts) {
+    opts = opts || {};
+    var soup = piece && (piece.rawTris || piece.soup || piece);
+    var skip = piece && piece.skipList !== undefined ? piece.skipList : opts.skipList;
+    var amount = opts.amount == null ? 100 : Math.max(0, Math.min(100, +opts.amount));
+    if (!soup || soup.length < 9) return Promise.resolve(refusal(soup, 'nothing', 'Float: there is no piece. Nothing changed.'));
+    return wasmOf(opts).then(function (W) {
+      var R = floatRead(W, soup, a, b, opts);
+      if (!R.ok) return refusal(soup, R.kind, 'Float: ' + R.reason + '. Nothing changed.');
+      var along = R.along, L = R.length;
+      return Promise.resolve(fillPockets(W, soup, R, amount, skip, opts, FLOAT_T)).then(function (res) {
+        if (res) { res.along = along; res.length = L; }
+        return res;
+      });
     });
   }
 
@@ -695,7 +840,7 @@
   function mm(x) { return x >= 1 ? f1(x) : String(+x.toPrecision(2)); }
   function readout(added) { return '+' + vol(added) + ' mm³'; }
 
-  var api = { spray: spray, probe: probe, prepare: prepare, pocket: pocket, forget: forget, readout: readout, frameFor: frameFor,
+  var api = { spray: spray, float: float, probe: probe, prepare: prepare, pocket: pocket, forget: forget, readout: readout, frameFor: frameFor,
               STEP: STEP, GROW: GROW, OVER: OVER, R_LADDER: R_LADDER };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_FoamGun = api;

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=b0ebc542" />
+  <link rel="stylesheet" href="styles.css?v=3a498e25" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -2579,7 +2579,7 @@
           <!-- FILL & FIX: what fills a hollow or mends a surface - Fill / Densify, Foam, GUN (out of Add),
                Patch (out of Add), and Weave (its own card before, a section here; opening it arms the lasso). -->
           <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-fillfix" data-sec="fillfix">
-            <summary class="vp-bar-btn" title="Fill / Densify, Foam (box or sealed hollow), Foam gun (point and spray into a gap), Patch, Weave">Fill &amp; fix</summary>
+            <summary class="vp-bar-btn" title="Fill / Densify, Foam (box or sealed hollow), Foam gun (point and spray into a gap), Float (two points, a straight edge), Patch, Weave">Fill &amp; fix</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-triple">
               <button id="btn-fill" class="btn btn-secondary" type="button"
@@ -2588,6 +2588,17 @@
                       title="Foam: a box appears on the selected piece - drag its handles to place and size it. Aim at the piece inside the box and hold the mouse: the box's buried space fills from the bottom while you hold, and letting go sets it, as one Undo. Hollows switches to the sealed-hollow mode (pick a hollow, Level slider, Set). Escape or Cancel takes the box away. See docs/FOAM.md.">Foam</button>
               <button id="btn-foam-gun" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Foam gun: point and spray. Aim into a gap - a slot, a crack, a notch, the space between welded parts - at its wall, and hold the mouse: that gap fills from the plate to the face while you hold, and letting go sets it, as one Undo. A gap open to the side is filled out to the outer surface, its mouth closed. Spray the next gap; Escape or GUN again puts it away. See docs/FOAM-GUN.md.">GUN</button>
+            </div>
+            <div class="vp-row vp-row-full">
+              <button id="btn-foam-float" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Float: topping compound with a straight edge. Click a point on the piece one side of a dip - an uneven seam, a step between two welded faces, a shallow notch - and a point the other side: the dip between is filled up to a straight edge resting on the high spots, along the whole run of it, as one Undo. It only fills, never cuts. On a wall it floats up the wall; on a face, across it. Escape drops the first point or puts Float away. See docs/FOAM-GUN.md.">Float</button>
+            </div>
+            <div id="foam-float-panel" class="foam-panel" hidden>
+              <p class="hint">Click one side of the dip, then the other.</p>
+              <p id="foam-float-readout" class="cut-readout foam-readout">—</p>
+              <div class="vp-row">
+                <button id="btn-foam-float-cancel" class="btn btn-secondary" type="button" title="Put Float away. What was floated stays; Undo takes it back.">Cancel</button>
+              </div>
             </div>
             <div id="foam-box-panel" class="foam-panel" hidden>
               <p id="foam-box-readout" class="cut-readout foam-readout">—</p>
@@ -3176,7 +3187,7 @@
   <script src="nso_hollow.js?v=9af04282"></script>
   <script src="nso_void.js"></script>
   <script src="nso_foam.js?v=9c2f6904"></script>
-  <script src="nso_foam_gun.js?v=fec62503"></script>
+  <script src="nso_foam_gun.js?v=8fcda3b3"></script>
   <!-- Support beacons: the plan-grid detector detectOverhangs wraps. Before
        nso_support_aim.js so its beacons ride along on every detection. See
        docs/SUPPORT-BEACONS.md. -->
@@ -3358,7 +3369,7 @@
   <script src="app-surftex-live.js?v=2fba4db4"></script>
   <script src="app-live-slider.js?v=9148b989"></script>
   <script src="app-hollow.js?v=f99c09ad"></script>
-  <script src="app-foam.js?v=021c5ea9"></script>
+  <script src="app-foam.js?v=c5dad8b7"></script>
   <script src="app-thicken-live.js?v=4dc96b30"></script>
   <script src="app-soften-live.js?v=d13157a0"></script>
   <script src="app-seat-surface.js?v=4b0f2e5d"></script>
@@ -3386,7 +3397,7 @@
   <!-- The arbiter first: the three menu tools below register with it as
        they bind, and it is what makes "one menu owns the input" true
        rather than three modules each hoping the other two are shut. -->
-  <script src="app-input-mode.js?v=c9b279d8"></script>
+  <script src="app-input-mode.js?v=417f1a08"></script>
   <script src="app-tip-orient.js?v=fb26beaf"></script>
   <script src="app-rotate-handles.js?v=f3873287"></script>
   <script src="app-move-vertical.js?v=da07bfef"></script>

@@ -23,6 +23,9 @@
         top face beside it (reach) fills it out to its flared mouth
     10. the notch's outer channel (its mouth shut at its narrowest by the notch
         shot): a shot into it bridges the arm's end to the S-curve
+    11. FLOAT: a step between two welded faces (a ramp to the high corner), a
+        V-groove down a wall, a pit in a top face, refusals, and
+        fixtures/welded_step.stl's seam
 */
 'use strict';
 const path = require('path');
@@ -190,6 +193,49 @@ function bounds(s) {
     const again = await GUN.spray({ rawTris: rCh.mesh, skipList: [] }, { point: [-3.88, 12.3, 0], dir: [-1, 0, 0], reach: 0.05 }, { wasm: W });
     check('...and nothing is left there: the same shot again finds no gap', !(again.ok && again.changed && again.addedVolume > 0.5), again.reason);
   }
+
+  console.log('\n== 11. FLOAT: two points, a straight edge resting on the high spots ==');
+  const fl = (soup, a, an, b, bn, opts) => GUN.float({ rawTris: soup, skipList: [] }, { point: a, normal: an }, { point: b, normal: bn }, Object.assign({ wasm: W }, opts || {}));
+  function gateFloat(tag, src, r, expect, tol) {
+    check(tag + ': set', r.ok && r.changed, r.reason);
+    if (!(r.ok && r.changed)) return;
+    const cs = FOAM.census(r.mesh);
+    check(tag + ': closed, 2-manifold, nothing collapsed', cs.closed && !cs.degen, JSON.stringify(cs));
+    check(tag + ': gained the volume it says, and lost none (Float never cuts)', Math.abs(vol(r.mesh) - vol(src) - r.addedVolume) < 1e-3 && r.addedVolume > 0,
+          (vol(r.mesh) - vol(src)).toFixed(4) + ' vs ' + r.addedVolume.toFixed(4));
+    if (expect != null) check(tag + ': added = the closed form', rel(r.addedVolume, expect) < (tol || 0.02), r.addedVolume.toFixed(4) + ' vs ' + expect);
+    const B0 = bounds(src), B1 = bounds(r.mesh);
+    check(tag + ': nothing past the piece\'s own box', [0, 1, 2].every(a => B1.lo[a] >= B0.lo[a] - 1e-4 && B1.hi[a] <= B0.hi[a] + 1e-4));
+  }
+  /* Two blocks welded side by side, the right one's front 0.05 mm proud: a step at x = 0. */
+  const stepped = soupOf(box(20, 10, 20, -10, 5, 10).add(box(20, 10.05, 20, 10, 4.975, 10)));    // fronts at y = 0 and y = -0.05
+  const rf = await fl(stepped, [-6, 0, 15], [0, -1, 0], [8, -0.05, 4], [0, -1, 0]);
+  gateFloat('a step between two welded faces, points 6 mm and 8 mm either side', stepped, rf, 0.5 * 6 * 0.05 * 20);
+  check('...a wall floats up the wall, whatever height each point was clicked at', rf.ok && rf.along && rf.along[2] === 1 && rf.reachesPlate && rf.reachesFace,
+        JSON.stringify(rf.along));
+  check('...and the edge rests on the high corner, not the line to the second point: the ramp ends at the step', rf.ok && rel(rf.addedVolume, 3) < 0.02,
+        rf.ok && rf.addedVolume.toFixed(3) + ' (to the step: 6 x 0.05 / 2 x 20 = 3; the line to the second point would give 1.29)');
+  /* A V-groove 1 mm wide, 0.3 mm deep, down the whole front wall. */
+  const groove = soupOf(box(20, 10, 20, 0, 5, 10).subtract(W.Manifold.cylinder(30, 0.6, 0.6, 3).rotate([0, 0, 90]).translate([0, -0.3, -5])));
+  const blockVol = vol(soupOf(box(20, 10, 20, 0, 5, 10)));
+  const rg = await fl(groove, [-3, 0, 10], [0, -1, 0], [3, 0, 2], [0, -1, 0]);
+  gateFloat("a V-groove down a wall, points either side of it", groove, rg, blockVol - vol(groove), 0.01);
+  /* A pit in the top face: 2 x 2 mm, 0.3 deep. */
+  const pit = soupOf(box(20, 10, 20, 0, 5, 10).subtract(box(2, 2, 0.6, 0, 5, 20)));
+  const rp = await fl(pit, [-3, 5, 20], [0, 0, 1], [3, 5, 20], [0, 0, 1]);
+  gateFloat('a pit in the top face, points either side across it', pit, rp, 2 * 2 * 0.3, 0.01);
+  check('...a face floats across itself, square to the edge', rp.ok && rp.along && Math.abs(rp.along[1]) === 1, JSON.stringify(rp.along));
+  const rflat = await fl(groove, [5, 0, 10], [0, -1, 0], [9, 0, 10], [0, -1, 0]);
+  check('two points on a flat wall: nothing to float, in words', !rflat.ok && rflat.kind === 'flat' && rflat.mesh === groove && /already straight or proud/.test(rflat.reason), rflat.reason);
+  const rnear = await fl(groove, [5, 0, 10], [0, -1, 0], [5.01, 0, 10], [0, -1, 0]);
+  check('two points on top of each other: refused, in words', !rnear.ok && /too close together/.test(rnear.reason), rnear.reason);
+  /* fixtures/welded_step.stl: two blocks welded with their fronts 0.054 mm apart at x = -10. */
+  const ws = readSTL(path.join(ROOT, 'fixtures', 'welded_step.stl'));
+  const t11 = Date.now();
+  const rws = await fl(ws, [-12, -15.036, 5], [0, -1, 0], [-8, -15.09, -3], [0, -1, 0]);
+  /* The oracle: the section at mid-height in shapely - the hull of the piece in
+     the strip between the points, less the piece - 0.05063 mm² - x 38.52 mm. */
+  gateFloat('welded_step.stl: the seam between the two fronts (' + (Date.now() - t11) + ' ms)', ws, rws, 0.050634 * 38.52, 0.02);
 
   console.log('\npassed ' + pass + ' check(s), ' + fail + ' failure(s)');
   if (fail) { FAILED.forEach(n => console.log('  FAILED: ' + n)); process.exit(1); }

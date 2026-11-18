@@ -140,3 +140,43 @@ slot: 1 prism, not 58).
 | fixtures/welded_gaps.stl, four shots | 1,044 + 140 + 1.2 + 151 mm³, each closed, genus 2 -> 0, 0.1-0.8 s each |
 | ...then its hairline slit to the outside, clicked on the top face beside it | 0.62 mm³, out to its flared mouth; a click 0.4 mm away is refused |
 | ...then the notch's outer channel (its mouth shut at its narrowest by the notch shot) | 56 mm³: the arm's edge runs on into the S-curve; the same shot again finds no gap |
+
+## 6. FLOAT - two points, a straight edge, the dip between floated
+
+`NSO_FoamGun.float(piece, a, b, opts)` (nso_foam_gun.js), the FLOAT section of app-foam.js,
+`#btn-foam-float` / `#foam-float-panel` in Fill & fix. Topping compound floated with a straight
+edge: the follow-up for what the GUN cannot click - an uneven seam, a step between two welded
+faces, a shallow notch, a pit in a face. It only fills; it never cuts.
+
+- **The points**: two clicks on the piece, each a point and its face's outward normal (raw).
+- **The sweep**: on a wall (the normals across the plate's vertical, |n . up| < 0.7) it floats up
+  the wall, whatever height each point was clicked at; on a face it floats across the face,
+  square to the edge (s = edge x normal, snapped to a raw axis within 25 degrees). The piece is
+  read in slabs along the sweep, as the GUN reads it along up.
+- **The straight edge rests on the high spots**: in each slab, in the strip between the two points
+  (a chord's length out into the air and into the piece), the hull of the piece is the edge's
+  line; the dip is the open air inside that hull reached from outside - never a hole in the piece,
+  never its far side. A second point on the proud face of a step does not drag the edge into it:
+  the edge rests on the step's corner, and the ramp ends there.
+- **Along the dip**: slab by slab from the points' own, out while the dip goes on.
+- **The foam** is the GUN's (`fillPockets`, shared): each slab's dip grown 0.03 mm into the piece,
+  never past the edge, prisms, one union, the overshoot at the piece's ends trimmed back.
+
+| step | what happens |
+|---|---|
+| **Float** | armed, the crosshair; the GUN, the box and Hollows step aside |
+| **first click** on the piece | a point (a 10 px orange dot); a line follows the mouse from it |
+| **second click** | floated, one Undo; the readout "+1.9 mm³ floated", the foam glowing a moment |
+| **Escape** | drops the first point; with none down, puts Float away |
+| **Cancel / Float / the card closing / leave-tool** | Float put away; what was floated stays |
+
+Refusals, in words, nothing changed: the two points too close together; nothing to float (the
+surface between them already straight or proud); not one closed solid; non-solid; paint.
+
+| gate (tools/nso_foam_gun_test.js, 11) | result |
+|---|---|
+| a 0.05 mm step between two welded faces, points 6 and 8 mm either side | 3.006 mm³ (closed form 3: the ramp to the step's corner), up the wall at any click heights |
+| a V-groove down a wall | its own volume, within 1% |
+| a pit 2 x 2 x 0.3 mm in a top face | 1.206 mm³ (1.2), floated across the face |
+| two points on a flat wall / on top of each other | refused |
+| fixtures/welded_step.stl's seam (fronts 0.054 mm apart) | 1.93 mm³ against shapely's 1.95, 0.14 s |

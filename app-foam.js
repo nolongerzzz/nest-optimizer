@@ -314,6 +314,7 @@
     if (!FM()) { say('Foam needs nso_foam.js', true); return { ok: false }; }
     boxCancel(true);                                       // one Foam at a time: the box steps aside
     gunCancel(true);
+    floatCancel(true);
     var model = (typeof getActiveModel === 'function') ? getActiveModel() : null;
     if (!model) { say('Select a piece first', true); return { ok: false, reason: 'no piece' }; }
     if (typeof nsoNonSolid === 'function' && nsoNonSolid(model)) {
@@ -455,6 +456,7 @@
 
   window.nsoFoamTakesPointer = function (event) {
     if (!event || event.button !== 0) return false;
+    if (Fl.on) return !!floatHit(event);
     if (P.on) return P.spraying || gunTakes(gunAim(event));
     if (G.on) return G.spraying || boxAims(event);
     if (!on) return false;
@@ -803,6 +805,7 @@
     if (!card) { say('Foam box needs the Crop card\'s Box', true); return { ok: false }; }
     if (on) cancel(true);                                   // one Foam at a time: the sealed-hollow one steps aside
     gunCancel(true);
+    floatCancel(true);
     var model = (typeof getActiveModel === 'function') ? getActiveModel() : null;
     if (!model) { say('Select a piece first', true); return { ok: false, reason: 'no piece' }; }
     var r = card.lend({ onChange: function (b) { G.box = b; }, taken: function () { boxCancel(true); } });
@@ -963,6 +966,11 @@
 
   /* After a set: the foam that went in, drawn over the piece and fading, so
      what changed can be seen without going to look for it. */
+  /* The glow for any result with foam: up to its own top. */
+  function gunGlowFor(res, model) {
+    if (!res || !res.foam) return;
+    gunGlow(res, null, model);                         // all of it: no level to cut at
+  }
   function gunGlowOff() {
     if (!P.glow) return;
     disposeObj(P.glow.obj);
@@ -976,7 +984,7 @@
     var o = gunFoamMesh(res), g = new THREE.Group();
     o.material.transparent = true;
     o.material.depthTest = false;
-    o.material.clippingPlanes = [gunLevelPlane(level + 1e-3, res, ms)];
+    if (level != null) o.material.clippingPlanes = [gunLevelPlane(level + 1e-3, res, ms)];
     g.userData.skipXray = true;
     g.userData.nsoFoamGroup = true;
     g.add(o);
@@ -1320,6 +1328,7 @@
     if (!GM()) { say('GUN needs nso_foam_gun.js', true); return { ok: false }; }
     if (on) cancel(true);
     if (G.on) boxCancel(true);
+    floatCancel(true);
     var model = (typeof getActiveModel === 'function') ? getActiveModel() : null;
     if (!model) { say('Select a piece first', true); return { ok: false, reason: 'no piece' }; }
     P.on = true; P.m = model; P.sprays = 0; P.last = null; P.pre = null; P.hover = null;
@@ -1335,13 +1344,176 @@
   }
 
   /* ---------------------------------------------------------------
+     FLOAT (docs/FOAM-GUN.md, Float): two points, and the dip between them
+     filled up to a straight edge resting on the high spots - topping
+     compound, floated. The follow-up for what the GUN cannot click: an
+     uneven seam, a step between two welded faces, a shallow notch.
+
+     Float arms it (the crosshair). The first click on the piece drops a point
+     (an orange dot); a line follows the mouse from it. The second click
+     floats between the two, as one Undo, and the foam that went in glows for a
+     moment. Escape drops the first point, or puts Float away; so do Cancel,
+     Float again, and the Fill & fix card closing.
+     --------------------------------------------------------------- */
+
+  var Fl = { on: false, m: null, a: null, busy: false, group: null, dot: null, line: null, readout: '—', last: null, floats: 0, moveRaf: 0 };
+
+  function floatReadout(text) {
+    Fl.readout = text;
+    var r = $('foam-float-readout');
+    if (r) r.textContent = text;
+  }
+  function floatPanel(v) {
+    var p = $('foam-float-panel');
+    if (p) p.hidden = !v;
+    var b = $('btn-foam-float');
+    if (b) { b.classList.toggle('is-on', !!v); b.setAttribute('aria-pressed', v ? 'true' : 'false'); }
+  }
+  /* The click under the mouse: the hit and the face's outward normal, raw;
+     and the hit in the mesh's own frame, for the markers. */
+  function floatHit(event) {
+    var ms = Fl.m ? meshOf(Fl.m) : null;
+    if (!ms || !state.camera || !state.renderer) return null;
+    var r = state.renderer.domElement.getBoundingClientRect();
+    var rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(((event.clientX - r.left) / r.width) * 2 - 1, -((event.clientY - r.top) / r.height) * 2 + 1), state.camera);
+    var hits = rc.intersectObject(ms, false);
+    if (!hits.length || !hits[0].face) return null;
+    ms.updateMatrixWorld(true);
+    var lp = ms.worldToLocal(hits[0].point.clone()), ln = hits[0].face.normal.clone();
+    var f = (typeof nsoRawFrameOf === 'function') ? nsoRawFrameOf(Fl.m) : null;
+    var point = f ? nsoRawPointFromLocal(f, [lp.x, lp.y, lp.z]) : [lp.x, -lp.z, lp.y];
+    var normal = (typeof nsoRawDirFromLocal === 'function') ? nsoRawDirFromLocal([ln.x, ln.y, ln.z]) : [ln.x, -ln.z, ln.y];
+    return { point: point, normal: normal, local: lp, ms: ms };
+  }
+  function floatMarkersOff() {
+    if (Fl.group && Fl.group.parent) Fl.group.parent.remove(Fl.group);
+    [Fl.dot, Fl.line].forEach(function (o) { if (o) { o.geometry.dispose(); o.material.dispose(); } });
+    Fl.group = null; Fl.dot = null; Fl.line = null;
+  }
+  function floatMarkers(a) {
+    floatMarkersOff();
+    var ms = a.ms;
+    Fl.group = new THREE.Group();
+    Fl.group.userData.skipXray = true;
+    /* A dot the same size on screen at any zoom: a 10 px point. */
+    Fl.dot = new THREE.Points(new THREE.BufferGeometry().setFromPoints([a.local.clone()]),
+                              new THREE.PointsMaterial({ color: 0xff8a1f, size: 10, sizeAttenuation: false, depthTest: false }));
+    Fl.dot.renderOrder = 50;
+    var g = new THREE.BufferGeometry().setFromPoints([a.local.clone(), a.local.clone()]);
+    Fl.line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xff8a1f, depthTest: false }));
+    Fl.line.renderOrder = 50;
+    Fl.group.add(Fl.dot, Fl.line);
+    nsoHelpers.attach(ms, Fl.group, 'foam', { interactive: false });
+  }
+  function floatMove(event) {
+    if (!Fl.on || !Fl.a || !Fl.line || Fl.moveRaf) return;
+    var ev = { clientX: event.clientX, clientY: event.clientY };
+    Fl.moveRaf = requestAnimationFrame(function () {
+      Fl.moveRaf = 0;
+      if (!Fl.on || !Fl.a || !Fl.line) return;
+      var h = floatHit(ev);
+      if (!h) return;
+      var pos = Fl.line.geometry.attributes.position;
+      pos.setXYZ(1, h.local.x, h.local.y, h.local.z);
+      pos.needsUpdate = true;
+    });
+  }
+  function floatDown(event) {
+    if (!Fl.on || event.button !== 0 || Fl.busy) return;
+    var h = floatHit(event);
+    if (!h) return;                                    // off the piece: the orbit's
+    event.stopPropagation();
+    event.preventDefault();
+    if (!Fl.a) {
+      Fl.a = h;
+      floatMarkers(h);
+      floatReadout('First point down - click the second, the other side of the dip.');
+      return;
+    }
+    floatAt(Fl.a, h);
+  }
+  /* Float between a and b (raw points and normals), set as one Undo. */
+  function floatAt(a, b) {
+    var model = Fl.m, ms = meshOf(model);
+    if (typeof nsoNonSolid === 'function' && nsoNonSolid(model)) {
+      var nr = 'Float does not apply to "' + model.name + '" - it is flagged non-solid. Nothing changed.';
+      say(nr, true); floatReadout(nr); Fl.a = null; floatMarkersOff();
+      return Promise.resolve({ ok: false, reason: nr });
+    }
+    var skip = (typeof nsoMaskFaceList === 'function') ? nsoMaskFaceList(model) : [];
+    if (skip === null) {
+      var sr = 'Float stood down - a painted recessed patch has no axis and side to check against. Clear that paint to float. Nothing changed.';
+      say(sr, true); floatReadout(sr); Fl.a = null; floatMarkersOff();
+      return Promise.resolve({ ok: false, reason: sr });
+    }
+    var base = model.rawTris;
+    Fl.busy = true;
+    floatReadout('floating…');
+    if (state.renderer) state.renderer.domElement.style.cursor = 'progress';
+    return new Promise(function (go) { requestAnimationFrame(function () { setTimeout(go, 0); }); }).then(function () {
+      return GM().float({ rawTris: base, skipList: skip }, { point: a.point, normal: a.normal }, { point: b.point, normal: b.normal }, { up: upRaw(ms) });
+    }).catch(function (err) {
+      return { ok: false, changed: false, reason: 'Float: ' + ((err && err.message) || err) + '. Nothing changed.' };
+    }).then(function (res) {
+      Fl.busy = false;
+      Fl.a = null;
+      floatMarkersOff();
+      if (state.renderer && Fl.on) state.renderer.domElement.style.cursor = 'crosshair';
+      if (!Fl.on) return res;
+      Fl.last = res;
+      if (model.rawTris !== base) { say('Float: the piece changed meanwhile. Nothing was set.', true); return res; }
+      if (!res.ok || !res.changed) { floatReadout(res.reason); say(res.reason, !res.ok); return res; }
+      if (typeof NSO_sculptCommitRaw !== 'function' || !NSO_sculptCommitRaw(model, res.mesh, 'foamReplace', res.reason)) {
+        floatReadout('Float: could not commit the result - nothing changed');
+        say('Float: could not commit the result - nothing changed', true);
+        return { ok: false, reason: 'commit failed' };
+      }
+      Fl.floats++;
+      floatReadout(gunWords(res.addedVolume) + ' floated');
+      say(res.reason);
+      if (typeof updateAdjustUI === 'function') updateAdjustUI();
+      gunGlowFor(res, model);
+      return res;
+    });
+  }
+  function floatCancel(quiet) {
+    if (!Fl.on) return false;
+    if (Fl.moveRaf) { cancelAnimationFrame(Fl.moveRaf); Fl.moveRaf = 0; }
+    floatMarkersOff();
+    Fl.on = false; Fl.a = null; Fl.m = null;
+    if (state.renderer) state.renderer.domElement.style.cursor = '';
+    floatPanel(false);
+    floatReadout('—');
+    if (!quiet) say('Float put away - what was floated stays; Undo takes it back');
+    return true;
+  }
+  function floatStart() {
+    if (Fl.on) { floatCancel(); return { ok: true, left: true }; }
+    if (!GM() || typeof GM().float !== 'function') { say('Float needs nso_foam_gun.js', true); return { ok: false }; }
+    if (on) cancel(true);
+    if (G.on) boxCancel(true);
+    if (P.on) gunCancel(true);
+    var model = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+    if (!model) { say('Select a piece first', true); return { ok: false, reason: 'no piece' }; }
+    Fl.on = true; Fl.m = model; Fl.a = null; Fl.floats = 0; Fl.last = null;
+    if (state.renderer) { state.renderer.domElement.style.cursor = 'crosshair'; state.renderer.localClippingEnabled = true; }
+    floatPanel(true);
+    floatReadout('—');
+    say('Float: click a point on the piece one side of the dip, then a point the other side - the dip between is filled up to a ' +
+        'straight edge resting on the high spots. Escape drops the first point or puts Float away.');
+    return { ok: true };
+  }
+
+  /* ---------------------------------------------------------------
      Wiring
      --------------------------------------------------------------- */
 
   function bind() {
     [['btn-foam', foamButton], ['btn-foam-all', fillAll], ['btn-foam-set', set], ['btn-foam-cancel', function () { cancel(); }],
      ['btn-foam-box-cancel', function () { boxCancel(); }], ['btn-foam-mode-hollow', toHollow], ['btn-foam-mode-box', toBox],
-     ['btn-foam-gun', function () { gunStart(); }], ['btn-foam-gun-cancel', function () { gunCancel(); }]].forEach(function (x) {
+     ['btn-foam-gun', function () { gunStart(); }], ['btn-foam-gun-cancel', function () { gunCancel(); }],
+     ['btn-foam-float', function () { floatStart(); }], ['btn-foam-float-cancel', function () { floatCancel(); }]].forEach(function (x) {
       var e = $(x[0]);
       if (e && e.dataset.nsoWired !== '1') { e.dataset.nsoWired = '1'; e.addEventListener('click', x[1]); }
     });
@@ -1360,11 +1532,12 @@
       card.dataset.nsoFoamCardWired = '1';
       new MutationObserver(function () {
         if (card.open) return;
-        var was = P.on ? 'GUN' : (G.on ? 'Foam box' : (on ? 'Foam' : null));
+        var was = P.on ? 'GUN' : (G.on ? 'Foam box' : (on ? 'Foam' : (Fl.on ? 'Float' : null)));
+        if (Fl.on) floatCancel(true);
         if (P.on) gunCancel(true);
         if (G.on) boxCancel(true);
         if (on) cancel(true);
-        if (was) say(was + ' put away - the Fill & fix card was closed. ' + (was === 'Foam' ? 'Nothing changed.' : 'Sprays already set stay.'));
+        if (was) say(was + ' put away - the Fill & fix card was closed. ' + (was === 'Foam' ? 'Nothing changed.' : (was === 'Float' ? 'What was floated stays.' : 'Sprays already set stay.')));
       }).observe(card, { attributes: true, attributeFilter: ['open'] });
     }
     if (typeof state === 'undefined' || !state.renderer || !state.renderer.domElement || state._foamBound) return;
@@ -1373,6 +1546,8 @@
     state.renderer.domElement.addEventListener('pointerdown', boxDown, true);
     state.renderer.domElement.addEventListener('pointerdown', gunDown, true);
     state.renderer.domElement.addEventListener('pointermove', gunMove);
+    state.renderer.domElement.addEventListener('pointerdown', floatDown, true);
+    state.renderer.domElement.addEventListener('pointermove', floatMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
     window.addEventListener('pointerup', boxUp);
@@ -1384,14 +1559,18 @@
       if (on) cancel();
       if (G.on) boxCancel();
       if (P.on) gunCancel();
+      if (Fl.on) {
+        if (Fl.a && !Fl.busy) { Fl.a = null; floatMarkersOff(); floatReadout('First point dropped - click again to start over.'); }
+        else floatCancel();
+      }
     });
   }
 
   /* Foam's session, for the helper registry. Undo needs no case of its own:
      tick() already puts Foam away when the piece changes under it. */
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('foam', {
-    live: function () { return on || G.on || P.on; },
-    close: function () { cancel(); boxCancel(); gunCancel(); }
+    live: function () { return on || G.on || P.on || Fl.on; },
+    close: function () { cancel(); boxCancel(); gunCancel(); floatCancel(); }
   });
 
   /* For the drive check and leaveTool: the same paths the controls run. */
@@ -1418,6 +1597,15 @@
     },
     objects: function () { return { group: G.group, foam: G.foam, mesh: G.ms }; },
     GUN_SECONDS: GUN_SECONDS
+  };
+
+  /* Float, for the drive check and leaveTool. */
+  window.nsoFoamFloat = {
+    start: floatStart, cancel: function () { return floatCancel(); },
+    on: function () { return Fl.on; },
+    /* Float between two raw points with their outward normals, as two clicks would. */
+    floatAt: function (a, b) { return Fl.on ? floatAt(a, b) : Promise.resolve({ ok: false, reason: 'Float is not armed' }); },
+    info: function () { return Fl.on ? { pointDown: !!Fl.a, busy: Fl.busy, readout: Fl.readout, last: Fl.last, floats: Fl.floats, glow: !!P.glow, modelId: Fl.m.id } : null; }
   };
 
   /* The GUN, for the drive check and leaveTool. */
