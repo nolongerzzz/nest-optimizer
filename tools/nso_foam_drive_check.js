@@ -24,14 +24,17 @@
         a solid piece, an open cup
      9. Cut still runs on the foamed piece (rawCut in the page, closed)
 
-   THE GUN (docs/FOAM.md section 11), sections 10-15:
-    10. GUN shows the box: Crop's Box on the selected piece with its six handles
+   FOAM'S BOX MODE (docs/FOAM.md section 11, the box that was the gun's), sections 10-15:
+    10. Foam shows the box: Crop's Box on the selected piece with its six handles
     11. the handles size it, with a real mouse: a face moves, the opposite stays
     12. hold fills, release sets, Undo restores: the level rises in the view while
         held, the readout is the engine's volume and nothing else, one undo entry
     13. a second spray stacks: more foam, a second entry, Undo steps back one
-    14. Escape (and Cancel) clear the box; Foam and GUN swap; Foam alone is as it was
+    14. Escape (and Cancel) clear the box; Box, Hollows and GUN swap; the hollow mode alone is as it was
     15. box_closed.stl (overlapping shells) fills, with no refusal and no flag
+   THE GUN (docs/FOAM-GUN.md), section 16: armed with no box; a press on the
+   top face is refused in words; a spray into fixtures/welded_gaps.stl's long
+   slot fills it plate to face, one Undo, closed; Escape puts it away.
    Screenshots (box placed, mid-spray, set) go to tools/foam-gun-out/.
 */
 'use strict';
@@ -105,9 +108,13 @@ async function pieceSpot(page) {
   });
 }
 
+/* Foam's sealed-hollow mode: FOAM opens the box (its default mode), and the
+   box panel's Hollows switches to the hollow mode. */
 async function startFoam(page) {
   await openFinishMenu(page);
   await page.click('#btn-foam');
+  await page.waitForTimeout(100);
+  await page.click('#btn-foam-mode-hollow');
   await page.waitForTimeout(100);
 }
 
@@ -345,31 +352,31 @@ withApp(async (page, logs) => {
   check('rawCut through the foamed piece gives closed halves', cut.every(c => c.closed && !c.degen), JSON.stringify(cut));
 
 
-  console.log('\n=== 10. GUN shows the box ===');
+  console.log('\n=== 10. Foam shows the box ===');
   const idG = await loadSTL(page, path.join(ROOT, 'fixtures', 'box_cavity_30.stl'));   // fresh: sections 2-9 foamed the first
   await selectModel(page, idG);
   await page.evaluate(i => { const k = state.placed.findIndex(p => p.sourceId === i); if (k >= 0) selectPlaced(k); }, idG);
   await frameOn(page);
   const g0 = await page.evaluate(() => {
-    const b = document.getElementById('btn-foam-gun'), foam = document.getElementById('btn-foam');
+    const b = document.getElementById('btn-foam'), h = document.getElementById('btn-foam-mode-hollow');
     return { present: !!b, text: b && b.textContent.trim(), wired: !!b && b.dataset.nsoWired === '1', inAdd: !!b && !!b.closest('#menu-fillfix'),
-             besideFoam: !!b && b.parentElement === foam.parentElement, panelHidden: document.getElementById('foam-gun-panel').hidden };
+             hollowSwitch: !!h && !!h.closest('#foam-box-panel'), panelHidden: document.getElementById('foam-box-panel').hidden };
   });
-  check('#btn-foam-gun "GUN" in the Fill & fix card beside Foam, wired, its panel hidden', g0.present && g0.text === 'GUN' && g0.inAdd && g0.besideFoam && g0.wired && g0.panelHidden, JSON.stringify(g0));
+  check('#btn-foam "Foam" in the Fill & fix card, wired, its box panel hidden, with a Hollows switch in it', g0.present && g0.text === 'Foam' && g0.inAdd && g0.wired && g0.panelHidden && g0.hollowSwitch, JSON.stringify(g0));
   const depthG = await undoDepth(page), rawG = await raw(page);
-  await page.click('#btn-foam-gun');
+  await page.click('#btn-foam');
   await page.waitForTimeout(250);
   const g1 = await page.evaluate(() => {
-    const c = window.NSO_CropCard, S = c.state(), gi = window.nsoFoamGun.info();
+    const c = window.NSO_CropCard, S = c.state(), gi = window.nsoFoamBox.info();
     const grp = state.scene.getObjectByName('foamGunBox');
     const b = new THREE.Box3().setFromObject(cutMeshOf(getActiveModel()));
     const pc = [(b.min.x + b.max.x) / 2, -(b.min.z + b.max.z) / 2, (b.min.y + b.max.y) / 2];
-    return { lent: c.lent(), shape: S.shape, handles: c.handles(), box: c.box(), grp: !!grp && !!grp.parent, on: window.nsoFoamGun.on(),
-             panel: !document.getElementById('foam-gun-panel').hidden, foamPanel: !document.getElementById('foam-panel').hidden,
-             read: document.getElementById('foam-gun-readout').textContent, pc, size: [b.max.x - b.min.x, b.max.z - b.min.z, b.max.y - b.min.y],
-             pressed: document.getElementById('btn-foam-gun').getAttribute('aria-pressed'), cropCardLive: !!(state.cutterOpen && state.cutTool === 'crop'), gi };
+    return { lent: c.lent(), shape: S.shape, handles: c.handles(), box: c.box(), grp: !!grp && !!grp.parent, on: window.nsoFoamBox.on(),
+             panel: !document.getElementById('foam-box-panel').hidden, foamPanel: !document.getElementById('foam-panel').hidden,
+             read: document.getElementById('foam-box-readout').textContent, pc, size: [b.max.x - b.min.x, b.max.z - b.min.z, b.max.y - b.min.y],
+             pressed: document.getElementById('btn-foam').getAttribute('aria-pressed'), cropCardLive: !!(state.cutterOpen && state.cutTool === 'crop'), gi };
   });
-  check('GUN: Crop\'s Box is on the selected piece, with its six handles', g1.on && g1.lent && g1.shape === 'box' && g1.grp &&
+  check('Foam: Crop\'s Box is on the selected piece, with its six handles', g1.on && g1.lent && g1.shape === 'box' && g1.grp &&
         g1.handles.length === 6 && ['x+', 'x-', 'y+', 'y-', 'z+', 'z-'].every(h => g1.handles.includes(h)), JSON.stringify(g1.handles));
   check('...centred on the piece at half its size, like Crop\'s Box', g1.box.c.every((v, i) => Math.abs(v - g1.pc[i]) < 1e-3) &&
         g1.box.h.every((v, i) => Math.abs(v - g1.size[i] / 4) < 1e-3), JSON.stringify(g1.box));
@@ -379,7 +386,7 @@ withApp(async (page, logs) => {
   await page.screenshot({ path: path.join(SHOTS, '1-box-placed.png') });
 
   console.log('\n=== 11. the handles size it ===');
-  const boxOf = () => page.evaluate(() => window.nsoFoamGun.info().box);
+  const boxOf = () => page.evaluate(() => window.nsoFoamBox.info().box);
   const camOf = () => page.evaluate(() => state.camera.position.toArray());
   const drag = async (handle, dx, dy) => {
     const at = await page.evaluate(h => window.NSO_CropCard.handleScreen(h), handle);
@@ -411,10 +418,10 @@ withApp(async (page, logs) => {
 
   console.log('\n=== 12. hold fills, release sets, Undo restores ===');
   const levelOf = () => page.evaluate(() => {
-    const o = window.nsoFoamGun.objects();
+    const o = window.nsoFoamBox.objects();
     if (!o.foam) return null;
     const pl = o.foam.material.clippingPlanes, lv = pl[pl.length - 1];
-    return { level: lv.constant - 0.03, amount: window.nsoFoamGun.info().amount, read: document.getElementById('foam-gun-readout').textContent,
+    return { level: lv.constant - 0.03, amount: window.nsoFoamBox.info().amount, read: document.getElementById('foam-box-readout').textContent,
              ghost: o.mesh.material.opacity };
   });
   const bw = await page.evaluate(() => {
@@ -429,7 +436,7 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(350);
   const s2 = await levelOf();
   await page.screenshot({ path: path.join(SHOTS, '2-mid-spray.png') });   // the shot itself takes about a second: it lands near the middle
-  const heldG = await page.evaluate(() => window.nsoFoamGun.info());
+  const heldG = await page.evaluate(() => window.nsoFoamBox.info());
   check('holding sprays: the foam is drawn, the piece a ghost, and the controls are off', !!s1 && !!s2 && s1.ghost < 0.3 && heldG.spraying &&
         (await page.evaluate(() => state.controls.enabled)) === false, JSON.stringify(s1));
   check('...the level rises in the view from the box\'s floor while the mouse is held', s1.level >= bw.floor - 0.05 && s2.level > s1.level + 0.3 && s2.level < bw.top,
@@ -439,7 +446,7 @@ withApp(async (page, logs) => {
   const depthHeld = await undoDepth(page);
   await page.mouse.up();
   await page.waitForTimeout(900);
-  const after12 = await raw(page), gi12 = await page.evaluate(() => window.nsoFoamGun.info());
+  const after12 = await raw(page), gi12 = await page.evaluate(() => window.nsoFoamBox.info());
   const cs12 = await census(page, after12);
   const vol = async arr => page.evaluate(a => NSO_Foam.signedVolume(new Float32Array(a)), arr);
   const added12 = (await vol(after12)) - (await vol(rawG));
@@ -450,7 +457,7 @@ withApp(async (page, logs) => {
         Math.abs(readNum(gi12.readout) - added12) <= 1, gi12.readout + ' vs ' + added12.toFixed(2));
   check('...the ghost, the foam and the controls are back; the box is still there', await page.evaluate(() => {
     const mt = cutMeshOf(getActiveModel()).material;
-    return mt.opacity === 1 && mt.depthWrite && !window.nsoFoamGun.objects().foam && state.controls.enabled && window.NSO_CropCard.lent() &&
+    return mt.opacity === 1 && mt.depthWrite && !window.nsoFoamBox.objects().foam && state.controls.enabled && window.NSO_CropCard.lent() &&
            !!state.scene.getObjectByName('foamGunBox');
   }));
   await page.screenshot({ path: path.join(SHOTS, '3-set.png') });
@@ -459,7 +466,7 @@ withApp(async (page, logs) => {
   const undone12 = await raw(page);
   check('Undo puts the piece back bit for bit, one entry for the spray', undone12.length === rawG.length && undone12.every((x, i) => Object.is(x, rawG[i])) &&
         (await undoDepth(page)) === depthG && /Undo: Foam reverted/.test(await statusOf(page)), await statusOf(page));
-  check('...and the box is still out', await page.evaluate(() => window.nsoFoamGun.on() && window.NSO_CropCard.lent() && !!state.scene.getObjectByName('foamGunBox')));
+  check('...and the box is still out', await page.evaluate(() => window.nsoFoamBox.on() && window.NSO_CropCard.lent() && !!state.scene.getObjectByName('foamGunBox')));
 
   console.log('\n=== 13. a second spray stacks ===');
   const fullBox = await page.evaluate(() => {   // the box's own volume within the 26 mm hollow, from the box and the piece
@@ -476,7 +483,7 @@ withApp(async (page, logs) => {
   check('two sprays, two undo entries', (await undoDepth(page)) === depthG + 2, String(await undoDepth(page) - depthG));
   check('...the second adds more on top of the first', v1 > 1 && v2 > 1 && sp2.length !== sp1.length, v1.toFixed(1) + ' then ' + v2.toFixed(1));
   check('...a full second spray fills the rest of the box: the two add up to what the box holds', Math.abs(v1 + v2 - fullBox) < 0.5, (v1 + v2).toFixed(2) + ' vs ' + fullBox.toFixed(2));
-  check('...the readout is the second spray\'s volume alone', Math.abs(readNum(await page.evaluate(() => window.nsoFoamGun.info().readout)) - v2) <= 1);
+  check('...the readout is the second spray\'s volume alone', Math.abs(readNum(await page.evaluate(() => window.nsoFoamBox.info().readout)) - v2) <= 1);
   await page.click('#btn-undo');
   await page.waitForTimeout(300);
   const u1 = await raw(page);
@@ -485,19 +492,19 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(300);
   check('...and the next takes back the first', (await raw(page)).every((x, i) => Object.is(x, rawG[i])) && (await undoDepth(page)) === depthG);
 
-  console.log('\n=== 14. Escape and Cancel clear the box; Foam and GUN swap ===');
+  console.log('\n=== 14. Escape and Cancel clear the box; Box, Hollows and GUN swap ===');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(150);
   check('Escape: the box is gone, nothing changed, no undo entry', await page.evaluate(() =>
-        !window.nsoFoamGun.on() && !window.NSO_CropCard.lent() && !state.scene.getObjectByName('foamGunBox') && document.getElementById('foam-gun-panel').hidden &&
+        !window.nsoFoamBox.on() && !window.NSO_CropCard.lent() && !state.scene.getObjectByName('foamGunBox') && document.getElementById('foam-box-panel').hidden &&
         state.controls.enabled) && (await undoDepth(page)) === depthG && (await raw(page)).every((x, i) => Object.is(x, rawG[i])));
-  await page.click('#btn-foam-gun');
+  await page.click('#btn-foam');
   await page.waitForTimeout(150);
-  await page.click('#btn-foam-gun-cancel');
+  await page.click('#btn-foam-box-cancel');
   await page.waitForTimeout(150);
-  check('Cancel does the same', await page.evaluate(() => !window.nsoFoamGun.on() && !window.NSO_CropCard.lent() && !state.scene.getObjectByName('foamGunBox')) &&
+  check('Cancel does the same', await page.evaluate(() => !window.nsoFoamBox.on() && !window.NSO_CropCard.lent() && !state.scene.getObjectByName('foamGunBox')) &&
         (await undoDepth(page)) === depthG);
-  await page.click('#btn-foam-gun');
+  await page.click('#btn-foam');
   await page.waitForTimeout(100);
   await page.mouse.move(spot12.x, spot12.y);
   await page.mouse.down();
@@ -507,18 +514,22 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(500);
   check('Escape in the middle of a spray: nothing set, ghost off, box gone', await page.evaluate(() => {
         const mt = cutMeshOf(getActiveModel()).material;
-        return !window.nsoFoamGun.on() && mt.opacity === 1 && mt.depthWrite && state.controls.enabled && !state.scene.getObjectByName('foamGunBox');
+        return !window.nsoFoamBox.on() && mt.opacity === 1 && mt.depthWrite && state.controls.enabled && !state.scene.getObjectByName('foamGunBox');
       }) && (await undoDepth(page)) === depthG && (await raw(page)).every((x, i) => Object.is(x, rawG[i])));
-  await page.click('#btn-foam-gun');
-  await page.waitForTimeout(100);
   await page.click('#btn-foam');
+  await page.waitForTimeout(100);
+  await page.click('#btn-foam-mode-hollow');
   await page.waitForTimeout(200);
-  check('Foam while the box is out: the box goes and Foam runs as ever', await page.evaluate(() => !window.nsoFoamGun.on() && !window.NSO_CropCard.lent() && window.nsoFoam.on() &&
-        !document.getElementById('foam-panel').hidden && document.getElementById('foam-gun-panel').hidden));
+  check('Hollows while the box is out: the box goes and the sealed-hollow Foam runs as ever', await page.evaluate(() => !window.nsoFoamBox.on() && !window.NSO_CropCard.lent() && window.nsoFoam.on() &&
+        !document.getElementById('foam-panel').hidden && document.getElementById('foam-box-panel').hidden));
+  await page.click('#btn-foam-mode-box');
+  await page.waitForTimeout(200);
+  check('Box while the hollow mode is on: it steps aside and the box comes', await page.evaluate(() => window.nsoFoamBox.on() && !window.nsoFoam.on() && window.NSO_CropCard.lent() &&
+        document.getElementById('foam-panel').hidden && cutMeshOf(getActiveModel()).material.opacity === 1));
   await page.click('#btn-foam-gun');
   await page.waitForTimeout(200);
-  check('GUN while Foam is on: Foam steps aside and the box comes', await page.evaluate(() => window.nsoFoamGun.on() && !window.nsoFoam.on() && window.NSO_CropCard.lent() &&
-        document.getElementById('foam-panel').hidden && cutMeshOf(getActiveModel()).material.opacity === 1));
+  check('GUN while the box is out: the box goes and the gun is armed, no box', await page.evaluate(() => window.nsoFoamGun.on() && !window.nsoFoamBox.on() &&
+        !window.NSO_CropCard.lent() && !document.getElementById('foam-gun-panel').hidden && document.getElementById('foam-box-panel').hidden));
   await page.click('#btn-foam-gun-cancel');
 
   console.log('\n=== 15. box_closed fills, with no false flag ===');
@@ -527,7 +538,7 @@ withApp(async (page, logs) => {
   await page.evaluate(i => { const k = state.placed.findIndex(p => p.sourceId === i); if (k >= 0) selectPlaced(k); }, idBC);
   await frameOn(page);
   const rawBC = await raw(page), depthBC = await undoDepth(page);
-  await page.click('#btn-foam-gun');
+  await page.click('#btn-foam');
   await page.waitForTimeout(250);
   await page.evaluate(() => {   // a box over the whole piece, the way the handles would put it
     const m = getActiveModel(), bb = new THREE.Box3().setFromObject(cutMeshOf(m)), s = bb.getSize(new THREE.Vector3());
@@ -535,7 +546,7 @@ withApp(async (page, logs) => {
   });
   await hold(page, 3800, await pieceSpot(page));
   await page.waitForTimeout(1500);
-  const stBC = await statusOf(page), giBC = await page.evaluate(() => window.nsoFoamGun.info());
+  const stBC = await statusOf(page), giBC = await page.evaluate(() => window.nsoFoamBox.info());
   const afterBC = await raw(page);
   check('box_closed: the spray sets, with the engine\'s own words', /^Foam set - 46,166 mm³ of buried space filled \(100% of what the box holds/.test(stBC), stBC);
   check('...the readout is the volume, +46,166 mm³', giBC.readout === '+46,166 mm³', giBC.readout);
@@ -546,6 +557,41 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(400);
   check('...Undo puts box_closed back bit for bit', (await raw(page)).every((x, i) => Object.is(x, rawBC[i])));
   await page.keyboard.press('Escape');
+
+  console.log('\n=== 16. the GUN: no box, point into a gap, it fills plate to face ===');
+  const idW = await loadSTL(page, path.join(ROOT, 'fixtures', 'welded_gaps.stl'));
+  await selectModel(page, idW);
+  await page.evaluate(i => { const k = state.placed.findIndex(p => p.sourceId === i); if (k >= 0) selectPlaced(k); }, idW);
+  await frameOn(page);
+  const rawW = await raw(page), depthW = await undoDepth(page);
+  await page.click('#btn-foam-gun');
+  await page.waitForTimeout(200);
+  check('GUN: armed, its panel up, no box anywhere', await page.evaluate(() => window.nsoFoamGun.on() && !window.NSO_CropCard.lent() &&
+        !document.getElementById('foam-gun-panel').hidden && document.getElementById('foam-box-panel').hidden &&
+        document.getElementById('btn-foam-gun').getAttribute('aria-pressed') === 'true'));
+  /* A real press on the piece's top face: the ray meets the top, not a gap. */
+  await hold(page, 600, await pieceSpot(page));
+  await page.waitForTimeout(1500);
+  const giTop = await page.evaluate(() => window.nsoFoamGun.info());
+  check('a press on the top face, not into a gap: refused in words, nothing changed, no undo entry',
+        /^GUN: /.test(giTop.readout) && /Nothing changed/.test(giTop.readout) && (await undoDepth(page)) === depthW &&
+        (await raw(page)).every((x, i) => Object.is(x, rawW[i])), giTop.readout);
+  /* Into the long slot, at its wall, held to the end. */
+  const rW = await page.evaluate(() => window.nsoFoamGun.sprayAt({ point: [-9.7081, -3.4119, 0], dir: [-1, 0, 0] }, 100)
+    .then(r => ({ ok: r.ok, changed: r.changed, reason: r.reason, added: r.addedVolume })));
+  await page.waitForTimeout(300);
+  const afterW = await raw(page), stW = await statusOf(page);
+  check('the long slot: filled plate to face, in the engine\'s words', rW.ok && rW.changed && /^Foam sprayed - 1,044 mm³ into the gap, from the plate to the face/.test(stW), stW);
+  check('...one undo entry, the piece closed', (await undoDepth(page)) === depthW + 1 && (await census(page, afterW)).closed);
+  check('...the readout is the volume', (await page.evaluate(() => window.nsoFoamGun.info().readout)) === '+1,044 mm³');
+  check('...the gun stays armed for the next gap, the piece no longer a ghost', await page.evaluate(() => window.nsoFoamGun.on() &&
+        cutMeshOf(getActiveModel()).material.opacity === 1 && !window.nsoFoamGun.objects().foam && state.controls.enabled));
+  await page.click('#btn-undo');
+  await page.waitForTimeout(400);
+  check('...Undo puts the piece back bit for bit', (await raw(page)).every((x, i) => Object.is(x, rawW[i])));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  check('Escape puts the gun away', await page.evaluate(() => !window.nsoFoamGun.on() && document.getElementById('foam-gun-panel').hidden));
 
   const errs = logs.filter(l => /pageerror|Uncaught|TypeError|ReferenceError/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

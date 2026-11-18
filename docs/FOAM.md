@@ -29,7 +29,8 @@ Both are in `npm test`.
 a box, the way Extract bit is a cutter bounded by its bit. Given a piece and a box
 (Crop's Box: centre, size, yaw) it fills every bit of empty space in the box that is
 **buried** in the piece and welds to every face it meets. The Foam card below is its
-sealed-hollow case; the ADD card that sprays a box is the GUN (§11).
+sealed-hollow case; FOAM's Box mode sprays a box (§11). The GUN - point into a gap, no box - is
+its own tool and its own engine: docs/FOAM-GUN.md.
 
 Fill / Densify (`nso_hollow.js` `fill`) stays exactly as it is: one click, every
 enclosed cavity gone, nothing to see. Foam is its visible, partial counterpart.
@@ -170,7 +171,8 @@ the skip list as a **required** input - `foam()` without one is refused - so
 
 ## 8. Flagged, not built
 
-- Freehand blobs (foam sprayed at a spot, not filling a hollow).
+- Freehand blobs (foam sprayed at a spot, not filling a hollow). The GUN (docs/FOAM-GUN.md) fills
+  the gap a click is in; a blob on an open surface is still not built.
 - Filling open vessels from the Foam card - refused there in words. foamBox (§10)
   fills them; the GUN (§11) is its ADD card.
 - Thin-wall beef-up (foam to thicken a wall from inside).
@@ -313,7 +315,14 @@ should keep the void for its piece while the amount changes (not done: the GUN, 
 - The amount is by height, not volume.
 - The engine has no preview of its own: the GUN (§11) draws the foam from `mesh`.
 
-## 11. The GUN: foamBox from the ADD column
+## 11. FOAM's Box mode: foamBox from the Fill & fix card
+
+This was the GUN until 2026-11-18. The GUN is now point-and-spray with no box (docs/FOAM-GUN.md);
+the box moved here, to **FOAM**, unchanged, and is FOAM's default mode. FOAM has two modes side by
+side: **Box** (this section) and **Hollows** (the sealed-hollow Foam, §1-9). The box panel carries
+**Hollows**, the hollow panel **Box**; each switch puts the other mode away first. Below, "GUN" reads
+"FOAM, Box mode"; ids are `#btn-foam`, `#foam-box-panel`, `#foam-box-readout`, `#btn-foam-box-cancel`,
+and the page API is `window.nsoFoamBox`.
 
 `app-foam.js` (the gun), `app-crop-card.js` (the loan of the Box), `index.html` (`#btn-foam-gun`,
 `#foam-gun-panel`). UI only: every number is foamBox's (§10). `tools/nso_foam_drive_check.js`

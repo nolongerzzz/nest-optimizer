@@ -174,7 +174,7 @@ withApp(async page => {
   console.log('\n=== 5. FILL & FIX ===');
   const fx = await page.evaluate(() => {
     const has = (c, id) => !!document.querySelector('#' + c + ' #' + id);
-    return { fix: ['btn-fill', 'btn-foam', 'btn-foam-gun', 'foam-panel', 'foam-gun-panel', 'btn-patch', 'patch-readout', 'menu-weave', 'weave-card'].filter(i => !has('menu-fillfix', i)),
+    return { fix: ['btn-fill', 'btn-foam', 'btn-foam-gun', 'foam-panel', 'foam-box-panel', 'foam-gun-panel', 'btn-patch', 'patch-readout', 'menu-weave', 'weave-card'].filter(i => !has('menu-fillfix', i)),
              add: ['btn-fill', 'btn-foam', 'btn-foam-gun', 'btn-patch', 'menu-weave'].filter(i => has('menu-add', i)),
              addKeeps: ['btn-thicken-out', 'btn-close', 'btn-bridge'].filter(i => !has('menu-add', i)) };
   });

@@ -132,7 +132,7 @@ const HOLDS = {
   // PUNCH: the card is the switch - open it and Punch is armed
   'menu-punch': ['punch-card', 'inp-punch-dia', 'sel-punch-depth', 'punch-pattern-row', 'punch-readout', 'btn-punch-go', 'btn-punch-cancel'],
   // FILL & FIX: Fill / Densify · Foam · GUN (and their panels) · Patch · Weave (a section: the lasso arms when it opens)
-  'menu-fillfix': ['btn-fill', 'btn-foam', 'btn-foam-gun', 'foam-gun-panel', 'foam-panel', 'btn-patch', 'patch-readout',
+  'menu-fillfix': ['btn-fill', 'btn-foam', 'btn-foam-gun', 'foam-box-panel', 'foam-gun-panel', 'foam-panel', 'btn-patch', 'patch-readout',
                    'menu-weave', 'weave-card', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear', 'btn-weave-smooth', 'btn-weave-follow',
                    'inp-weave-pitch', 'weave-readout', 'btn-weave-go', 'btn-weave-attach', 'btn-weave-cancel'],
   // SUBTRACT: Subtract B from A · Extract bit · Hollow · Hollow to safe min (Carve is in Sculpt; Lift, with Detach flange, is in Crop)

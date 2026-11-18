@@ -273,8 +273,8 @@ function buildPlan() {
   V(COL, 'Supports', 'btn-sup-none', 'Remove all', { pre: async x => { await x.click('btn-sup-all'); await x.wait(800); }, run: press(['btn-sup-none']) });
   const hollowed = async x => { await x.click('btn-hollow'); await x.wait(1200); };
   V(COL, 'Fill & fix', 'btn-fill', 'Fill / Densify (after Hollow)', { pre: hollowed, run: press(['btn-fill']) });
-  V(COL, 'Fill & fix', 'btn-foam', 'Foam (after Hollow; hold the mouse on the piece)', { pre: hollowed, run: async x => { await x.click('btn-foam'); await x.wait(300); const p = x.pt(0, 0); if (p) await x.hold(p, 1500); else x.note('no point on the piece'); } });
-  V(COL, 'Fill & fix', 'btn-foam-all', 'Foam: Fill it all', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-all']) });
+  V(COL, 'Fill & fix', 'btn-foam', 'Foam (after Hollow; Hollows mode, hold the mouse on the piece)', { pre: hollowed, run: async x => { await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-mode-hollow'); await x.wait(300); const p = x.pt(0, 0); if (p) await x.hold(p, 1500); else x.note('no point on the piece'); } });
+  V(COL, 'Fill & fix', 'btn-foam-all', 'Foam: Fill it all', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-mode-hollow'); await x.wait(300); }, run: press(['btn-foam-all']) });
   V(COL, 'Fill & fix', 'btn-foam-set', 'Foam: Fill it all, Set', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-all'); await x.wait(500); }, run: press(['btn-foam-set']) });
   V(COL, 'Fill & fix', 'btn-foam-cancel', 'Foam: Cancel', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-cancel']) });
   V(COL, 'Add', 'btn-thicken-out', 'Thicken out (arms the live ghost, then Set)', { run: press(['btn-thicken-out', 'btn-thicken-set']) });

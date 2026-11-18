@@ -399,7 +399,7 @@
     "detach:test": "node tools/nso_detach_test.js",
     "lift:test": "node tools/nso_lift_test.js",
     "lift:drive": "node tools/nso_lift_drive_check.js",
-    "foam:test": "node tools/nso_foam_test.js && node tools/nso_foam_box_test.js",
+    "foam:test": "node tools/nso_foam_test.js && node tools/nso_foam_box_test.js && node tools/nso_foam_gun_test.js",
     "foam:drive": "node tools/nso_foam_drive_check.js",
     "cavity:thickwall": "node tools/nso_cavity_thickwall_test.js",
     "lift:shots": "node tools/nso_lift_drive_check.js tools/lift-out",

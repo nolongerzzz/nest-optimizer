@@ -2579,20 +2579,28 @@
           <!-- FILL & FIX: what fills a hollow or mends a surface - Fill / Densify, Foam, GUN (out of Add),
                Patch (out of Add), and Weave (its own card before, a section here; opening it arms the lasso). -->
           <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-fillfix" data-sec="fillfix">
-            <summary class="vp-bar-btn" title="Fill / Densify, Foam, Foam gun, Patch, Weave">Fill &amp; fix</summary>
+            <summary class="vp-bar-btn" title="Fill / Densify, Foam (box or sealed hollow), Foam gun (point and spray into a gap), Patch, Weave">Fill &amp; fix</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-triple">
               <button id="btn-fill" class="btn btn-secondary" type="button"
                       title="Fill a hollow piece's interior cavity solid - the inverse of Hollow. Drops the shells that bound enclosed cavities and touches nothing else, so the outer surface comes back exactly as it was. A captive separate solid is not a cavity and is never removed.">Fill / Densify</button>
               <button id="btn-foam" class="btn btn-secondary" type="button" aria-pressed="false"
-                      title="Spray foam into a sealed hollow and watch it fill from the bottom up. The piece turns to a ghost, the hollow shows dark and the foam orange. Hold the mouse on the piece to spray, let go to pause; the Level slider sets it directly. Set turns the foam into solid mesh, bonded into the piece; Cancel leaves everything as it was. Only the hollow's own walls change. See docs/FOAM.md.">Foam</button>
+                      title="Foam: a box appears on the selected piece - drag its handles to place and size it. Aim at the piece inside the box and hold the mouse: the box's buried space fills from the bottom while you hold, and letting go sets it, as one Undo. Hollows switches to the sealed-hollow mode (pick a hollow, Level slider, Set). Escape or Cancel takes the box away. See docs/FOAM.md.">Foam</button>
               <button id="btn-foam-gun" class="btn btn-secondary" type="button" aria-pressed="false"
-                      title="Foam gun: a box appears on the selected piece - drag its handles to place and size it. Aim at the piece inside the box and hold the mouse: the box's buried space fills from the bottom while you hold, and letting go sets it, as one Undo. Spray again to add more. Escape or Cancel takes the box away. See docs/FOAM.md.">GUN</button>
+                      title="Foam gun: point and spray. Aim into a gap - a slot, a crack, a notch, the space between welded parts - at its wall, and hold the mouse: that gap fills from the plate to the face while you hold, and letting go sets it, as one Undo. A gap open to the side is filled out to the outer surface, its mouth closed. Spray the next gap; Escape or GUN again puts it away. See docs/FOAM-GUN.md.">GUN</button>
+            </div>
+            <div id="foam-box-panel" class="foam-panel" hidden>
+              <p id="foam-box-readout" class="cut-readout foam-readout">—</p>
+              <div class="vp-row">
+                <button id="btn-foam-mode-hollow" class="btn btn-secondary" type="button" title="Foam's sealed-hollow mode: pick an enclosed hollow and raise the foam in it to a level, then Set.">Hollows</button>
+                <button id="btn-foam-box-cancel" class="btn btn-secondary" type="button" title="Take the box away. Sprays already set stay set; Undo takes them back one at a time.">Cancel</button>
+              </div>
             </div>
             <div id="foam-gun-panel" class="foam-panel" hidden>
+              <p class="hint">Aim into a gap, at its wall, and hold. Let go to set.</p>
               <p id="foam-gun-readout" class="cut-readout foam-readout">—</p>
               <div class="vp-row">
-                <button id="btn-foam-gun-cancel" class="btn btn-secondary" type="button" title="Take the box away. Sprays already set stay set; Undo takes them back one at a time.">Cancel</button>
+                <button id="btn-foam-gun-cancel" class="btn btn-secondary" type="button" title="Put the gun away. Sprays already set stay set; Undo takes them back one at a time.">Cancel</button>
               </div>
             </div>
             <div id="foam-panel" class="foam-panel" hidden>
@@ -2607,6 +2615,7 @@
               <div class="vp-row vp-row-triple">
                 <button id="btn-foam-all" class="btn btn-secondary" type="button" title="Raise the foam to the top of the hollow.">Fill it all</button>
                 <button id="btn-foam-set" class="btn btn-secondary" type="button" title="Turn the foam into solid mesh, bonded into the piece. One Undo puts it back.">Set</button>
+                <button id="btn-foam-mode-box" class="btn btn-secondary" type="button" title="Foam's box mode: a box on the piece, its buried space sprayed full.">Box</button>
                 <button id="btn-foam-cancel" class="btn btn-secondary" type="button" title="Put Foam away and leave the piece exactly as it was.">Cancel</button>
               </div>
             </div>
@@ -3167,6 +3176,7 @@
   <script src="nso_hollow.js?v=9af04282"></script>
   <script src="nso_void.js"></script>
   <script src="nso_foam.js?v=9c2f6904"></script>
+  <script src="nso_foam_gun.js?v=84f6cac2"></script>
   <!-- Support beacons: the plan-grid detector detectOverhangs wraps. Before
        nso_support_aim.js so its beacons ride along on every detection. See
        docs/SUPPORT-BEACONS.md. -->
@@ -3348,7 +3358,7 @@
   <script src="app-surftex-live.js?v=2fba4db4"></script>
   <script src="app-live-slider.js?v=9148b989"></script>
   <script src="app-hollow.js?v=f99c09ad"></script>
-  <script src="app-foam.js?v=16cca4f6"></script>
+  <script src="app-foam.js?v=ef9a92da"></script>
   <script src="app-thicken-live.js?v=4dc96b30"></script>
   <script src="app-soften-live.js?v=d13157a0"></script>
   <script src="app-seat-surface.js?v=4b0f2e5d"></script>
