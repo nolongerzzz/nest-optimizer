@@ -3624,6 +3624,18 @@ function cutTFromPointer(hitWorld, hit) {
     // (app-cut.js, cutBladeSpec). The full blade ignores it.
     state.cutBladeAt = { modelId: m.id, local: local.clone(),
       normal: hit && hit.face && hit.face.normal ? hit.face.normal.clone() : null };
+    /* A SIZED or NOTCH blade clicked on a face that lies in its own plane - the top of a wall under a flat
+       blade - stays at the height it was set to: the click says WHERE across the piece (cutBladeSpec goes in
+       through the edge nearest it), not how high. Moved to the click, the blade sat on the top face, half of
+       it in the air over the piece, and missed. */
+    const bl = state.cutBlade, fn = state.cutBladeAt.normal;
+    if (bl && bl.sized && fn && Math.abs(fn.clone().normalize().dot(n)) > 0.9) {
+      state.cutDragging = false;            // nor does the press drag it there: the slider and the arrows set the height
+      state.cutDragFrom = null;
+      syncCutUI();
+      updateCutHelper();
+      return;
+    }
   } else {
     if (state.raycaster && state.camera) state.raycaster.setFromCamera(state.pointer, state.camera);
     const ray = state.raycaster.ray;
@@ -4345,13 +4357,16 @@ function onCanvasPointerDown(event) {
     const inBlade = o => { for (let n = o; n; n = n.parent) if (n === state.cutHelper) return true; return false; };
     const modelHits = state.raycaster.intersectObjects(state.modelGroup.children, true)
       .filter(h => !inBlade(h.object));
-    /* The ball on the blade's top end is the blade's handle: a press that reaches it before it reaches the piece (the ball stands
-       over the piece from most views) takes hold of the blade, it is not a click on the piece behind it - on the Full blade. */
-    const ballObj = state.cutHelper && state.cutHelper.children.find(c => c.userData && c.userData.cutBall);
-    // (only on the Full blade: on the Sized blade and the Notch a click on the piece is how the blade is placed, and the
-    // ball, standing just over where it was last put, must not swallow a click on that same spot)
-    const ballHit = ballObj && !state.cutHideBlade && !(state.cutBlade && state.cutBlade.sized) ? state.raycaster.intersectObject(ballObj, false)[0] : null;
-    if (modelHits.length && !(ballHit && ballHit.distance <= modelHits[0].distance)) {
+    /* The ball on the blade's top end, and the bar it stands on, are the blade's handle: a press that reaches them before it
+       is drawn (over the piece, always) takes hold of the blade, it is not a click on the piece
+       behind. On every blade: on the Sized blade and the Notch the handle once let the press through, so taking hold of it
+       dropped the blade onto whatever face lay behind - the next wall over. A click on the piece itself still places them. */
+    const handle = state.cutHelper && !state.cutHideBlade
+      ? state.cutHelper.children.filter(c => c.userData && (c.userData.cutBall || c.userData.cutBar)) : [];
+    const ballHit = handle.length ? state.raycaster.intersectObjects(handle, false)[0] || null : null;
+    // The handle is drawn over everything (no depth test): where the pointer sees it, it is what is pressed, even when
+    // the ball stands behind a wall in depth.
+    if (modelHits.length && !ballHit) {
       let obj = modelHits[0].object;
       while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
       const idx = obj && obj.userData ? obj.userData.placedIndex : undefined;

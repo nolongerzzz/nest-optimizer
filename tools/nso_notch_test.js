@@ -171,6 +171,14 @@ function soupOfManifold(m) {
   check('the outside of a wall: the whole side, the margin past both open ends', near(uOut.box.min[1], -N.NOTCH_MARGIN_MM, 1e-3) && near(uOut.box.max[1], 14 + N.NOTCH_MARGIN_MM, 1e-3) && near(uOut.box.min[2], 19),
     JSON.stringify(uOut.box));
 
+  // A flat blade and a click on the TOP of the left wall (a face in the plane: no way in to read from it),
+  // near its inner edge: the blade goes in through the nearest edge of the section - the inside face, z = 4.
+  const ed = N.edgeEntry(ucl, 0, [20, 9, 3.6]);
+  check('a click over the wall\'s top, near its inner edge, enters through the inside face',
+    !!ed && near(ed.point[2], 4) && near(ed.point[1], 9) && ed.normal[2] > 0.99, JSON.stringify(ed));
+  const ed2 = N.edgeEntry(ucl, 0, [20, 9, 0.4]);
+  check('...and near its outer edge, through the outside face', !!ed2 && near(ed2.point[2], 0) && ed2.normal[2] < -0.99, JSON.stringify(ed2));
+
   console.log('notch sizes');
   const ns = N.sizes({ mode: 'notch', nwidth: 2.5, ndepth: 0.7 });
   check('notch mode reads its own width (kerf) and depth', ns.kerf === 2.5 && ns.depth === 0.7, JSON.stringify(ns));

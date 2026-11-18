@@ -520,6 +520,19 @@ function cutBladeSpec(info) {
     if (p) p.applyMatrix4(info.turn);
     if (nrm) nrm.transformDirection(info.turn);
   }
+  /* A face lying in the cut plane gives no way in - a flat blade (mitre 90, bevel 90) and a click on the top of a
+     wall - and with the blade flat "down from above" is no way in either: the plate vertical is the plane's own
+     normal. The click is over the wall; the blade goes in through the section's edge nearest it, against that
+     edge's outward side - near a wall's inner edge, the inside face. */
+  if (p && m) {
+    const inPlane = v => { const o = v.toArray(); o[k] = 0; return Math.hypot(o[0], o[1], o[2]); };
+    const noLean = !nrm || inPlane(nrm) < NSO_Notch.LEAN_MIN * nrm.length();
+    if (noLean && inPlane(info.upCut) < NSO_Notch.LEAN_MIN) {
+      const qq = p.toArray(); qq[k] = info.plane;
+      const ed = NSO_Notch.edgeEntry(cutSectionOf(m, info, k), k, qq);
+      if (ed) { p = new THREE.Vector3().fromArray(ed.point); nrm = new THREE.Vector3().fromArray(ed.normal); }
+    }
+  }
   const entry = NSO_Notch.entryFor(k, nrm ? nrm.toArray() : null, info.upCut.toArray());
   const C = info.bbox.getCenter(new THREE.Vector3());
   const dName = AX[entry.dAxis];

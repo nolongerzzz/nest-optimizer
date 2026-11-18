@@ -431,6 +431,48 @@
              open: [!closed[0] && out[0] !== ends[0].w, !closed[1] && out[1] !== ends[1].w], wall: closed };
   }
 
+  /* The section's edge nearest `q` (a point on the plane, cut frame) and the
+     way it faces out, in the plane: where a blade goes in when the face
+     clicked gives no way in - it lies in the cut plane (a flat blade and the
+     top of a wall). The click is over the wall, so the wall's nearest side is
+     the one meant. -> { point:[x,y,z], normal:[x,y,z] } or null.            */
+  function edgeEntry(clusters, axis, q) {
+    var a = (axis + 1) % 3, b = (axis + 2) % 3, best = null;
+    for (var i = 0; i < clusters.length; i++) {
+      var S = clusters[i].segs;
+      for (var j = 0; j < S.length; j++) {
+        var p0 = S[j][0], p1 = S[j][1];
+        var ta = p1[a] - p0[a], tb = p1[b] - p0[b], l2 = ta * ta + tb * tb;
+        if (!(l2 > 1e-14)) continue;
+        var t = ((q[a] - p0[a]) * ta + (q[b] - p0[b]) * tb) / l2;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        var ca = p0[a] + ta * t, cb = p0[b] + tb * t, d2 = (ca - q[a]) * (ca - q[a]) + (cb - q[b]) * (cb - q[b]);
+        if (!best || d2 < best.d2) best = { d2: d2, ca: ca, cb: cb, ta: ta, tb: tb, l: Math.sqrt(l2) };
+      }
+    }
+    if (!best) return null;
+    // Material at (pa, pb): an odd number of the outline's crossings on a line from it toward +a.
+    function inside(pa, pb) {
+      var n = 0;
+      for (var i = 0; i < clusters.length; i++) {
+        var S = clusters[i].segs;
+        for (var j = 0; j < S.length; j++) {
+          var u = S[j][0], v = S[j][1];
+          if ((u[b] > pb) === (v[b] > pb)) continue;
+          var x = u[a] + (v[a] - u[a]) * (pb - u[b]) / (v[b] - u[b]);
+          if (x > pa) n++;
+        }
+      }
+      return (n & 1) === 1;
+    }
+    var na = -best.tb / best.l, nb = best.ta / best.l, EPS = 0.02;
+    if (inside(best.ca + na * EPS, best.cb + nb * EPS)) { na = -na; nb = -nb; }
+    var point = [0, 0, 0], normal = [0, 0, 0];
+    point[axis] = q[axis]; point[a] = best.ca; point[b] = best.cb;
+    normal[a] = na; normal[b] = nb;
+    return { point: point, normal: normal, dist: Math.sqrt(best.d2) };
+  }
+
   var round = function (v) { return Math.round(v * 100) / 100; };
 
   /* The status line for a finished notch. */
@@ -445,7 +487,7 @@
   var api = {
     MIN_KERF_MM: MIN_KERF_MM, MIN_WIDTH_MM: MIN_WIDTH_MM, MIN_DEPTH_MM: MIN_DEPTH_MM,
     OVERSHOOT_MM: OVERSHOOT_MM, LEAN_MIN: LEAN_MIN, DEFAULTS: DEFAULTS,
-    sizes: sizes, entryFor: entryFor, sectionClusters: sectionClusters, nearestCluster: nearestCluster, notchBox: notchBox, faceRun: faceRun, sectionConvex: sectionConvex,
+    sizes: sizes, entryFor: entryFor, sectionClusters: sectionClusters, nearestCluster: nearestCluster, notchBox: notchBox, edgeEntry: edgeEntry, faceRun: faceRun, sectionConvex: sectionConvex,
     NOTCH_DEFAULTS: NOTCH_DEFAULTS, NOTCH_MARGIN_MM: NOTCH_MARGIN_MM, bladeBox: bladeBox, boxSoup: boxSoup,
     transformSoup: transformSoup, refusal: refusal, report: report
   };
