@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=d561fe4e" />
+  <link rel="stylesheet" href="styles.css?v=096ee501" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1416,16 +1416,16 @@
               <p id="cut-follow-readout" class="cut-readout">-</p>
               </div>
               </div>
-              <!-- Hide blade: the blade (and its tab, and the whole-plate blade) not drawn and not answering a press, so a piece can be turned
-                   without it moving about. Cut is off while it is hidden (app-cut.js cutSetHideBlade). -->
-              <div class="cut-switches cut-hide">
-              <label class="cut-switch" title="Hide the blade while you turn or move the piece. A click on the piece then just picks it - the blade is not placed or dragged - and Cut is off until the blade is shown again."><input type="checkbox" id="chk-cut-hide-blade"><span>Hide blade</span></label>
-              </div>
               <!-- Mitre and Rotate, side by side: each a wheel with its name at the wheel's top-left corner and its number IN the centre
                    (a readout that turns with the wheel; click it to type one), its - / + under it, then (Mitre) Square and 90 degrees, or
                    (Rotate) the axis ticks. The Mitre wheel turns the blade; the Rotate wheel turns the PIECE (app-cut.js, cutWireRotateDial)
                    about the axis ticked under it: Horizontal (about the plate's vertical, the default), Front/back or Side/side (the two
                    leans). It stands in for the rotate rings, which Cut no longer shows. -->
+              <div class="cut-rotate-axes cut-per-piece" role="group" aria-label="Rotate about">
+              <label class="cut-seg" title="Turn the piece about the plate's vertical, as seen from above (the default)."><input type="checkbox" id="chk-cut-rot-h" checked><span>Horizontal</span></label>
+              <label class="cut-seg" title="Lean the piece front over back: its two ends go up and down, about the level line across its footprint."><input type="checkbox" id="chk-cut-rot-fb"><span>Front/back</span></label>
+              <label class="cut-seg" title="Lean the piece side over side: one long edge goes up as the other goes down, about the level line along its footprint."><input type="checkbox" id="chk-cut-rot-ss"><span>Side/side</span></label>
+              </div>
               <div class="cut-dials cut-per-piece">
               <div class="cut-dialcol">
               <div class="cut-dialwrap">
@@ -1479,11 +1479,6 @@
               <button id="btn-cut-rotate-minus" class="btn btn-secondary" type="button" aria-label="Turn the piece 1 degree anticlockwise" title="Turn the piece −1° (anticlockwise from above; Shift: 0.1°, Alt: 5°). Hold to repeat.">−</button>
               <button id="btn-cut-rotate-plus" class="btn btn-secondary" type="button" aria-label="Turn the piece 1 degree clockwise" title="Turn the piece +1° (clockwise from above; Shift: 0.1°, Alt: 5°). Hold to repeat.">+</button>
               </div>
-              <div class="cut-rotate-axes" role="group" aria-label="Rotate piece about">
-              <label class="cut-switch" title="Turn the piece about the plate's vertical, as seen from above (the default)."><input type="checkbox" id="chk-cut-rot-h" checked><span>Horizontal</span></label>
-              <label class="cut-switch" title="Lean the piece front over back: its two ends go up and down, about the level line across its footprint."><input type="checkbox" id="chk-cut-rot-fb"><span>Front/back</span></label>
-              <label class="cut-switch" title="Lean the piece side over side: one long edge goes up as the other goes down, about the level line along its footprint."><input type="checkbox" id="chk-cut-rot-ss"><span>Side/side</span></label>
-              </div>
               </div>
               </div>
               <!-- Bevel: the blade's lean off plumb, about its own horizontal line
@@ -1514,6 +1509,11 @@
               </div>
               <div class="cut-miter-side">
               <button id="btn-cut-plumb" class="btn btn-secondary cut-plumb" type="button" title="Set the bevel that stands the blade vertical on the plate, whatever pose the piece came with. The readout shows the bevel it applied.">Plumb</button>
+              <!-- Hide blade: the blade (and its tab, and the whole-plate blade) not drawn and not answering a press, so a piece can be turned
+                   without it moving about. Cut is off while it is hidden (app-cut.js cutSetHideBlade). -->
+              <div class="cut-switches cut-hide">
+              <label class="cut-switch" title="Hide the blade while you turn or move the piece. A click on the piece then just picks it - the blade is not placed or dragged - and Cut is off until the blade is shown again."><input type="checkbox" id="chk-cut-hide-blade"><span>Hide blade</span></label>
+              </div>
               </div>
               <div class="cut-miter-steps" role="group" aria-label="Bevel, step">
               <button id="btn-cut-bevel-minus" class="btn btn-secondary" type="button" aria-label="Bevel 1 degree less" title="Bevel −1°: the top of the blade toward the near end (Shift: 0.1°, Alt: 5°). Hold to repeat.">−</button>

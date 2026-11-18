@@ -258,7 +258,7 @@ withApp(async (page, logs) => {
     const q = m.quaternion, v = e => new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(q).toArray();
     return { x: v([1, 0, 0]), y: v([0, 1, 0]), z: v([0, 0, 1]) }; });
   const rh = await R('chk-cut-rot-h'), rfb = await R('chk-cut-rot-fb'), rss = await R('chk-cut-rot-ss');
-  check('three ticks under the Rotate piece box, Horizontal first', rh.y >= rdeg.b - 2 && rfb.y > rh.y && rss.y > rfb.y && rh.cx > rd.x - 20 && rh.x < rd.r);
+  check('three axis choices in one row ABOVE the wheels, Horizontal first, filling the width of the card', rh.b <= md.y + 2 && rh.b <= rd.y + 2 && Math.abs(rfb.cy - rh.cy) < 2 && Math.abs(rss.cy - rh.cy) < 2 && rh.x < rfb.x && rfb.x < rss.x && rss.r - rh.x > 250, JSON.stringify({ h: [rh.x, rh.y], fb: [rfb.x], ss: [rss.x, rss.r], wheelTop: md.y }));
   check('Horizontal is ticked by default, the leans are not', JSON.stringify(await ticks()) === JSON.stringify({ h: true, fb: false, ss: false }), JSON.stringify(await ticks()));
   check('and the card has no rotate rings option', await page.evaluate(() => !document.getElementById('chk-cut-rotate') && !document.getElementById('cut-rotate-rings') && !/Rotate rings/.test(document.getElementById('edit-card').textContent)));
   await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
@@ -419,7 +419,8 @@ withApp(async (page, logs) => {
   console.log('Hide blade');
   {
     const hbox = await R('chk-cut-hide-blade');
-    check('the Hide blade box is at the top of the card, unticked', (await page.$eval('#chk-cut-hide-blade', e => e.checked)) === false && hbox.y < md.y - 10, 'box y ' + hbox.y.toFixed(0) + ', wheel y ' + md.y.toFixed(0));
+    const bvd = await R('cut-bevel-dial'), plm = await R('btn-cut-plumb');
+    check('the Hide blade box is beside the Bevel wheel, under Plumb, unticked', (await page.$eval('#chk-cut-hide-blade', e => e.checked)) === false && hbox.x >= bvd.r - 2 && hbox.y >= plm.b - 2 && hbox.y < bvd.b, JSON.stringify({ box: [hbox.x, hbox.y], plumbBottom: plm.b, bevelWheel: [bvd.r, bvd.b] }));
     check('blade shown, Cut on', await page.evaluate(() => !!state.cutHelper && state.cutHelper.visible === true && !document.getElementById('btn-cut').disabled));
     const snap = () => page.evaluate(() => ({ cutT: state.cutT, at: JSON.stringify(state.cutBladeAt && state.cutBladeAt.local), drag: state.cutDragging, sel: state.selectedIndex, mitre: state.cutMiterDeg }));
     const s0 = await snap();
