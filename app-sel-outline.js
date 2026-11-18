@@ -123,6 +123,11 @@
       try { const e = own(g); if (e && e.length) edges = e; }
       catch (err) { console.warn('refreshOutline: the geometry\'s own edges failed', err); }
     }
+    // the house outline: the 15 degree creases and the tangent edges where a flat face runs into a rounded one
+    // (nso_edges.js featureEdges); three's EdgesGeometry where that file is not loaded (a lifted copy in a check)
+    if (!edges && window.NSO_Edges && window.NSO_Edges.featureEdges && !g.index) {
+      edges = window.NSO_Edges.featureEdges(positionOf(g).array, 15);
+    }
     if (!edges) {
       const eg = new THREE.EdgesGeometry(g, 15);
       edges = eg.attributes.position.array;
@@ -137,7 +142,7 @@
     const live = jobs.get(p);
     if (live && live.uuid === g.uuid && live.arr === arr && live.version === version) return;   // already on its way
     if (live) live.job.cancel();
-    const job = window.NSO_Work.run('edges', ['nso_edges.js'], 'NSO_Edges.edgesOfTransfer', [arr, 15]);
+    const job = window.NSO_Work.run('edges', ['nso_edges.js'], 'NSO_Edges.featureEdgesTransfer', [arr, 15]);
     const rec = { uuid: g.uuid, arr: arr, version: version, job: job };
     jobs.set(p, rec);
     function stillMine() {

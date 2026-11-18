@@ -101,13 +101,143 @@
     return new Float32Array(out);
   }
 
+  /* ---- featureEdges: the outline the page draws -------------------------
+     edgesOf's edges, plus the TANGENT edges a CAD view draws: where a flat face
+     runs into a rounded one. A fillet is a run of narrow facets each turned a
+     few degrees from the next, so no edge along it reaches 15 degrees and
+     edgesOf draws nothing there - the corner where a wall rounds into the next
+     one showed as a flat-looking side with no line at all.
+
+     Facets lying in one plane (within FLAT_DEG) are grouped into faces, and a
+     face's breadth is read as 2 x area / perimeter (a strip L long and w wide:
+     about w). An edge turned FLAT_DEG or more but under the threshold is drawn
+     when the face on one side is broad - FLAT_MM or more - and RATIO times as
+     broad as the other: a wall meeting the first facet of a fillet. Between
+     two narrow facets - inside the curve - it is not, nor between facets of a
+     coarse sphere or cylinder, which are all about as broad as each other. Everything edgesOf draws
+     is drawn, in the same order, so a piece with no flat face beside a curve
+     gets exactly edgesOf's array.                                            */
+  var FLAT_DEG = 0.5, FLAT_MM = 1.5, RATIO = 4;
+  function featureEdges(pos, thresholdAngle, opts) {
+    var angle = thresholdAngle == null ? 1 : thresholdAngle;
+    var thresholdDot = Math.cos((Math.PI / 180) * angle);
+    var flatDot = Math.cos((Math.PI / 180) * ((opts && opts.flatDeg) || FLAT_DEG));
+    var broad = (opts && opts.flatMm) || FLAT_MM;
+    var nTri = (pos.length / 9) | 0;
+
+    var cap = 1; while (cap < nTri * 3 * 2) cap <<= 1;
+    var mask = cap - 1;
+    var table = new Int32Array(cap).fill(-1);
+    var rx = new Float64Array(nTri * 3), ry = new Float64Array(nTri * 3), rz = new Float64Array(nTri * 3);
+    var nv = 0;
+    function weld(x, y, z) {
+      var qx = Math.round(x * PRECISION), qy = Math.round(y * PRECISION), qz = Math.round(z * PRECISION);
+      var h = (Math.imul(qx | 0, 73856093) ^ Math.imul(qy | 0, 19349663) ^ Math.imul(qz | 0, 83492791)) & mask;
+      for (;;) {
+        var id = table[h];
+        if (id < 0) { table[h] = nv; rx[nv] = qx; ry[nv] = qy; rz[nv] = qz; return nv++; }
+        if (rx[id] === qx && ry[id] === qy && rz[id] === qz) return id;
+        h = (h + 1) & mask;
+      }
+    }
+
+    var TN = new Float64Array(nTri * 3), TA = new Float64Array(nTri);
+    var edgeAt = new Map();
+    var recA = [], recB = [], recT = [], alive = [];
+    var STRIDE = 67108864;
+    // edgesOf's matches, in its order: the corner offsets of the current triangle's edge, its triangle, the record met
+    var mO = [], mJ = [], mJn = [], mT = [], mRev = [];
+    var hs = [0, 0, 0];
+    for (var t = 0; t < nTri; t++) {
+      var o = t * 9;
+      var ax = pos[o], ay = pos[o + 1], az = pos[o + 2], bx = pos[o + 3], by = pos[o + 4], bz = pos[o + 5];
+      var cx = pos[o + 6], cy = pos[o + 7], cz = pos[o + 8];
+      var ux = cx - bx, uy = cy - by, uz = cz - bz, vx = ax - bx, vy = ay - by, vz = az - bz;
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      var L = nx * nx + ny * ny + nz * nz;
+      if (L > 0) { var k = 1 / Math.sqrt(L); TA[t] = Math.sqrt(L) / 2; nx *= k; ny *= k; nz *= k; } else { nx = 0; ny = 0; nz = 0; }
+      TN[t * 3] = nx; TN[t * 3 + 1] = ny; TN[t * 3 + 2] = nz;
+      hs[0] = weld(ax, ay, az); hs[1] = weld(bx, by, bz); hs[2] = weld(cx, cy, cz);
+      if (hs[0] === hs[1] || hs[1] === hs[2] || hs[2] === hs[0]) continue;
+      for (var j = 0; j < 3; j++) {
+        var jn = (j + 1) % 3, h0 = hs[j], h1 = hs[jn];
+        var rev = edgeAt.get(h1 * STRIDE + h0);
+        if (rev !== undefined && alive[rev]) {
+          mO.push(o); mJ.push(j); mJn.push(jn); mT.push(t); mRev.push(rev);
+          alive[rev] = 0;
+        } else {
+          var key = h0 * STRIDE + h1;
+          if (!edgeAt.has(key)) {
+            edgeAt.set(key, recA.length);
+            recA.push(o + j * 3); recB.push(o + jn * 3); recT.push(t);
+            alive.push(1);
+          }
+        }
+      }
+    }
+    function dotT(a, b) { return TN[a * 3] * TN[b * 3] + TN[a * 3 + 1] * TN[b * 3 + 1] + TN[a * 3 + 2] * TN[b * 3 + 2]; }
+    function len(a, b) { var dx = pos[b] - pos[a], dy = pos[b + 1] - pos[a + 1], dz = pos[b + 2] - pos[a + 2]; return Math.sqrt(dx * dx + dy * dy + dz * dz); }
+
+    // faces: facets joined across edges turned less than FLAT_DEG
+    var par = new Int32Array(nTri);
+    for (var i = 0; i < nTri; i++) par[i] = i;
+    function find(x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; }
+    var m, nm = mO.length;
+    for (m = 0; m < nm; m++) {
+      var ta = mT[m], tb = recT[mRev[m]];
+      if (dotT(ta, tb) >= flatDot) { var ra = find(ta), rb = find(tb); if (ra !== rb) par[rb] = ra; }
+    }
+    var area = new Float64Array(nTri), peri = new Float64Array(nTri);
+    for (i = 0; i < nTri; i++) area[find(i)] += TA[i];
+    /* Joined edge by edge, facets each a hair off the last chain round a gentle curve - a sphere's polar cap is a
+       ring of facets 0.46 degrees apart. A face is FLAT only if every facet in it lies within 1 degree of its first;
+       one that does not is a curve, and as narrow as its facets. */
+    var bent = new Uint8Array(nTri), bentDot = Math.cos(Math.PI / 180);
+    for (i = 0; i < nTri; i++) { var root = find(i); if (TA[i] > 0 && TA[root] > 0 && dotT(i, root) < bentDot) bent[root] = 1; }
+    for (m = 0; m < nm; m++) {
+      var fa = find(mT[m]), fb = find(recT[mRev[m]]);
+      if (fa === fb) continue;
+      var l = len(mO[m] + mJ[m] * 3, mO[m] + mJn[m] * 3);
+      peri[fa] += l; peri[fb] += l;
+    }
+    for (var r = 0; r < recA.length; r++) if (alive[r]) peri[find(recT[r])] += len(recA[r], recB[r]);
+    function breadth(f) { return bent[f] ? 0 : peri[f] > 0 ? 2 * area[f] / peri[f] : Infinity; }
+    /* a flat face meeting a much narrower facet: the face FLAT_MM broad or more, and RATIO times the facet's breadth -
+       a coarse sphere's or cylinder's facets are all about as broad as their neighbours, and stay unlined */
+    function tangent(fa, fb) {
+      var a = breadth(fa), b = breadth(fb), hi = Math.max(a, b), lo = Math.min(a, b);
+      return hi >= broad && hi >= RATIO * lo;
+    }
+
+    var out = [];
+    for (m = 0; m < nm; m++) {
+      var t1 = mT[m], t2 = recT[mRev[m]], d = dotT(t1, t2);
+      if (d <= thresholdDot || (d < flatDot && tangent(find(t1), find(t2)))) {
+        var p0 = mO[m] + mJ[m] * 3, p1 = mO[m] + mJn[m] * 3;
+        out.push(pos[p0], pos[p0 + 1], pos[p0 + 2], pos[p1], pos[p1 + 1], pos[p1 + 2]);
+      }
+    }
+    for (r = 0; r < recA.length; r++) {
+      if (!alive[r]) continue;
+      var a = recA[r], b = recB[r];
+      out.push(pos[a], pos[a + 1], pos[a + 2], pos[b], pos[b + 1], pos[b + 2]);
+    }
+    return new Float32Array(out);
+  }
+
+  function featureEdgesTransfer(pos, angle) {
+    var e = featureEdges(pos, angle);
+    return (typeof self !== 'undefined' && self.NSO_Work && self.NSO_Work.transfer) ? self.NSO_Work.transfer(e, [e.buffer]) : e;
+  }
+
   /* The worker's entry: the segments, moved rather than copied. */
   function edgesOfTransfer(pos, angle) {
     var e = edgesOf(pos, angle);
     return (typeof self !== 'undefined' && self.NSO_Work && self.NSO_Work.transfer) ? self.NSO_Work.transfer(e, [e.buffer]) : e;
   }
 
-  var api = { edgesOf: edgesOf, edgesOfTransfer: edgesOfTransfer };
+  var api = { edgesOf: edgesOf, edgesOfTransfer: edgesOfTransfer, featureEdges: featureEdges, featureEdgesTransfer: featureEdgesTransfer,
+              FLAT_DEG: FLAT_DEG, FLAT_MM: FLAT_MM };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_Edges = api;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null));

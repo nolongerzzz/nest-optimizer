@@ -52,5 +52,34 @@ for (const [name, soup] of cases) {
   }
 }
 check('an empty position array is no segments', E.edgesOf(new Float32Array(0), 15).length === 0);
+
+/* featureEdges, the outline the page draws: edgesOf's edges, plus the TANGENT edges where a flat face runs into a
+   rounded one - a fillet's facets turn a few degrees each, so no edge of it reaches 15 and edgesOf draws none. */
+console.log('featureEdges');
+for (const [name, soup] of cases) {
+  const a = E.edgesOf(soup, 15), b = E.featureEdges(soup, 15);
+  const same = a.length === b.length && a.every((v, i) => v === b[i]);
+  check(name + ': with no flat face beside a curve it is edgesOf\'s array exactly', same, same ? '' : a.length / 6 + ' vs ' + b.length / 6);
+}
+// An inside corner extruded 50 along z: a wall x = 0 (y 10 -> 2), a fillet of radius 2 in 18 steps of 5 degrees, a
+// floor y = 0 (x 2 -> 10).
+function filleted() {
+  const prof = [[0, 10], [0, 2]];
+  for (let i = 1; i < 18; i++) { const t = Math.PI + (Math.PI / 2) * i / 18; prof.push([2 + 2 * Math.cos(t), 2 + 2 * Math.sin(t)]); }
+  prof.push([2, 0], [10, 0]);
+  const out = [];
+  for (let i = 0; i + 1 < prof.length; i++) {
+    const [x0, y0] = prof[i], [x1, y1] = prof[i + 1];
+    out.push(x0, y0, 0, x1, y1, 0, x1, y1, 50, x0, y0, 0, x1, y1, 50, x0, y0, 50);
+  }
+  return new Float32Array(out);
+}
+const fil = filleted();
+const along = (e, x, y) => { let n = 0; for (let i = 0; i < e.length; i += 6) if (Math.abs(e[i + 5] - e[i + 2]) > 1 && Math.abs(e[i] - x) < 1e-4 && Math.abs(e[i + 1] - y) < 1e-4) n++; return n; };
+const alongAny = e => { let n = 0; for (let i = 0; i < e.length; i += 6) if (Math.abs(e[i + 5] - e[i + 2]) > 1) n++; return n; };
+const eo = E.edgesOf(fil, 15), fe = E.featureEdges(fil, 15);
+check('edgesOf draws nothing along a 5-degree fillet', along(eo, 0, 2) === 0 && along(eo, 2, 0) === 0, alongAny(eo) + ' lengthwise');
+check('featureEdges draws the two tangent edges: wall into fillet, fillet into floor', along(fe, 0, 2) > 0 && along(fe, 2, 0) > 0, JSON.stringify([along(fe, 0, 2), along(fe, 2, 0)]));
+check('...and nothing inside the curve', alongAny(fe) - alongAny(eo) === along(fe, 0, 2) + along(fe, 2, 0), alongAny(fe) + ' lengthwise, ' + alongAny(eo) + ' before');
 console.log('\n' + (fails ? 'FAILED: ' + fails : 'all held'));
 process.exit(fails ? 1 : 0);
