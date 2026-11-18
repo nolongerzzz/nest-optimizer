@@ -70,6 +70,19 @@
     return tris >= (now ? (window.NSO_BVH ? window.NSO_BVH.BIG_TRIS : Infinity) : OUTLINE_WORKER_TRIS);
   }
 
+  /* The line's depth taken from its point pulled toward the eye by OUTLINE_NEARER of its distance; x and y as drawn. */
+  const OUTLINE_NEARER = 0.002;
+  function outlineNearer(mat) {
+    mat.onBeforeCompile = function (shader) {
+      shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>',
+        '#include <project_vertex>\n' +
+        '  { vec4 nsoNear = projectionMatrix * vec4(mvPosition.xyz * ' + (1 - OUTLINE_NEARER).toFixed(4) + ', 1.0);\n' +
+        '    gl_Position.z = nsoNear.z / nsoNear.w * gl_Position.w; }');
+    };
+    mat.customProgramCacheKey = function () { return 'nsoOutlineNearer'; };
+    return mat;
+  }
+
   function drawOutline(p, g, edges) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(edges, 3));
@@ -77,10 +90,16 @@
     // depth check, so writing depth would leave a hidden edge's z sitting
     // in front of the face it crosses and reject whatever is drawn after
     // it - which is how this outline was cutting holes in the paint.
+    /* Only the edges that can be SEEN. Drawn through everything (depthTest off) the outline showed every crease of
+       the piece at once - the far end's, the inner walls' behind the face in view - and close up on a long piece they
+       fell across the very faces being looked at as stray diagonals ("confused on the rounded edges"). Depth-tested,
+       an edge on a face z-fights that face and comes out dotted, so each line is drawn a hair nearer the camera than
+       it is (outlineNearer): 0.2 % of its distance, along the view ray - nothing moves on screen. */
     const mat = new THREE.LineBasicMaterial({
-      color: 0xffffff, depthTest: false, depthWrite: false,
+      color: 0xffffff, depthTest: true, depthWrite: false,
       transparent: true, opacity: 1
     });
+    outlineNearer(mat);
     const line = new THREE.LineSegments(geo, mat);
     line.renderOrder = 12;
     line.name = 'selOutline';
