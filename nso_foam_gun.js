@@ -99,8 +99,9 @@
   var FOAM_SIMPLIFY = 0.005;  // mm: the foam's outline - it reaches GROW into the walls, so this is plenty
   var SIMPLIFY = 1e-4;        // mm: a section's corners this close to a straight run are dropped
   var FLUSH = 2.5;            // a gap found at r is taken out to the outside with closings up to this x r ...
-  var FLUSH_MAX = 0.1;        // ... but no wider than this: a weld's hairline crack flares to the outside within a
-                              // tenth of a mm; a wider closing would bridge the outline's own V's (a notch's arms)
+  var FLUSH_MAX = 0.1;        // up to this, a hairline's flare: the wider gap need only still be a pocket
+  var FLUSH_REL = 4;          // past it, closings up to this x the r the gap was found at ...
+  var FLUSH_GROW = 1.25;      // ... each growing the gap by no more than this: the mouth's own flare, not open air
   var POCKET_MIN = 8;         // a pocket behind a mouth of 2r holds at least this x r^2
   var PLATE_REACH = 0.5;      // mm: a gap whose bottom is this close to the plate, over air, drops to it
 
@@ -181,7 +182,57 @@
       if (keep !== t) out.copyWithin(keep * 9, o, o + 9);
       keep++;
     }
-    return keep * 9 === out.length ? out : out.slice(0, keep * 9);
+    out = keep * 9 === out.length ? out : out.slice(0, keep * 9);
+    return unNeedle(out);
+  }
+
+  /* A needle: three distinct corners in a line, no area (a T-junction the
+     kernel's float32 corners leave). It goes, and the triangle across its long
+     edge is split at its middle corner, so every edge still has its twin. */
+  function unNeedle(soup) {
+    function bad(s, o) {
+      var ux = s[o + 3] - s[o], uy = s[o + 4] - s[o + 1], uz = s[o + 5] - s[o + 2];
+      var vx = s[o + 6] - s[o], vy = s[o + 7] - s[o + 1], vz = s[o + 8] - s[o + 2];
+      return Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) < 1e-12;
+    }
+    var nt = soup.length / 9, any = false, t;
+    for (t = 0; t < nt && !any; t++) if (bad(soup, t * 9)) any = true;
+    if (!any) return soup;
+    var tris = [];
+    for (t = 0; t < nt; t++) tris.push(Array.prototype.slice.call(soup, t * 9, t * 9 + 9));
+    var key = function (T, c) { return T[c * 3] + ',' + T[c * 3 + 1] + ',' + T[c * 3 + 2]; };
+    var i;
+    for (var guard = 0; guard < 64; guard++) {         // one needle a pass; a mesh has a handful
+      var edge = new Map(), fixed = 0, c;
+      for (i = 0; i < tris.length; i++) if (tris[i]) for (c = 0; c < 3; c++) edge.set(key(tris[i], c) + '|' + key(tris[i], (c + 1) % 3), i);
+      for (i = 0; i < tris.length; i++) {
+        var T = tris[i];
+        if (!T || !bad(T, 0)) continue;
+        /* the long edge u -> w and the middle corner v */
+        var best = -1, bl = -1;
+        for (c = 0; c < 3; c++) {
+          var a = c, b = (c + 1) % 3, l = Math.hypot(T[b * 3] - T[a * 3], T[b * 3 + 1] - T[a * 3 + 1], T[b * 3 + 2] - T[a * 3 + 2]);
+          if (l > bl) { bl = l; best = c; }
+        }
+        var u = best, w = (best + 1) % 3, v = (best + 2) % 3;
+        var j = edge.get(key(T, w) + '|' + key(T, u));
+        if (j == null || j === i || !tris[j]) continue;
+        var N = tris[j], cu = -1;
+        for (c = 0; c < 3; c++) if (key(N, c) === key(T, w) && key(N, (c + 1) % 3) === key(T, u)) cu = c;
+        if (cu < 0) continue;
+        var P = function (X, k) { return [X[k * 3], X[k * 3 + 1], X[k * 3 + 2]]; };
+        var pw = P(N, cu), pu = P(N, (cu + 1) % 3), pd = P(N, (cu + 2) % 3), pv = P(T, v);
+        tris[j] = pw.concat(pv, pd);
+        tris.push(pv.concat(pu, pd));
+        tris[i] = null;
+        fixed++;
+        break;                                         // edges changed: index again
+      }
+      if (!fixed) break;
+    }
+    var outT = [];
+    for (i = 0; i < tris.length; i++) if (tris[i]) outT.push.apply(outT, tris[i]);
+    return Float32Array.from(outT);
   }
 
   /* The slab cuts: the piece's corner heights, one per run within WELD (the
@@ -389,13 +440,20 @@
            narrowest, and a mouth that flares leaves a wedge outside that. Wider
            closings, each up to FLUSH x the last, take the gap out to where the mouth meets
            the outside - while the gap they give still holds this one and is
-           still a pocket, not a corner - and only up to FLUSH_MAX, the flare
-           of a hairline; past that the outline's own shapes would be bridged. */
+           still a pocket (a hairline's flare, up to FLUSH_MAX) or, past that,
+           grows by no more than FLUSH_GROW a step, up to FLUSH_REL x the r it
+           was found at: a notch's arms are bridged where they end, out to the
+           outside, and a closing that reaches open air stops. */
         var r0 = R_LADDER[i], held = G.held;
-        for (var k = i + 1; r0 > 0 && k < R_LADDER.length && R_LADDER[k] <= FLUSH * R_LADDER[i] + 1e-12 && R_LADDER[k] <= Math.min(rMax, FLUSH_MAX); k++) {
+        var rTop = Math.min(rMax, Math.max(FLUSH_MAX, FLUSH_REL * r0));
+        for (var k = i + 1; r0 > 0 && k < R_LADDER.length && R_LADDER[k] <= FLUSH * R_LADDER[i] + 1e-12 && R_LADDER[k] <= rTop + 1e-12; k++) {
           var Gk = gapsAt(W, S, R_LADDER[k]), wider = null;
           for (g = 0; g < Gk.gaps.length; g++) {
-            var ok = !wider && Gk.gaps[g].area() >= POCKET_MIN * R_LADDER[k] * R_LADDER[k];
+            var rk = R_LADDER[k], ga = Gk.gaps[g].area();
+            /* A hairline's flare: still a pocket. Past that: the gap may only
+               grow a little a step - a mouth closing flush grows gently, a
+               closing that has reached open air jumps. */
+            var ok = !wider && (rk <= FLUSH_MAX ? ga >= POCKET_MIN * rk * rk : ga <= FLUSH_GROW * hit.area());
             if (ok) { var xx = Gk.gaps[g].intersect(hit), xa2 = xx.area(); xx.delete(); ok = xa2 >= 0.9 * hit.area(); }
             if (ok) wider = Gk.gaps[g]; else Gk.gaps[g].delete();
           }
@@ -405,7 +463,7 @@
         }
         if (near) near.delete();
         if (lap) lap('bridge');
-        return { ok: true, P: P, seed: seed, js: js, r: R_LADDER[i], first: hit, held0: held };
+        return { ok: true, P: P, seed: seed, js: js, r: R_LADDER[i], r0: r0, first: hit, held0: held };
       }
       G.held.delete();
     }
@@ -456,7 +514,7 @@
         lo = 0; plate = true;
       }
     }
-    return { ok: true, F: P.F, m: P.m, cuts: cuts, lo: lo, hi: hi, pockets: pockets, helds: helds, r: r, zmin: P.zmin, zmax: P.zmax,
+    return { ok: true, F: P.F, m: P.m, cuts: cuts, lo: lo, hi: hi, pockets: pockets, helds: helds, r: r, r0: A.r0, zmin: P.zmin, zmax: P.zmax,
              reachesPlate: plate, reachesFace: hi === nS - 1, nS: nS };
   }
   function release(R) {
@@ -537,7 +595,7 @@
       try {
         var zlo = R.cuts[R.lo], zhi = R.cuts[R.hi + 1], level = zlo + amount / 100 * (zhi - zlo);
         var base = { ok: true, changed: false, kind: 'nothing', mesh: soup, addedVolume: 0, level: level, span: [zlo, zhi],
-                     reachesPlate: R.reachesPlate, reachesFace: R.reachesFace, bridge: R.r, slabs: R.hi - R.lo + 1, amount: amount };
+                     reachesPlate: R.reachesPlate, reachesFace: R.reachesFace, bridge: R.r, mouth: 2 * R.r0, slabs: R.hi - R.lo + 1, amount: amount };
         if (amount <= 0 || level <= zlo + WELD) { base.reason = 'GUN: the amount is 0 - nothing to set. Nothing changed.'; return base; }
         var pa = paintedReached(soup, skip, R);
         if (pa) {
@@ -613,7 +671,7 @@
         }
         lap('kernelOut');
         result = { ok: true, changed: true, kind: 'set', mesh: mesh, foam: foamSoup, up: R.F.n.slice(), addedVolume: added, level: level, span: [zlo, zhi],
-                   reachesPlate: R.reachesPlate, reachesFace: R.reachesFace, bridge: R.r, slabs: R.hi - R.lo + 1, amount: amount,
+                   reachesPlate: R.reachesPlate, reachesFace: R.reachesFace, bridge: R.r, mouth: 2 * R.r0, slabs: R.hi - R.lo + 1, amount: amount,
                    genusBefore: R.m.genus(), genusAfter: t2.genus() };
         result.reason = words(result);
         return result;
@@ -630,7 +688,7 @@
                r.reachesFace ? 'from the gap\'s floor up to the face' : 'from the gap\'s floor to its ceiling';
     var full = r.amount >= 100 ? ', ' + ends : ' (' + Math.round(r.amount) + '% of the way, ' + ends.replace(/^from /, 'rising from ') + ')';
     return 'Foam sprayed - ' + vol(r.addedVolume) + ' mm³ into the gap' + full +
-           (r.bridge > 0 ? '; its mouth (under ' + mm(2 * r.bridge) + ' mm) closed flush with the outside' : '') + '.';
+           (r.bridge > 0 ? '; its mouth (under ' + mm(r.mouth || 2 * r.bridge) + ' mm at its narrowest) closed flush with the outside' : '') + '.';
   }
   /* Volumes and widths a hairline gap has: enough digits to be more than 0. */
   function vol(v) { return v >= 10 ? grouped(v) : (v >= 1 ? v.toFixed(1) : v.toPrecision(2)); }

@@ -38,11 +38,17 @@ FOAM and GUN share nothing but the orange: the GUN's engine is its own file, and
   about 0.21 r², and a corner is not a gap - a wide shallow groove is refused, not
   filled. Past the ladder the seed is in open air: refused, in words.
 - **out to the outside**: the smallest r shuts a mouth at its narrowest; a mouth
-  that flares leaves a wedge outside that (a weld's hairline crack does). Wider
-  closings, each up to 2.5 x the last and no wider than 0.1 mm, take the gap out to
-  where its mouth meets the outside, while the gap they give still holds the first
-  and is still a pocket. 0.1 mm is the flare of a hairline; wider, the outline's own
-  shapes would be bridged (a notch's arms - welded_gaps.stl's notch stays 151 mm³).
+  that flares leaves the rest of it outside that (a weld's hairline crack does; a
+  notch's arms run on past their narrowest). Wider closings, each up to 2.5 x the
+  last, take the gap out to where its mouth meets the outside while the gap they
+  give still holds the first: up to 0.1 mm (a hairline's flare) so long as it is
+  still a pocket, and past that up to 4 x the r it was found at so long as each step
+  grows the gap by no more than 25% - a mouth closing flush grows gently (the
+  welded notch's outer channel: 1.74, 1.85, 1.91, 1.96 mm² from r 0.3 to 1.2), a
+  closing that has reached open air jumps. The readout names the mouth at its
+  narrowest, not the closing that took it out.
+- **needles**: a triangle the kernel leaves with three corners in a line (no
+  area) goes, and the triangle across its long edge is split at its middle corner.
 - **reach**: a hairline slit is narrower than the seed's 0.02 mm step back off the
   wall, and seen from above a click lands on the top face beside it. A gap within
   `reach` of the seed counts as aimed at (the nearest wins), and a click on the top
@@ -133,3 +139,4 @@ slot: 1 prism, not 58).
 | float noise (2e-5 mm) on the faces | 799.999 mm³, plate to face |
 | fixtures/welded_gaps.stl, four shots | 1,044 + 140 + 1.2 + 151 mm³, each closed, genus 2 -> 0, 0.1-0.8 s each |
 | ...then its hairline slit to the outside, clicked on the top face beside it | 0.62 mm³, out to its flared mouth; a click 0.4 mm away is refused |
+| ...then the notch's outer channel (its mouth shut at its narrowest by the notch shot) | 56 mm³: the arm's edge runs on into the S-curve; the same shot again finds no gap |

@@ -21,6 +21,8 @@
         another, each closed, ending with no hole through it (genus 0)
      9. the hairline slit left where the crack reached the outside: a click on the
         top face beside it (reach) fills it out to its flared mouth
+    10. the notch's outer channel (its mouth shut at its narrowest by the notch
+        shot): a shot into it bridges the arm's end to the S-curve
 */
 'use strict';
 const path = require('path');
@@ -105,7 +107,7 @@ function bounds(s) {
   const notched = minus(block(), chamber, mouth);
   const r4 = await shot(notched, -4, 5, 10);
   gateSolid('the chamber', notched, r4, 20 * (10 * 4 + 0.4 * 8), 0.01);
-  check('...its mouth closed flush with the outside (bridge > 0, said so)', r4.bridge > 0 && /mouth \(under [0-9.]+ mm\) closed flush/.test(r4.reason), r4.reason);
+  check('...its mouth closed flush with the outside (bridge > 0, said so)', r4.bridge > 0 && /mouth \(under 0\.4 mm at its narrowest\) closed flush/.test(r4.reason), r4.reason);
   check('...the piece is a plain block again (volume 40 x 30 x 20)', r4.ok && rel(vol(r4.mesh), 24000) < 0.002, r4.ok && vol(r4.mesh).toFixed(2));
 
   console.log('\n== 4. amount 50 ==');
@@ -168,9 +170,26 @@ function bounds(s) {
         r9b.ok && r9b.changed && cs9.closed && !cs9.degen && r9b.reachesPlate && r9b.reachesFace, r9b.reason);
   check('...out to its flared mouth, not just its narrowest point: 0.6 mm³ (0.023 mm² x 27.1 mm)', r9b.ok && r9b.addedVolume > 0.5 && r9b.addedVolume < 0.75,
         r9b.ok && r9b.addedVolume.toFixed(3));
-  check('...and says so in numbers that are not 0', /0\.6\d mm³/.test(r9b.reason) && /under 0\.1 mm/.test(r9b.reason), r9b.reason);
+  check('...and says so in numbers that are not 0', /0\.6\d mm³/.test(r9b.reason) && /under 0\.0\d+ mm at its narrowest/.test(r9b.reason), r9b.reason);
   const r9c = await GUN.spray({ rawTris: soup, skipList: [] }, { point: [2.6, -18.2, 13.55], dir: [0, 0, -1], reach: 0.1 }, { wasm: W });
   check('a click on the top face 0.4 mm from it is not a gap', !r9c.ok && r9c.kind === 'air', r9c.reason);
+  if (r9b.ok && r9b.changed) soup = r9b.mesh;
+
+  console.log('\n== 10. the notch\'s outer channel: from where its mouth was shut out to the arm\'s end ==');
+  /* The notch shot shuts its 0.4 mm mouth at its narrowest (y 10.1). Above that a
+     channel 0.3-0.6 mm wide runs 4 mm up between the arm tip's edge and the
+     S-curve, open at the top: the outline's last curve. A shot into it takes it
+     out to where the arm ends - the closing grows gently step by step there (1.74,
+     1.85, 1.91, 1.96 mm²) - and the arm's edge then runs on into the S-curve. */
+  const rCh = await GUN.spray({ rawTris: soup, skipList: [] }, { point: [-3.88, 12.3, 0], dir: [-1, 0, 0], reach: 0.05 }, { wasm: W });
+  const csCh = rCh.ok && rCh.changed ? FOAM.census(rCh.mesh) : null;
+  check('a shot into the channel fills it plate to face, closed', rCh.ok && rCh.changed && csCh.closed && !csCh.degen && rCh.reachesPlate && rCh.reachesFace, JSON.stringify(csCh));
+  check('...out to the arm\'s end: about 2 mm² x 27.1 mm (50-60 mm³)', rCh.ok && rCh.addedVolume > 50 && rCh.addedVolume < 60, rCh.ok && rCh.addedVolume.toFixed(1));
+  check('...its mouth named at its narrowest, not the closing that took it out', rCh.ok && /under 0\.8 mm at its narrowest/.test(rCh.reason), rCh.reason);
+  if (rCh.ok && rCh.changed) {
+    const again = await GUN.spray({ rawTris: rCh.mesh, skipList: [] }, { point: [-3.88, 12.3, 0], dir: [-1, 0, 0], reach: 0.05 }, { wasm: W });
+    check('...and nothing is left there: the same shot again finds no gap', !(again.ok && again.changed && again.addedVolume > 0.5), again.reason);
+  }
 
   console.log('\npassed ' + pass + ' check(s), ' + fail + ' failure(s)');
   if (fail) { FAILED.forEach(n => console.log('  FAILED: ' + n)); process.exit(1); }
