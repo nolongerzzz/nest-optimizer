@@ -489,6 +489,7 @@
     if (D.draft && D.draft.pts.length) {
       ctx.save();
       var isLine = defaults.kind === 'line', dp = D.draft.pts;
+      if (D.draft.follow) dp = dp.slice(0, -1).concat(D.draft.follow);   // the segment being drawn runs along the edge
       if (isLine && dp.length >= 2) {
         var al = resolveSide(dp, defaults.width, !!D.draft.closedPreview);
         if (D.draftFlip) al = al === 'left' ? 'right' : al === 'right' ? 'left' : 'left';
@@ -705,19 +706,106 @@
     sketch.objects.forEach(function (o) { bounds.push({ pts: o.pts, closed: o.kind === 'fill' || o.closed, guide: o.kind === 'guide' }); });
     var bite = parseFloat($('dr-bite').value);
     if (!(bite >= 0)) bite = 0.3;
-    var r = SK.regionAt(p, bounds, { bite: bite });
+    var gap = parseFloat(($('dr-gap') || {}).value);
+    if (!(gap >= 0)) gap = 0.5;
+    var r = SK.regionAt(p, bounds, { bite: bite, gap: gap });
     if (!r.ok) { say(r.reason, true); return null; }
     var n = 1;
     sketch.objects.forEach(function (o) { var m = /^Fill area (\d+)$/.exec(o.name); if (m) n = Math.max(n, +m[1] + 1); });
     var o = addObject({ kind: 'fill', closed: true, width: defaults.width, pts: r.pts, name: 'Fill area ' + n });
-    say(o.name + ': ' + f2(r.area) + ' mm², grown ' + f2(bite) + ' mm into the walls round it so the weld bites them. Ctrl+Z takes it off.');
+    say(o.name + ': ' + f2(r.area) + ' mm², grown ' + f2(bite) + ' mm into the walls round it so the weld bites them' + (r.closedGap ? '; a gap under ' + f2(r.closedGap) + ' mm was closed' : '') + '. Ctrl+Z takes it off.');
     return o;
   }
 
+  /* every edge a point can land on, or a path can follow: the traced outline (simplified) and everything drawn */
+  function edgePaths() {
+    var out = [];
+    if (sketch.trace && D.snapEdge) traceSimple().forEach(function (L) { out.push({ pts: L, closed: true, trace: true }); });
+    sketch.objects.forEach(function (o) { if (o.pts.length >= 2) out.push({ pts: o.pts, closed: o.kind === 'fill' || !!o.closed }); });
+    return out;
+  }
+  /* FOLLOW EDGES (the Line tool): two points one after the other on the same edge - a traced wall, or a line, guide
+     or fill already drawn - are joined ALONG that edge, round its fillets and curves, the shorter way on a closed one,
+     when that is plainly meant (followPath); otherwise by the straight line. Alt held: the other of the two.
+     followWay -> the points after a, ending at b, along the edge, or null */
+  function locate(p, P, closed, tol) {
+    var m = closed ? P.length : P.length - 1, best = null;
+    for (var i = 0; i < m; i++) {
+      var a = P[i], b = P[(i + 1) % P.length], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+      var t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+      var d = Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t);
+      if (d <= tol && (!best || d < best.d)) best = { i: i, t: t, d: d };
+    }
+    return best;
+  }
+  /* followPath(a, b, force): along the edge when that is plainly what is meant - the way along it no more than 1.5
+     times the straight distance and round no sharp corner (over 60 degrees): a fillet, a curve, a run of one wall.
+     A guide from corner to corner across a channel's mouth is NOT followed round the channel. force: follow anyway
+     (Alt, when the plain choice was straight). */
+  function followPath(a, b, force) {
+    if (!a || !b || Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6) return null;
+    var w = followWay(a, b);
+    if (!w) return null;
+    if (force) return w;
+    var chord = Math.hypot(a[0] - b[0], a[1] - b[1]), len = 0, sharp = false, all = [a].concat(w);
+    for (var i = 1; i < all.length; i++) {
+      len += Math.hypot(all[i][0] - all[i - 1][0], all[i][1] - all[i - 1][1]);
+      if (i < all.length - 1) {
+        var u = [all[i][0] - all[i - 1][0], all[i][1] - all[i - 1][1]], v = [all[i + 1][0] - all[i][0], all[i + 1][1] - all[i][1]];
+        var lu = Math.hypot(u[0], u[1]), lv = Math.hypot(v[0], v[1]);
+        if (lu > 1e-9 && lv > 1e-9 && (u[0] * v[0] + u[1] * v[1]) / (lu * lv) < Math.cos(60 * Math.PI / 180)) sharp = true;
+      }
+    }
+    return !sharp && len <= 1.5 * chord ? w : null;
+  }
+  function followWay(a, b) {
+    var tol = Math.max(0.02, 2 / D.view.z), best = null;
+    edgePaths().forEach(function (E) {
+      var P = E.pts, n = P.length, la = locate(a, P, E.closed, tol), lb = locate(b, P, E.closed, tol);
+      if (!la || !lb) return;
+      var pa = la.i + la.t, pb = lb.i + lb.t, ways = [];
+      function walk(dir) {                                          // the corners passed going from pa to pb, dir +1 or -1
+        var pts = [], len = 0, prev = a, m = E.closed ? n : n - 1;
+        if (dir > 0) {
+          var k = Math.floor(pa) + 1, guard = 0;
+          while (guard++ <= n) {
+            var kk = E.closed ? ((k % n) + n) % n : k;
+            var stepTo = E.closed ? (pb >= pa ? (k <= pb) : (k <= pb + n)) : k <= pb;
+            if (!stepTo || (!E.closed && k > m)) break;
+            pts.push(P[kk]); len += Math.hypot(P[kk][0] - prev[0], P[kk][1] - prev[1]); prev = P[kk]; k++;
+          }
+        } else {
+          var j = pa === Math.floor(pa) ? pa - 1 : Math.floor(pa), guard2 = 0;   // the segment's own start first
+          while (guard2++ <= n) {
+            var jj = E.closed ? ((j % n) + n) % n : j;
+            var stepTo2 = E.closed ? (pb <= pa ? (j >= pb) : (j >= pb - n)) : j >= pb;
+            if (!stepTo2 || (!E.closed && j < 0)) break;
+            pts.push(P[jj]); len += Math.hypot(P[jj][0] - prev[0], P[jj][1] - prev[1]); prev = P[jj]; j--;
+          }
+        }
+        pts = pts.filter(function (q) { return Math.hypot(q[0] - b[0], q[1] - b[1]) > 1e-9 && Math.hypot(q[0] - a[0], q[1] - a[1]) > 1e-9; });
+        len += Math.hypot(b[0] - prev[0], b[1] - prev[1]);
+        return { pts: pts.map(function (q) { return q.slice(); }).concat([b.slice()]), len: len };
+      }
+      if (E.closed) { ways.push(walk(1), walk(-1)); }
+      else ways.push(walk(pb >= pa ? 1 : -1));
+      ways.forEach(function (w) { if (w.pts.length > 1 && (!best || w.len < best.len)) best = w; });
+    });
+    return best ? best.pts : null;
+  }
+
+  /* the segment from a to b: along the edge or straight - the plain choice, or (Alt) the other one */
+  function followFor(a, b, alt) {
+    if (!D.followEdges) return null;
+    var plain = followPath(a, b, false);
+    if (!alt) return plain;
+    return plain ? null : followPath(a, b, true);
+  }
+
   function edgeSnap(p) {
-    if (!D.snapEdge || !sketch.trace) return null;
+    if (!D.snapEdge) return null;
     var best = null, bd = 8 / D.view.z, cd = 10 / D.view.z, corner = null;
-    traceSimple().forEach(function (L) {
+    edgePaths().map(function (E) { return E.pts; }).forEach(function (L) {
       for (var i = 0; i < L.length; i++) {
         var a = L[i], b = L[(i + 1) % L.length], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
         var dc = Math.hypot(p[0] - a[0], p[1] - a[1]);
@@ -827,8 +915,11 @@
         var prev0 = D.draft.pts[D.draft.pts.length - 2], sn = lineSnap(prev0, p, e.shiftKey), q = sn.p;
         var first = D.draft.pts[0], close = D.draft.pts.length > 3 && Math.hypot(toScreen(first)[0] - toScreen(q)[0], toScreen(first)[1] - toScreen(q)[1]) < 9;
         if (close) { D.draft.pts.pop(); finishLine(true); return; }
-        D.draft.pts[D.draft.pts.length - 1] = q;
+        var fol = followFor(prev0, q, e.altKey);
+        D.draft.pts.pop();
+        (fol || [q]).forEach(function (x) { D.draft.pts.push(x.slice()); });
         D.draft.pts.push(q.slice());
+        D.draft.follow = null;
       }
     } else if (D.tool === 'rect' || D.tool === 'ellipse') {
       var s = snapMm(p);
@@ -906,7 +997,11 @@
     D.hint = null;
     if (D.tool === 'line') {
       var lprev = D.draft && D.draft.kind === 'line' ? D.draft.pts[D.draft.pts.length - 2] : null, ls = lineSnap(lprev, p, e.shiftKey);
-      if (lprev) D.draft.pts[D.draft.pts.length - 1] = ls.p;
+      if (lprev) {
+        D.draft.pts[D.draft.pts.length - 1] = ls.p;
+        D.draft.follow = followFor(lprev, ls.p, e.altKey);
+        if (D.draft.follow && ls.label) ls.label += ' · follows the edge';
+      }
       D.hint = ls.label ? { at: ls.p, label: ls.label } : null;
       draw();
     }
@@ -1116,6 +1211,7 @@
     $('dr-undo').disabled = !D.history.length; $('dr-redo').disabled = !D.future.length;
     syncTrace();
     $('dr-snap').checked = !!D.snap;
+    $('dr-follow').checked = !!D.followEdges;
     $('dr-scale-width').checked = !!D.scaleWidth;
     /* the objects list */
     var list = $('dr-objects');
@@ -1211,6 +1307,8 @@
         btn('dr-trace-go', 'Trace', 'Lay this piece\'s outline, seen from above, under the sheet - in plate millimetres, so Connect puts the drawing exactly where it is drawn'),
         btn('dr-trace-clear', 'Clear', 'Take the traced outline off the sheet')
       ]),
+      h('div', { cls: 'dr-row' }, [field('dr-gap', 'closes gaps to', 'A space whose lines stop a little short of a wall is still filled, as if they met, when the gap is no wider than this, mm. 0: only a space closed all round', 'mm', { min: '0', step: '0.1', value: '0.5' })]),
+      h('label', { cls: 'dr-check', title: 'Line tool: two points one after the other on the same edge (a traced wall, or something drawn) are joined along that edge - round its fillets and curves - when the way along it is short and smooth (no sharp corner); a line across a mouth stays straight. The preview shows which. Alt held while clicking: the other one' }, [h('input', { type: 'checkbox', id: 'dr-follow' }), h('span', { text: ' Line follows edges (Alt: the other way)' })]),
       h('div', { cls: 'dr-row' }, [field('dr-bite', 'Fill area grows', 'How far a Fill area reaches into the walls round it, mm - so a weld bites solid material instead of sharing a face (a seam the weld cannot close). Keep it under the walls\' thickness', 'mm', { min: '0', step: '0.05', value: '0.3' })]),
       h('label', { cls: 'dr-check', title: 'Line points, shape corners and the ends of a pencil stroke land on the traced outline when near it' }, [h('input', { type: 'checkbox', id: 'dr-snap-edge' }), h('span', { text: ' Snap to the traced edges' })]),
       h('div', { cls: 'dr-side-title', text: 'Drawing' }),
@@ -1301,6 +1399,7 @@
     $('dr-trace-go').addEventListener('click', doTrace);
     $('dr-trace-piece').addEventListener('change', syncTrace);
     $('dr-trace-clear').addEventListener('click', function () { if (!sketch.trace) return; remember(); sketch.trace = null; changed(); });
+    $('dr-follow').addEventListener('change', function () { D.followEdges = $('dr-follow').checked; });
     $('dr-snap-edge').addEventListener('change', function () { D.snapEdge = $('dr-snap-edge').checked; });
     $('dr-clear').addEventListener('click', function () { if (!sketch.objects.length) return; remember(); sketch.objects = []; D.sel = []; changed(true); });
     $('dr-done').addEventListener('click', function () { close(); });
@@ -1358,7 +1457,7 @@
     buildDom();
     if (D) close();
     D = { tool: 'pencil', sel: [], view: { cx: 0, cy: 0, z: 4 }, history: [], future: [], drag: null, draft: null,
-          lock: true, snap: false, snapEdge: true, scaleWidth: false, space: false, busy: false, w: 800, h: 600,
+          lock: true, snap: false, snapEdge: true, followEdges: true, scaleWidth: false, space: false, busy: false, w: 800, h: 600,
           ref: opts.ref || null, onConnect: opts.onConnect || null, onChange: opts.onChange || null, onClose: opts.onClose || null };
     root.hidden = false;
     document.body.classList.add('draw-editor-open');
@@ -1395,6 +1494,7 @@
     assist: function (m) { if (m) setAssist(m); return assistMode; },
     fillAt: function (p) { if (!D) return null; return fillArea(p); },
     wallCorners: function () { return wallCorners(); },
+    followAt: function (a, b, force) { return D ? followPath(a, b, force !== false) : null; },
     snapAt: function (prev, p, shift) { return D ? lineSnap(prev, p, !!shift) : null; },
     side: function (v) { if (v) setBeadSide(v); return beadSide; },
     info: function () { return D ? { tool: D.tool, sel: D.sel.slice(), objects: sketch.objects.length, kind: defaults.kind, view: clone(D.view), history: D.history.length } : null; }

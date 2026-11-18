@@ -802,16 +802,56 @@
     });
     var start = cy(at[1]) * W + cx(at[0]);
     if (wall[start]) return { ok: false, reason: 'that is on a line - click inside the space' };
-    var fill = new Uint8Array(W * H), stack = [start], n = 0, open = false;
-    fill[start] = 1;
-    while (stack.length) {
-      var c = stack.pop(), x = c % W, y = (c - x) / W;
-      n++;
-      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) { open = true; break; }
-      var nb = [c - 1, c + 1, c - W, c + W];
-      for (var k = 0; k < 4; k++) { var q = nb[k]; if (!fill[q] && !wall[q]) { fill[q] = 1; stack.push(q); } }
+    function flood(block) {
+      var F = new Uint8Array(W * H), st = [start], cnt = 0;
+      F[start] = 1;
+      while (st.length) {
+        var c = st.pop(), x = c % W, y = (c - x) / W;
+        cnt++;
+        if (x === 0 || y === 0 || x === W - 1 || y === H - 1) return null;
+        var nb = [c - 1, c + 1, c - W, c + W];
+        for (var k = 0; k < 4; k++) { var q = nb[k]; if (!F[q] && !block[q]) { F[q] = 1; st.push(q); } }
+      }
+      F.count = cnt;
+      return F;
     }
-    if (open) return { ok: false, reason: 'that space is open to the outside - draw a line across its mouth first (it snaps to the traced corners), then fill', open: true };
+    var fill = flood(wall), n = fill ? fill.count : 0, closedGap = 0;
+    /* CLOSE GAPS: a line that stops a hair short of a wall leaves the space open. Up to `gap` mm: the boundaries are
+       thickened by half of it (so a gap that narrow is shut), the space flooded inside them, and the flood let back
+       out by the same half - towards the true boundaries, never past a guide and never further than that from where
+       it was - so away from the gap it reaches the walls exactly as before. */
+    var gap = Math.max(0, num(opts.gap, 0));
+    if (!fill && gap > 0) {
+      var g = Math.max(1, Math.ceil(gap / 2 / res)), thick = new Uint8Array(wall), offs = [];
+      for (var oy = -g; oy <= g; oy++) for (var ox = -g; ox <= g; ox++) if (ox * ox + oy * oy <= g * g) offs.push(oy * W + ox);
+      for (var c1 = 0; c1 < W * H; c1++) {
+        if (!wall[c1]) continue;
+        var x1 = c1 % W, y1 = (c1 - x1) / W;
+        if (x1 < g || y1 < g || x1 >= W - g || y1 >= H - g) continue;
+        for (var o1 = 0; o1 < offs.length; o1++) thick[c1 + offs[o1]] = 1;
+      }
+      if (!thick[start]) {
+        var F2 = flood(thick);
+        if (F2) {
+          var from = new Int32Array(W * H).fill(-1), qq = [];
+          for (var c2 = 0; c2 < W * H; c2++) if (F2[c2]) { from[c2] = c2; qq.push(c2); }
+          for (var qi0 = 0; qi0 < qq.length; qi0++) {
+            var cc0 = qq[qi0], x2 = cc0 % W, y2 = (cc0 - x2) / W, s2 = from[cc0], sx2 = s2 % W, sy2 = (s2 - sx2) / W;
+            var nb2 = [cc0 - 1, cc0 + 1, cc0 - W, cc0 + W], ok3 = [x2 > 0, x2 < W - 1, y2 > 0, y2 < H - 1];
+            for (var k3 = 0; k3 < 4; k3++) {
+              if (!ok3[k3]) continue;
+              var q3 = nb2[k3];
+              if (from[q3] >= 0 || wall[q3]) continue;
+              var qx3 = q3 % W, qy3 = (q3 - qx3) / W;
+              if ((qx3 - sx2) * (qx3 - sx2) + (qy3 - sy2) * (qy3 - sy2) > (g + 1) * (g + 1)) continue;
+              from[q3] = s2; F2[q3] = 1; qq.push(q3);
+            }
+          }
+          fill = F2; n = qq.length; closedGap = gap;
+        }
+      }
+    }
+    if (!fill) return { ok: false, reason: 'that space is open to the outside' + (gap > 0 ? ' (by more than ' + gap + ' mm)' : '') + ' - draw a line or a guide across the opening first (it snaps to the traced corners), then fill', open: true };
     /* grown by bite: a walk out from the flood of at most bite (Euclidean, from the cell it left the flood at),
        never onto a guide's cells */
     var b = Math.round(bite / res);
@@ -871,7 +911,7 @@
       pts = rdp(dedupe(pts, 1e-6, true).concat([pts[0]]), 0.01).slice(0, -1);
     }
     if (signedArea(pts) < 0) pts.reverse();
-    return { ok: true, pts: pts, area: Math.abs(signedArea(pts)), res: res, cells: n };
+    return { ok: true, pts: pts, area: Math.abs(signedArea(pts)), res: res, cells: n, closedGap: closedGap };
   }
 
   /* the boundary loops of a 0/1 mask, as lattice points, counter-clockwise round filled cells */

@@ -16,7 +16,7 @@ DRAW
 | geometry | `nso_sketch.js` (`window.NSO_Sketch`, headless) — outlines, solids |
 | editor | `app-draw-editor.js` (`window.NSO_DrawEditor`) |
 | connect | `app-draw-connect.js` — a SOLO mode on the Assemble editor's stage (`NSO_AsmEditor.mode('drawconnect')`), as Step / Boss is |
-| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`), `npm run draw:assist` (`tools/nso_draw_assist_drive_check.js`), `npm run draw:fill-area` (`tools/nso_draw_fill_area_drive_check.js`), `npm run draw:bead-side` (`tools/nso_draw_bead_side_drive_check.js`), `npm run draw:trace` (`tools/nso_draw_trace_drive_check.js`: trace, snap, where drawn, stretch, weld; `TRACE_STL=` / `TRACE_BLOCK=` run it on a piece of your own); screenshots to `tools/draw-out/` |
+| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`), `npm run draw:assist` (`tools/nso_draw_assist_drive_check.js`), `npm run draw:fill-area` (`tools/nso_draw_fill_area_drive_check.js`), `npm run draw:bead-side` (`tools/nso_draw_bead_side_drive_check.js`), `npm run draw:follow` (`tools/nso_draw_follow_drive_check.js`), `npm run draw:trace` (`tools/nso_draw_trace_drive_check.js`: trace, snap, where drawn, stretch, weld; `TRACE_STL=` / `TRACE_BLOCK=` run it on a piece of your own); screenshots to `tools/draw-out/` |
 
 ## Why
 
@@ -124,6 +124,33 @@ edges, 1 068 self-intersections).
    2 non-manifold edges; 0.02 out or in, none). A space open to the outside, or a
    click outside everything, is refused in words.
 3. **Connect → Piece height → Weld it in.**
+
+#### Follow edges, and closing small gaps
+
+Hand-drawing a guide along a boundary that already exists — a traced fillet, a
+bead's edge — leaves slivers and gaps whatever the assist does with the stroke
+(the owner's screenshots, 2026-11-18). So the boundary is not redrawn, it is used:
+
+- **Line follows edges** (on by default): two points one after the other on the
+  same edge — the traced outline, or a line, guide or fill already drawn — are
+  joined *along* that edge, round its fillets and curves, the shorter way round a
+  closed one, **when that is plainly meant**: the way along it is no more than 1.5×
+  the straight distance and turns no sharp corner (over 60°). A guide from corner to
+  corner across a channel's mouth stays straight (it ran round the channel at first:
+  `draw:fill-area` caught it). **Alt** held while clicking gives the other choice.
+  The preview shows which before the click; the hint adds "follows the edge".
+- **Fill area closes gaps** up to *closes gaps to* (0.5 mm): a line that stops a hair
+  short of a wall no longer leaves the space "open". Its boundaries are thickened
+  by half the gap, the space flooded inside them, and the flood let back out by the
+  same half towards the true boundaries (never past a guide) — so away from the
+  gap it still reaches the walls exactly. The hint says when a gap was closed.
+- The ends of a pencil stroke, and the Line tool's edge snap, now land on drawn
+  lines as well as the traced outline.
+
+The recommended way to fill a pocket: draw the beads, then **Fill area inside the
+pocket** — it hugs the traced curve exactly and bites *Fill area grows* into the
+walls and beads round it (lower it for a smaller bite). Draw a guide only to cut
+a space off, and let it follow the edges.
 
 #### The Line tool's snaps
 
