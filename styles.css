@@ -1327,6 +1327,15 @@ select:focus, input:focus {
 #edit-card .cut-dialfields { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; }
 #edit-card .cut-dialfields input[type="number"] { width: 54px; min-width: 0; box-sizing: border-box; margin-top: 0; }
 #edit-card .cut-dialfields .btn { width: auto; flex: 0 0 auto; margin-top: 0; padding: 7px 8px; }
+/* A wheel whose centre is its number (the Rotate piece wheel, app-cut.js cutWireRotateDial): the readout is an input laid over the
+   middle of the rail - it shows the reading as the wheel turns, and a click in it types one. The rail round it still drags. */
+.cut-dialwrap { position: relative; width: 104px; height: 104px; flex: 0 0 auto; }
+#edit-card .cut-dialwrap .cut-dial-input { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 54px; height: 26px; min-width: 0; margin: 0; padding: 0; box-sizing: border-box; text-align: center;
+  font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; color: #f1f5f9; cursor: text;
+  background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(226, 232, 240, 0.35); border-radius: 6px; }
+#edit-card .cut-dialwrap .cut-dial-input:hover { border-color: rgba(226, 232, 240, 0.7); }
+#edit-card .cut-dialwrap .cut-dial-input:focus { outline: none; border-color: #7dd3fc; background: rgba(15, 23, 42, 0.98); }
 .cut-dialbtns { display: flex; flex-direction: column; gap: 3px; }
 #edit-card .cut-dialbtns .btn { width: 100%; padding: 5px 8px; }
 #edit-card .cut-dialcol .cut-miter-steps { width: 100%; }
@@ -1639,6 +1648,7 @@ select:focus, input:focus {
   margin-top: 4px;
   margin-bottom: 8px;
 }
+#cutter-status:empty { display: none; }
 
 .btn-danger {
   background: #7f1d1d;

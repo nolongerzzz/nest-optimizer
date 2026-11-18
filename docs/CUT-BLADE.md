@@ -55,7 +55,10 @@ opposite blade direction, a quarter-turn about the vertical - without dragging t
 
 **Rotate piece** is a wheel beside the Mitre wheel, for turning or leaning a piece close up. It
 replaces the rotate rings, which Cut no longer shows (they stood too far out of view on a small
-piece). Three ticks under its box pick the axis, one at a time: **Horizontal** (the default: about
+piece). Its number is the **centre of the wheel**: it reads out as the wheel turns, and a click in it
+selects it so you can type one (Enter, or leaving it, sets the piece; Esc puts the reading back; Up / Down
+step it a degree, Shift a tenth) - there is no separate box under the wheel. Three ticks under the − / +
+pick the axis, one at a time: **Horizontal** (the default: about
 the plate's vertical, clockwise seen from above), **Front/back** (tips the piece along its length,
 its ends going up and down) and **Side/side** (across it, one long edge up). They are the rotate
 rings' own three motions (the position lock is honoured, one Undo step per drag, typed value or

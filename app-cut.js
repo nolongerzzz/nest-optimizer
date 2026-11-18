@@ -887,7 +887,7 @@ function updateCutterUI() {
       ? (typeof cutPlateOn === 'function' && cutPlateOn()
         ? 'Whole plate: the blade crosses every piece. Set its height, then Cut.'
         : getActiveModel() && state.cutHelper
-        ? 'Click the piece to move the blade; slide, nudge or angle it, then Cut.'
+        ? ''                                   // a blade is placed: nothing to say, and the line takes no room (styles.css, :empty)
         : 'Click a piece to drop a square blade on it.')
       : 'Cutter off.';
   }
@@ -1311,20 +1311,16 @@ function syncCutRotateUI() {
   const deg = cutRotateReading();
   const turn = document.getElementById('cut-rotate-turn');
   if (turn) turn.setAttribute('transform', 'rotate(' + (deg == null ? 0 : deg) + ' 50 50)');
-  const text = document.getElementById('cut-rotate-dial-deg');
-  if (text) text.textContent = deg == null ? '-' : deg + '°';
   const dial = document.getElementById('cut-rotate-dial');
   if (dial) {
     dial.setAttribute('aria-valuenow', String(deg == null ? 0 : deg));
     dial.setAttribute('aria-valuemin', lean ? '-180' : '0');
     dial.setAttribute('aria-valuemax', lean ? '180' : '359.9');
   }
+  /* The wheel's centre is its readout AND its box (an input over the middle of the rail): it shows the reading with its degree
+     sign as the wheel turns, and is left alone while it is being typed in. */
   const input = document.getElementById('cut-rotate-deg');
-  if (input) {
-    input.min = lean ? '-180' : '0';
-    input.max = lean ? '180' : '359.9';
-    if (document.activeElement !== input) input.value = deg == null ? '' : String(deg);
-  }
+  if (input && document.activeElement !== input) input.value = deg == null ? '-' : deg + '°';
   Object.keys(CUT_ROTATE_AXES).forEach(function (k) {
     const el = document.getElementById(CUT_ROTATE_AXES[k]);
     if (el) el.checked = k === cutRotateAxis();
@@ -1448,14 +1444,38 @@ function cutWireRotateDial() {
     ev.preventDefault();
     ev.stopPropagation();
   });
+  /* The centre of the wheel is also its box. A click in it selects the reading, so typing replaces it (the text is left as it
+     is: rewriting it on focus races the selection); Enter or leaving it sets the piece to what was typed (the degree sign is
+     ignored; one Undo point), Esc puts the reading back, Up / Down step it as the arrow keys do on the wheel (1 degree,
+     Shift 0.1). Typed nothing new, nothing is turned. */
   const typed = document.getElementById('cut-rotate-deg');
-  if (typed) typed.addEventListener('change', function () {
-    const v = parseFloat(typed.value), cur = cutRotateReading();
-    if (!isFinite(v) || cur == null) { syncCutRotateUI(); return; }
-    const d = cutRotateWrap(v - cur);
-    if (Math.abs(d) > 1e-6) cutRotateDial.undoAt = 0, cutRotateBy(d);
-    syncCutRotateUI();
-  });
+  if (typed) {
+    let from = '';                                                   // the bare reading the box held when it was clicked into
+    const bare = function () { const r = cutRotateReading(); return r == null ? '' : String(r); };
+    typed.addEventListener('focus', function () {
+      from = bare();
+      requestAnimationFrame(function () { if (document.activeElement === typed) typed.select(); });
+    });
+    typed.addEventListener('blur', function () {
+      const text = typed.value.replace(/[°\s]/g, '').replace(/^\u2212/, '-');
+      const v = parseFloat(text), cur = cutRotateReading();
+      if (text !== from && isFinite(v) && cur != null) {
+        const d = cutRotateWrap(v - cur);
+        if (Math.abs(d) > 1e-6) cutRotateDial.undoAt = 0, cutRotateBy(d);
+      }
+      syncCutRotateUI();                                             // the box shows what the piece reads now, degree sign back
+    });
+    typed.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') typed.blur();
+      else if (ev.key === 'Escape') { typed.value = from + '°'; typed.blur(); }
+      else if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
+        const step = (ev.shiftKey ? CUT_MITER_STEP_SHIFT_DEG : CUT_MITER_STEP_DEG) * (ev.key === 'ArrowUp' ? 1 : -1);
+        if (cutRotateBy(step)) { from = bare(); typed.value = from + '°'; typed.select(); }
+      } else return;
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+  }
   // One axis at a time: ticking one clears the others, and the one in use cannot be cleared (the wheel needs an axis)
   Object.keys(CUT_ROTATE_AXES).forEach(function (k) {
     const el = document.getElementById(CUT_ROTATE_AXES[k]);

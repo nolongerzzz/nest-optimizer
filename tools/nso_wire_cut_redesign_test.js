@@ -268,9 +268,9 @@ withApp(async (page, logs) => {
     // is hidden until a Cut refuses an inside-out piece.)
     const order = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools button, #cutter-tools input, #cutter-tools svg')]
       .filter(e => !e.hidden).map(e => e.id));
-    check('the Cut card is: Hide blade, mitre dial + Rotate piece dial (− / +, then box, under each; the Rotate piece axes under its box), bevel dial, − / +, Plumb, slider, ← number →, Blade, Cut',
+    check('the Cut card is: Hide blade, mitre dial + Rotate piece dial (the Rotate piece number is the centre of its wheel; − / + under each, the mitre box and Square under its − / +; the Rotate piece axes under its −/+), bevel dial, − / +, Plumb, slider, ← number →, Blade, Cut',
       order.join(' ') === 'chk-cut-hide-blade cut-miter-dial btn-cut-miter-minus btn-cut-miter-plus cut-miter-deg btn-cut-square btn-cut-miter-90 ' +
-        'cut-rotate-dial btn-cut-rotate-minus btn-cut-rotate-plus cut-rotate-deg chk-cut-rot-h chk-cut-rot-fb chk-cut-rot-ss ' +
+        'cut-rotate-dial cut-rotate-deg btn-cut-rotate-minus btn-cut-rotate-plus chk-cut-rot-h chk-cut-rot-fb chk-cut-rot-ss ' +
         'cut-bevel-dial cut-bevel-deg btn-cut-bevel-minus btn-cut-bevel-plus btn-cut-plumb ' +
         'cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p ' +
         'btn-cut-blade-full btn-cut-blade-sized btn-cut-blade-notch btn-cut-blade-plate ' +

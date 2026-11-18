@@ -98,7 +98,8 @@ withApp(async (page, logs) => {
     mm.x >= md.x - 0.5 && mp.r <= md.r + 0.5 && rm.x >= rd.x - 0.5 && rp.r <= rd.r + 0.5, JSON.stringify({ mitre: mm.y - md.b, rotate: rm.y - rd.b }));
   check('the Mitre box and Square are under the Mitre wheel (and its - / +), side by side', mdeg.y >= mm.b - 1 && sq.y >= mm.b - 1 && Math.abs(sq.cy - mdeg.cy) < 16 && sq.r <= rd.x + 4 && mdeg.x >= md.x - 20,
     JSON.stringify({ steps: mm.b, box: mdeg.y, square: sq.y }));
-  check('the Rotate piece box is under its wheel and its - / +', rdeg.y >= rm.b - 1 && rdeg.cx > rd.x && rdeg.cx < rd.r);
+  check('the Rotate piece number is the CENTRE of its wheel (no box under it): inside the rail, on its middle', Math.abs(rdeg.cx - (rd.x + rd.w / 2)) < 3 && Math.abs(rdeg.cy - (rd.y + rd.h / 2)) < 3 && rdeg.w < rd.w * 0.7 && rdeg.y < rm.y,
+    JSON.stringify({ box: [rdeg.cx, rdeg.cy], wheel: [rd.x + rd.w / 2, rd.y + rd.h / 2] }));
   check('nothing sticks out of the card', rp.r < 440 && sq.r < rd.x + 8, 'right edge ' + rp.r);
 
   console.log('the Mitre 90 button');
@@ -122,16 +123,42 @@ withApp(async (page, logs) => {
 
   console.log('the heading');
   check('a piece as loaded reads 0', (await heading()) === 0, String(await heading()));
-  check('the wheel shows it', /^0°$/.test(await page.evaluate(() => document.getElementById('cut-rotate-dial-deg').textContent)));
+  check('the wheel shows it, with its degree sign', (await page.inputValue('#cut-rotate-deg')) === '0°');
   await page.fill('#cut-rotate-deg', '90'); await page.press('#cut-rotate-deg', 'Tab');
   await page.waitForTimeout(150);
   let ax = await page.evaluate(() => __axes());
   check('typing 90 turns the piece a clockwise quarter: its +X lies along the plate\'s +Z', (await heading()) === 90 && ax.x[2] > 0.99 && Math.abs(ax.x[0]) < 0.02, JSON.stringify({ h: await heading(), x: ax.x.map(v => +v.toFixed(3)) }));
-  check('the wheel and box show 90', (await page.evaluate(() => document.getElementById('cut-rotate-dial-deg').textContent)) === '90°' && (await page.inputValue('#cut-rotate-deg')) === '90');
+  check('the wheel centre shows 90°', (await page.inputValue('#cut-rotate-deg')) === '90°');
   const tr = await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'));
   check('and the handle is at 90', /rotate\(90 /.test(tr), tr);
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   check('the blade went with the piece: still square across its length', Math.abs(dot(ax.n, ax.x)) > 0.999, 'n.x ' + dot(ax.n, ax.x).toFixed(4));
+
+  console.log('the centre of the wheel is its box');
+  {
+    const c = await R('cut-rotate-deg');
+    const h0 = await heading(), undo0 = await page.evaluate(() => (state.undoStack || []).length);
+    await page.mouse.click(c.cx, c.cy);                                       // a REAL click on the readout
+    await page.waitForTimeout(120);
+    const f = await page.evaluate(() => { const e = document.getElementById('cut-rotate-deg'); return { active: document.activeElement === e, value: e.value, sel: e.value.slice(e.selectionStart, e.selectionEnd) }; });
+    check('a click in the centre takes the focus and selects the whole reading, so typing replaces it', f.active && f.value === '90°' && f.sel === '90°', JSON.stringify(f));
+    check('...and the click did not turn the piece or the wheel', (await heading()) === h0 && h0 === 90);
+    await page.keyboard.type('135'); await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+    check('typing 135 and Enter turns the piece to 135 and the centre reads 135° again', (await heading()) === 135 && (await page.inputValue('#cut-rotate-deg')) === '135°' && !(await page.evaluate(() => document.activeElement && document.activeElement.id === 'cut-rotate-deg')),
+      JSON.stringify({ h: await heading(), box: await page.inputValue('#cut-rotate-deg') }));
+    await page.mouse.click(c.cx, c.cy); await page.waitForTimeout(80);
+    await page.keyboard.type('10'); await page.keyboard.press('Escape'); await page.waitForTimeout(120);
+    check('Esc puts the reading back and turns nothing', (await heading()) === 135 && (await page.inputValue('#cut-rotate-deg')) === '135°');
+    await page.mouse.click(c.cx, c.cy); await page.waitForTimeout(80);
+    await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Shift+ArrowDown');
+    await page.waitForTimeout(120);
+    check('Up / Down in the box step the piece 1 degree (Shift 0.1): 135 -> 136 -> 137 -> 136.9', Math.abs((await heading()) - 136.9) < 0.051 && (await page.inputValue('#cut-rotate-deg')) === '136.9°', String(await heading()));
+    await page.keyboard.press('Tab'); await page.waitForTimeout(100);
+    check('leaving the box with nothing typed turns nothing and puts the degree sign back', Math.abs((await heading()) - 136.9) < 0.051 && (await page.inputValue('#cut-rotate-deg')) === '136.9°');
+    await page.fill('#cut-rotate-deg', '90'); await page.press('#cut-rotate-deg', 'Tab'); await page.waitForTimeout(150);   // back to 90 for what follows
+    check('and back at 90 for the gates below', (await heading()) === 90);
+  }
 
   console.log('drag');
   await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
@@ -207,7 +234,7 @@ withApp(async (page, logs) => {
   const rise = v => Math.asin(Math.min(1, Math.abs(v[1]))) * 180 / Math.PI;           // a level axis (own X, Z): up from level
   check('typing 20 leans the piece front over back: its LENGTH (own X) rises 20 degrees and its width stays level', Math.abs(rise(ax2.x) - 20) < 0.6 && rise(ax2.z) < 0.6 && Math.abs(tilt(ax2.y) - 20) < 0.6,
     JSON.stringify({ xRise: rise(ax2.x).toFixed(1), yTilt: tilt(ax2.y).toFixed(1), zRise: rise(ax2.z).toFixed(1) }));
-  check('the wheel and box read 20, the handle at 20', (await heading()) === 20 && (await page.inputValue('#cut-rotate-deg')) === '20' && /rotate\(20 /.test(await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'))));
+  check('the wheel and box read 20, the handle at 20', (await heading()) === 20 && (await page.inputValue('#cut-rotate-deg')) === '20°' && /rotate\(20 /.test(await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'))));
   await page.click('#btn-cut-rotate-plus');
   await page.waitForTimeout(80);
   check('+ is 1 degree more lean', (await heading()) === 21, String(await heading()));
@@ -219,7 +246,7 @@ withApp(async (page, logs) => {
   check('Undo gives the lean back', Math.abs((await heading()) - 21) < 1.5, 'reading ' + (await heading()));
   await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
   await page.waitForTimeout(100);
-  check('typing 0 brings it level again', (await heading()) === 0 && tilt((await axesOf()).y) < 0.3);
+  check('typing 0 brings it level again', (await heading()) === 0 && tilt((await axesOf()).y) < 0.3, JSON.stringify({ h: await heading(), box: await page.inputValue('#cut-rotate-deg'), active: await page.evaluate(() => document.activeElement && document.activeElement.id) }));
   await page.click('#chk-cut-rot-ss');
   check('ticking Side/side clears Front/back', JSON.stringify(await ticks()) === JSON.stringify({ h: false, fb: false, ss: true }));
   await page.fill('#cut-rotate-deg', '25'); await page.press('#cut-rotate-deg', 'Tab');
@@ -292,7 +319,7 @@ withApp(async (page, logs) => {
     await page.waitForTimeout(250);
     const u = await box();
     check('one Undo takes the typed 70 back to the 40 before it, seated on the plate', Math.abs(u.lo - 0.2) < 0.06, 'lowest ' + u.lo.toFixed(2));
-    check('...and the WHEEL reads the pose that came back, 40 (it kept the old 70)', (await heading()) === 40 && (await page.inputValue('#cut-rotate-deg')) === '40' && /rotate\(40 /.test(await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'))),
+    check('...and the WHEEL reads the pose that came back, 40 (it kept the old 70)', (await heading()) === 40 && (await page.inputValue('#cut-rotate-deg')) === '40°' && /rotate\(40 /.test(await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'))),
       'reading ' + (await heading()) + ', box ' + (await page.inputValue('#cut-rotate-deg')));
     await page.click('#btn-redo');
     await page.waitForTimeout(250);
