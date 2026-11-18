@@ -78,6 +78,7 @@ withApp(async (page, logs) => {
   check('it is at the top of the card, under the Cut | Crop switch and above Hide blade', full.y >= tog.b - 1 && full.b <= hide.y, JSON.stringify({ toggleBottom: tog.b, blade: full.y, hide: hide.y }));
   check('Whole plate is a thin button on a row of its own under the four, the full width of the row', plate.y >= full.b - 1 && plate.h < full.h * 0.8 && Math.abs(plate.x - full.x) < 2 && Math.abs(plate.r - plane.r) < 2,
     JSON.stringify({ plate: [plate.x, plate.y, plate.w, plate.h], row: [full.x, plane.r, full.h] }));
+  check('the Blade row is close under the Cut | Crop switch (no more than 16 px of air)', full.y - tog.b <= 16 + 8, 'gap ' + (full.y - (tog.b - 8)) + ' px below the switch\'s own edge, ' + (full.y - tog.b) + ' px below its box');
   const gaps = await page.evaluate(() => [...document.querySelectorAll('.cut-dial-label')].map(l => { const r = l.getBoundingClientRect(), w = l.parentElement.querySelector('svg').getBoundingClientRect();
     return { t: l.textContent, gap: (w.left + 52 - Math.sqrt(41.6 * 41.6 - (52 - r.height) ** 2)) - r.right }; }));
   const g = Object.fromEntries(gaps.map(x => [x.t, x.gap]));

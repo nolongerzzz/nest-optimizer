@@ -1366,12 +1366,18 @@ select:focus, input:focus {
 .cut-bevel-dart { fill: #ffc83d; stroke: #1a1d21; stroke-width: 1; cursor: pointer; }
 
 /* Cut card: the sized blade's mode switch and its three sizes */
-.cut-blade { margin-top: 6px; }
+.cut-blade { margin-top: 0; }
 .cut-blade-mode .btn { flex: 1 1 0; }
 .cut-blade-mode .btn[aria-pressed="true"],
 .cut-blade-plate-row .btn[aria-pressed="true"] { outline: 1px solid var(--accent, #38bdf8); }
 /* Whole plate: one thin button the full width of the card, under the four blades. */
-.cut-blade-plate-row { margin-top: 4px; }
+/* The top of the card is spaced by hand: the global .edit-row / label margins (8 px above, 8 below) would add a row's worth of air in all. */
+#edit-card .cut-blade-mode { margin: 0; }
+#edit-card .cut-blade-plate-row { margin: 4px 0 0; }
+#edit-card .cut-hide { margin: 6px 0 0; }
+#edit-card .cut-hide .cut-switch { margin: 0; }
+#edit-card .cut-rotate-axes { margin: 6px 0 4px; }
+#edit-card .cut-seg { margin: 0; }
 #edit-card .cut-blade-plate-row .btn { flex: 1 1 100%; width: 100%; padding: 4px 8px; margin-top: 0; }
 /* Whole plate: the blade is level and across every piece, so the per-piece controls (the dials, the position
    slider, the readout) stand down and the plate's own fields (#cut-plate-fields) take their place. */
@@ -1578,7 +1584,7 @@ select:focus, input:focus {
 .hidden-quiet { display: none !important; }
 .drop-zone-compact { padding: 10px; min-height: 0; }
 .drop-zone-compact .drop-content p { margin: 0; }
-.cutter-tools { display: none; margin-top: 8px; }
+.cutter-tools { display: none; }      /* no top margin: the Blade block is the first thing in it, 14 px under the Cut | Crop switch (its 8 px margin and the card's 6 px gap) */
 .cutter-tools.is-open { display: block; }
 .more-tools { margin-top: 8px; font-size: 13px; }
 .more-tools summary { cursor: pointer; color: #94a3b8; font-weight: 600; }

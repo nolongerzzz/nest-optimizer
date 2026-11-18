@@ -419,8 +419,8 @@ withApp(async (page, logs) => {
   console.log('Hide blade');
   {
     const hbox = await R('chk-cut-hide-blade');
-    const bvd = await R('cut-bevel-dial'), plm = await R('btn-cut-plumb');
-    check('the Hide blade box is beside the Bevel wheel, under Plumb, unticked', (await page.$eval('#chk-cut-hide-blade', e => e.checked)) === false && hbox.x >= bvd.r - 2 && hbox.y >= plm.b - 2 && hbox.y < bvd.b, JSON.stringify({ box: [hbox.x, hbox.y], plumbBottom: plm.b, bevelWheel: [bvd.r, bvd.b] }));
+    const wp = await R('btn-cut-blade-plate'), axh = await R('chk-cut-rot-h');
+    check('the Hide blade box is up under the Blade block (above the axes row and the wheels), unticked', (await page.$eval('#chk-cut-hide-blade', e => e.checked)) === false && hbox.y >= wp.b - 2 && hbox.b <= axh.y + 2 && hbox.b <= md.y, JSON.stringify({ box: [hbox.x, hbox.y, hbox.b], wholePlateBottom: wp.b, axesTop: axh.y, wheelTop: md.y }));
     check('blade shown, Cut on', await page.evaluate(() => !!state.cutHelper && state.cutHelper.visible === true && !document.getElementById('btn-cut').disabled));
     const snap = () => page.evaluate(() => ({ cutT: state.cutT, at: JSON.stringify(state.cutBladeAt && state.cutBladeAt.local), drag: state.cutDragging, sel: state.selectedIndex, mitre: state.cutMiterDeg }));
     const s0 = await snap();

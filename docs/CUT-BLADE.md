@@ -31,7 +31,7 @@ within reach);
 the number box takes anything, and the slider's range grows to hold what it is
 given, so a slider never sits at its end while its box says something else.
 
-**Hide blade.** A box beside the Bevel wheel, under Plumb, hides the blade - the per-piece blade with its tab, and the
+**Hide blade.** A box just under the Blade block (above the axes row and the wheels) hides the blade - the per-piece blade with its tab, and the
 whole-plate blade - so a piece can be turned or leaned without the blade moving about on screen. While it is hidden a
 click on a piece only picks it (the blade is not placed or dragged, and a press where the hidden tab was takes no hold),
 the Rotate piece wheel and everything else on the card work as usual, and **Cut is off** (greyed, with the reason in its
