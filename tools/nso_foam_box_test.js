@@ -244,6 +244,21 @@ const solid = (soup, box, amount, more, opts) => FOAM.foamBoxSolid(piece(soup, m
     const rt = solid(St.soup, { c: [0, 0, 20], h: [20, 20, 25] }, 100);
     gateSet('a stepped rim, 20 mm on the -X wall to 28 mm on the +X', St.soup, rt, St.bowl);
     check('...it fills to the lowest step, 20 mm', rt.level === 20 && sameBox(bounds(rt.mesh), bounds(St.soup)), 'level ' + rt.level);
+
+    /* A weld leaves a flat face spread over a few float32 steps of height:
+       every corner off the walls' mid-height nudged by up to 2e-5 mm, the
+       same corner the same way wherever it is used. One level per face. */
+    const noisy = new Float32Array(cup), nudge = new Map();
+    for (let i = 0; i < noisy.length; i += 3) {
+      const k = noisy[i] + ',' + noisy[i + 1] + ',' + noisy[i + 2];
+      if (!nudge.has(k)) nudge.set(k, (((nudge.size * 7919) % 11) - 5) * 4e-6);
+      noisy[i + 2] = Math.fround(noisy[i + 2] + nudge.get(k));
+    }
+    const rn = solid(noisy, { c: [0, 0, 26], h: [20, 20, 25] }, 100);
+    check('a cup whose floor and rim are float noise (2e-5 mm): set, closed', rn.ok && rn.changed && FOAM.census(rn.mesh).closed, rn.reason);
+    check('...filled to the rim, the bowl\'s volume', rn.ok && Math.abs(rn.level - 30) < 1e-4 && rel(rn.addedVolume, 26 * 26 * 28) < 1e-5,
+          'level ' + rn.level + ', ' + (rn.addedVolume || 0).toFixed(4));
+    if (rn.ok && rn.changed) gateCanonical('noisy cup filled', rn.mesh);
   }
 
   console.log('\n== 4. a box half inside a wall ==');

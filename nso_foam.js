@@ -747,6 +747,37 @@
     return { ids: ids, V: V.subarray(0, nv * 3), first: first.subarray(0, nv), nv: nv };
   }
 
+  /* One level per flat face. A face that is flat in the model can come in
+     spread over a few float32 steps of height - a union or a weld leaves its
+     corners 1e-6..1e-5 mm apart - and every distinct height is a critical
+     height to buriedVoid, so the face reads as a stack of slabs a hair thick
+     and no lid can be laid on it. Heights within BOX_TOL (the weld radius: a
+     corner this close to a plane is on it) of a run's lowest are one level,
+     the height most corners in the run have. Only the working copy moves:
+     corners are already welded by id, and an original corner goes back out
+     as the raw corner it came from, bit for bit. -> corners moved */
+  function levelHeights(V, nv) {
+    var ord = new Int32Array(nv), i;
+    for (i = 0; i < nv; i++) ord[i] = i;
+    ord.sort(function (a, b) { return V[a * 3 + 2] - V[b * 3 + 2]; });
+    var moved = 0, s = 0;
+    while (s < nv) {
+      var z0 = V[ord[s] * 3 + 2], e = s + 1;
+      while (e < nv && V[ord[e] * 3 + 2] - z0 <= BOX_TOL) e++;
+      if (V[ord[e - 1] * 3 + 2] !== z0) {
+        var best = z0, bestN = 0, run = 0;
+        for (i = s; i < e; i++) {
+          var z = V[ord[i] * 3 + 2];
+          run = (i > s && z === V[ord[i - 1] * 3 + 2]) ? run + 1 : 1;
+          if (run > bestN) { bestN = run; best = z; }
+        }
+        for (i = s; i < e; i++) if (V[ord[i] * 3 + 2] !== best) { V[ord[i] * 3 + 2] = best; moved++; }
+      }
+      s = e;
+    }
+    return moved;
+  }
+
   /* Edges of an indexed soup: each undirected edge once, with the half-edges
      on it (half-edge t*3+k runs from corner k of triangle t to corner k+1).
      Counts what a closed, consistently wound 2-manifold may not have. */
@@ -1518,6 +1549,12 @@
       list.forEach(function (tt) {
         var o = tt * 3, A = T[o] * 3, B = T[o + 1] * 3, Cc = T[o + 2] * 3;
         var nz = (V[B] - V[A]) * (V[Cc + 1] - V[A + 1]) - (V[B + 1] - V[A + 1]) * (V[Cc] - V[A]);
+        /* A needle - one corner within the weld radius of the line through
+           the other two - has no facing to read: float noise picks its sign.
+           It faces neither way, and the lid closes over it if it must. */
+        var span = Math.max(Math.hypot(V[B] - V[A], V[B + 1] - V[A + 1]), Math.hypot(V[Cc] - V[B], V[Cc + 1] - V[B + 1]),
+                            Math.hypot(V[A] - V[Cc], V[A + 1] - V[Cc + 1]));
+        if (Math.abs(nz) <= BOX_TOL * span) return;
         if (nz > 0) ups.push(tt); else if (nz < 0) downs.push(tt);
       });
       [[ups, ci, false], [downs, ci - 1, true]].forEach(function (job) {
@@ -1919,6 +1956,7 @@
     else for (i = 0; i < nt * 3; i++) frame.to(soup[i * 3], soup[i * 3 + 1], soup[i * 3 + 2], Q, i * 3);
     var W0 = weldExact(Q, nt * 3), T = W0.ids;
     var E = buildEdges(T, nt);
+    var levelled = opts.voidFaces ? 0 : levelHeights(W0.V, W0.nv);
     var M = { V: W0.V, T: T, nv: W0.nv, nt: nt, E: E };
     lap('index');
     if (!opts.voidFaces && (E.open || E.nm || E.flipped)) {

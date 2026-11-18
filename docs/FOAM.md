@@ -230,6 +230,14 @@ pieces, one with a yawed box).
 - **Cut at a height where the side changes.** A face whose side changes inside its span is cut at
   that critical height (a slanted rim opens at the inner rim's lowest corner, a saddle mid-wall;
   every inner wall of `slantCup` is one tall quad and is cut there).
+- **One level per flat face.** A weld or a union can leave a flat face spread over a few float32
+  steps of height (1e-6..1e-5 mm), and every distinct height would be a critical height - a stack
+  of slabs a hair thick that no lid can be laid on. Before the critical heights are read, heights
+  within the weld radius (1e-4 mm) of a run's lowest are taken as one level, the height most
+  corners in the run have. Only the engine's working copy moves; an original corner goes back out
+  as the raw corner it came from. A flat face that is a needle - one corner within 1e-4 mm of the
+  line through the other two - has no facing to read (float noise picks its sign), so it faces
+  neither way and the lid closes over it.
 - **The void.** The faces that border buried space, turned inside out, closed by a flat **lid**
   wherever the buried space ends against air (a cup's rim, a bell's mouth), are a closed solid.
 - **The foam** is that solid cut by the box's six faces and then the level, plane by plane, each
