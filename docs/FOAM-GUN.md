@@ -79,20 +79,36 @@ exact, refuses.
 
 ## 4. Controls
 
+The cursor is a little foam gun (nozzle tip at the hotspot), and it says what a press
+would do before you press:
+
+| cursor | means |
+|---|---|
+| plain gun | off the piece - a press there orbits |
+| grey dots | reading the piece (on arming, and after each set) |
+| **green tick** | over a gap the gun can fill: **hold now** |
+| red bar | over the piece but not in a gap (the top face, a wide groove) - nothing to fill |
+| orange foam | spraying |
+
+Straight down a through-gap the ray meets nothing; the gun then aims at the middle of the
+ray's run through the piece's box, so a slot seen from above shows the tick too. A press
+there is the gun's only when the cursor already shows the tick; otherwise it orbits.
+
 | step | what happens |
 |---|---|
-| **GUN** | armed; the panel says "Aim into a gap, at its wall, and hold." FOAM (either mode) steps aside. |
-| **press** on the piece | the gap there is read and its foam built once (a few hundred ms to a few s); the piece turns to a ghost |
-| **hold** | the foam rises from the pocket's bottom, 0 to 100 in 3 s (`GUN_SECONDS`), the readout the volume so far |
-| **release** | the amount reached is set, one Undo ("Undo: Foam reverted"); a click with no hold sets a short burst |
+| **GUN** | armed; the piece is read at once (the busy cursor), and the ghost's and the foam's shaders are built then, so the first press does not wait for them. FOAM (either mode) steps aside. |
+| **hover** | each move asks the engine `probe` - only the slab under the cursor, a few ms on a read piece. Rest on a gap for 120 ms and its foam is built ahead. |
+| **press** on a ready gap | the ghost, the spraying cursor and the foam at once (built ahead); elsewhere the gap is read and built after two frames, so the ghost shows first |
+| **hold** | the foam rises from the pocket's bottom, 0 to 100 in 3 s (`GUN_SECONDS`); the readout "+412 mm³ - holding" |
+| **release** | the amount reached is set, one Undo ("Undo: Foam reverted"); the readout "+1,044 mm³ set - the gap is filled" (or "- 40% of the gap"), and the foam that went in glows over the piece for 1.4 s, fading, so it is plain what changed |
+| **tap** | let go before any foam has visibly risen (a 250 ms hold's worth), or before the gap was read: **nothing is set**, and the readout says to hold |
 | **again** | the next press takes the piece as it now is |
-| **press off the piece** | the orbit's |
 | **Escape / Cancel / GUN** | put the gun away; sprays already set stay |
 
-Refusals, in words, nothing changed: not in a gap; above or below the piece; the
-piece not one closed solid the kernel can read ("Check & repair it first");
-flagged non-solid; a painted face the foam would fill against (paint elsewhere
-does not matter); a painted recessed patch.
+Times (fixtures/welded_gaps.stl, in Node): the piece read once, about 0.4 s; a probe under 5 ms
+after the first; a spray 0.1 - 0.8 s. Slabs are cut between corner heights and subdivided only
+where a slanted face spans them, and runs of slabs with one outline go up as one prism (the long
+slot: 1 prism, not 58).
 
 ## 5. Results (`tools/nso_foam_gun_test.js`)
 
@@ -104,4 +120,4 @@ does not matter); a painted recessed patch.
 | a chamber behind a 0.4 mm mouth | 863 mm³ of 864 (the mouth's closing arc), the block whole again |
 | amount 50 | 400 mm³, level half way |
 | float noise (2e-5 mm) on the faces | 799.999 mm³, plate to face |
-| fixtures/welded_gaps.stl, four shots | 1,044 + 140 + 1 + 151 mm³, each closed, genus 2 -> 0, 0.3-4.3 s each |
+| fixtures/welded_gaps.stl, four shots | 1,044 + 140 + 1 + 151 mm³, each closed, genus 2 -> 0, 0.1-0.8 s each |

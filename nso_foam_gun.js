@@ -72,6 +72,13 @@
        kind: 'set' | 'air' | 'notSolid' | 'painted' | 'kernel' | 'nothing'
    pocket(piece, aim, opts) -> Promise of the same reading without building the
        foam: { ok, span, reachesPlate, reachesFace, bridge, slabs, reason }
+   probe(piece, aim, opts)  -> Promise of { ok, kind, reason, bridge }: is the aim
+       in a gap? Only the seed's slab is read - quick enough for a hover.
+   prepare(piece, opts)     -> Promise of { ok, reason }: read the piece now.
+   forget()                 drop the piece kept from the last call.
+   The piece last read (the kernel's solid, its slab cuts and sections) is kept
+   while the same soup and `up` come back, so a probe and the spray after it,
+   and sprays on one piece, read it once.
 
    Refusals follow the house contract: ok false, a reason in plain words, `mesh`
    the ORIGINAL soup.
@@ -86,10 +93,16 @@
   var OVER = 0.05;            // mm: overshoot at the plate and the face, trimmed back
   var R_LADDER = [0, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4];
   var MIN_AREA = 1e-6;        // mm^2: a gap smaller than this is no gap
+  var FOAM_SIMPLIFY = 0.005;  // mm: the foam's outline - it reaches GROW into the walls, so this is plenty
   var SIMPLIFY = 1e-4;        // mm: a section's corners this close to a straight run are dropped
   var POCKET_MIN = 8;         // a pocket behind a mouth of 2r holds at least this x r^2
   var PLATE_REACH = 0.5;      // mm: a gap whose bottom is this close to the plate, over air, drops to it
 
+  function clock() { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
+  function lapper(tm) {
+    var t0 = clock();
+    return function (name) { if (!tm) return; var t1 = clock(); tm[name] = (tm[name] || 0) + (t1 - t0); t0 = t1; };
+  }
   function f1(x) { return (Math.round(x * 10) / 10).toFixed(1); }
   function grouped(x) {
     var s = String(Math.round(x)), neg = s.charAt(0) === '-';
@@ -165,13 +178,17 @@
     return keep * 9 === out.length ? out : out.slice(0, keep * 9);
   }
 
-  /* The piece's corner heights, one per run within WELD (the run's most
-     common height), sorted. */
-  function cornerHeights(m) {
-    var mesh = m.getMesh(), vp = mesh.vertProperties, np = mesh.numProp || 3, n = vp.length / np, zs = new Float64Array(n);
-    for (var i = 0; i < n; i++) zs[i] = vp[i * np + 2];
+  /* The slab cuts: the piece's corner heights, one per run within WELD (the
+     run's most common height), and between two of them more cuts no more than
+     STEP apart - but only where a slanted face spans them. Walls that stand
+     straight up change nothing between corner heights, so a part made of
+     them is read in a handful of slabs. */
+  function slabCuts(m, zmin, zmax) {
+    var mesh = m.getMesh(), vp = mesh.vertProperties, tv = mesh.triVerts, np = mesh.numProp || 3, n = vp.length / np;
+    var zs = new Float64Array(n), i;
+    for (i = 0; i < n; i++) zs[i] = vp[i * np + 2];
     zs.sort();
-    var out = [], s = 0;
+    var lv = [], s = 0;
     while (s < n) {
       var e = s + 1;
       while (e < n && zs[e] - zs[s] <= WELD) e++;
@@ -180,10 +197,73 @@
         run = (k > s && zs[k] === zs[k - 1]) ? run + 1 : 1;
         if (run > bestN) { bestN = run; best = zs[k]; }
       }
-      out.push({ z: best, lo: zs[s], hi: zs[e - 1] });
+      lv.push(best);
       s = e;
     }
-    return out;
+    lv[0] = zmin; lv[lv.length - 1] = zmax;
+    /* Slanted faces: neither standing up nor lying flat. */
+    var spans = [];
+    for (var t = 0; t < tv.length; t += 3) {
+      var A = tv[t] * np, B = tv[t + 1] * np, C = tv[t + 2] * np;
+      var ux = vp[B] - vp[A], uy = vp[B + 1] - vp[A + 1], uz = vp[B + 2] - vp[A + 2];
+      var wx = vp[C] - vp[A], wy = vp[C + 1] - vp[A + 1], wz = vp[C + 2] - vp[A + 2];
+      var nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, nl = Math.hypot(nx, ny, nz);
+      if (!(nl > 0)) continue;
+      var c = Math.abs(nz) / nl;
+      if (c < 1e-3 || c > 1 - 1e-6) continue;
+      var lo = Math.min(vp[A + 2], vp[B + 2], vp[C + 2]), hi = Math.max(vp[A + 2], vp[B + 2], vp[C + 2]);
+      if (hi - lo > WELD) spans.push(lo, hi);
+    }
+    var cuts = [lv[0]];
+    for (i = 1; i < lv.length; i++) {
+      var a = lv[i - 1], b = lv[i], kk = Math.ceil((b - a) / STEP - 1e-9);
+      if (kk > 1) {
+        var slanted = false;
+        for (var q = 0; q < spans.length && !slanted; q += 2) if (spans[q] < b - WELD && spans[q + 1] > a + WELD) slanted = true;
+        if (slanted) for (var r = 1; r < kk; r++) cuts.push(a + (b - a) * r / kk);
+      }
+      cuts.push(b);
+    }
+    return cuts;
+  }
+
+  /* The piece, read once and kept while it is the piece: the kernel's solid,
+     its slab cuts and (as they are asked) its sections. A hover's probe and
+     the spray that follows share it. A new soup (the piece after a spray, or
+     another piece) or another `up` replaces it. */
+  var CACHE = null;
+  function forget() {
+    if (!CACHE) return;
+    if (CACHE.sec) for (var i = 0; i < CACHE.sec.length; i++) if (CACHE.sec[i]) CACHE.sec[i].delete();
+    if (CACHE.m) CACHE.m.delete();
+    CACHE = null;
+  }
+  function pieceOf(W, soup, up, lap) {
+    var key = (up || [0, 0, 1]).join(',');
+    if (CACHE && CACHE.soup === soup && CACHE.upKey === key && CACHE.W === W) return CACHE;
+    forget();
+    var F = frameFor(up), m = soupToManifold(W, soup, F);
+    if (lap) lap('kernelIn');
+    if (m.status() !== 'NoError' || m.isEmpty()) {
+      var st = m.status();
+      m.delete();
+      CACHE = { W: W, soup: soup, upKey: key, bad: 'the piece is not one closed solid the kernel can read (' + st + ') - Check & repair it first' };
+      return CACHE;
+    }
+    var bb = m.boundingBox(), zmin = bb.min[2], zmax = bb.max[2], cuts = slabCuts(m, zmin, zmax);
+    if (lap) lap('heights');
+    CACHE = { W: W, soup: soup, upKey: key, F: F, m: m, zmin: zmin, zmax: zmax, cuts: cuts, nS: cuts.length - 1,
+              w: Math.min(bb.max[0] - bb.min[0], bb.max[1] - bb.min[1]), sec: new Array(cuts.length - 1) };
+    return CACHE;
+  }
+  /* Slab j's section at its middle height, simplified; kept. */
+  function sectionAt(P, j) {
+    if (!P.sec[j]) {
+      var S0 = P.m.slice((P.cuts[j] + P.cuts[j + 1]) / 2);
+      P.sec[j] = S0.simplify(SIMPLIFY);
+      S0.delete();
+    }
+    return P.sec[j];
   }
 
   function inRing(x, y, ring) {
@@ -222,15 +302,13 @@
     return held;
   }
 
-  /* One slab's gaps: { held, gaps: [CrossSection...] }. */
-  function gapsAt(W, m, z, r) {
-    var S0 = m.slice(z), S = S0.simplify(SIMPLIFY);
-    S0.delete();
+  /* One slab's gaps, from its section: { held, gaps: [CrossSection...] }. */
+  function gapsAt(W, S, r) {
     var held = heldAt(W, S, r), cand = held.subtract(S), parts = cand.decompose(), gaps = [];
     for (var i = 0; i < parts.length; i++) {
       if (parts[i].area() > MIN_AREA) gaps.push(parts[i]); else parts[i].delete();
     }
-    S.delete(); cand.delete();
+    cand.delete();
     return { held: held, gaps: gaps };
   }
   function overlaps(a, b) {
@@ -238,10 +316,14 @@
     x.delete();
     return ar > MIN_AREA;
   }
-  /* Same shape: their difference both ways is under MIN_AREA. */
-  function sameShape(a, b) {
-    if (Math.abs(a.area() - b.area()) > MIN_AREA) return false;
-    var d1 = a.subtract(b), d2 = b.subtract(a), same = d1.area() < MIN_AREA && d2.area() < MIN_AREA;
+  /* Same shape: their difference both ways is no more than a sliver the weld
+     radius wide round the outline (its length taken as 10 x sqrt(area), a
+     long thin gap's perimeter) - the same gap sliced at two heights differs by
+     float noise, not by nothing. */
+  function sameShape(a, b, width) {
+    var tol = Math.max(MIN_AREA, 10 * (width || WELD) * Math.sqrt(Math.max(a.area(), b.area())));
+    if (Math.abs(a.area() - b.area()) > tol) return false;
+    var d1 = a.subtract(b), d2 = b.subtract(a), same = d1.area() < tol && d2.area() < tol;
     d1.delete(); d2.delete();
     return same;
   }
@@ -255,46 +337,23 @@
     return { ok: false, changed: false, kind: kind, mesh: soup, addedVolume: 0, reason: reason };
   }
 
-  /* The reading: frame, seed, bridge radius, slabs and the pocket in each.
-     -> { ok, ... } with live wasm objects in `live` (the caller deletes them). */
-  function read(W, soup, aim, opts) {
-    var F = frameFor(opts.up);
-    var m = soupToManifold(W, soup, F);
-    if (m.status() !== 'NoError' || m.isEmpty()) {
-      var st = m.status();
-      m.delete();
-      return { ok: false, kind: 'notSolid', reason: 'the piece is not one closed solid the kernel can read (' + st + ') - Check & repair it first' };
-    }
-    var bb = m.boundingBox(), zmin = bb.min[2], zmax = bb.max[2];
-    var d = norm(aim.dir), p = aim.point;
-    if (!d || !p) { m.delete(); return { ok: false, kind: 'air', reason: 'no aim - click on the piece, into a gap' }; }
+  /* The seed and its gap: the frame, the seed, its slab, the bridge radius
+     and the seed's gap there. Cheap once the piece is read - the hover's probe.
+     -> { ok, P, seed, js, r, first, held0 } or { ok: false, kind, reason } */
+  function aimAt(W, soup, aim, opts, lap) {
+    var P = pieceOf(W, soup, opts.up, lap);
+    if (P.bad) return { ok: false, kind: 'notSolid', reason: P.bad };
+    var d = norm(aim.dir || []), p = aim.point;
+    if (!d || !p) return { ok: false, kind: 'air', reason: 'no aim - click on the piece, into a gap' };
     var sp = [p[0] - d[0] * EPS_SEED, p[1] - d[1] * EPS_SEED, p[2] - d[2] * EPS_SEED];
-    var seed = F.identity ? sp : toF(F, sp);
-    if (!(seed[2] > zmin && seed[2] < zmax)) {
-      m.delete();
-      return { ok: false, kind: 'air', reason: 'that click is above or below the piece - aim into a gap, at its wall' };
-    }
-
-    /* Slabs: corner heights, welded, then cut to STEP. */
-    var H = cornerHeights(m), zs = [];
-    for (var i = 0; i < H.length; i++) zs.push(H[i].z);
-    zs[0] = zmin; zs[zs.length - 1] = zmax;
-    var cuts = [zs[0]];
-    for (i = 1; i < zs.length; i++) {
-      var a = zs[i - 1], b = zs[i], k = Math.ceil((b - a) / STEP - 1e-9);
-      for (var q = 1; q < k; q++) cuts.push(a + (b - a) * q / k);
-      cuts.push(b);
-    }
-    var nS = cuts.length - 1, js = -1;
-    for (i = 0; i < nS; i++) if (seed[2] >= cuts[i] && seed[2] <= cuts[i + 1]) { js = i; break; }
+    var seed = P.F.identity ? sp : toF(P.F, sp);
+    if (!(seed[2] > P.zmin && seed[2] < P.zmax)) return { ok: false, kind: 'air', reason: 'that is above or below the piece - aim into a gap, at its wall' };
+    var js = -1, i;
+    for (i = 0; i < P.nS; i++) if (seed[2] >= P.cuts[i] && seed[2] <= P.cuts[i + 1]) { js = i; break; }
     if (js < 0) js = 0;
-    var mid = function (j) { return (cuts[j] + cuts[j + 1]) / 2; };
-
-    /* The bridge: the smallest r that puts the seed in a gap, at the seed's slab. */
-    var w = Math.min(bb.max[0] - bb.min[0], bb.max[1] - bb.min[1]), rMax = Math.max(0.05, w / 4);
-    var r = -1, first = null, held0 = null;
+    var S = sectionAt(P, js), rMax = Math.max(0.05, P.w / 4);
     for (i = 0; i < R_LADDER.length && R_LADDER[i] <= rMax; i++) {
-      var G = gapsAt(W, m, mid(js), R_LADDER[i]), hit = null;
+      var G = gapsAt(W, S, R_LADDER[i]), hit = null;
       for (var g = 0; g < G.gaps.length; g++) {
         /* A closing also rounds every inside corner by r - about 0.21 r^2 of
            "gap" in a corner that is not one. A pocket behind a mouth is far
@@ -302,23 +361,28 @@
         var ok = !hit && csHas(G.gaps[g], seed[0], seed[1]) && (R_LADDER[i] === 0 || G.gaps[g].area() >= POCKET_MIN * R_LADDER[i] * R_LADDER[i]);
         if (ok) hit = G.gaps[g]; else G.gaps[g].delete();
       }
-      if (hit) { r = R_LADDER[i]; first = hit; held0 = G.held; break; }
+      if (hit) { if (lap) lap('bridge'); return { ok: true, P: P, seed: seed, js: js, r: R_LADDER[i], first: hit, held0: G.held }; }
       G.held.delete();
     }
-    if (r < 0) {
-      m.delete();
-      return { ok: false, kind: 'air', reason: 'that click is not in a gap - the space there is open to the outside wider than ' +
-               f1(2 * Math.min(rMax, R_LADDER[R_LADDER.length - 1])) + ' mm. Aim into a slot, a crack or a notch, at its wall' };
-    }
+    return { ok: false, kind: 'air', reason: 'that is not in a gap - the space there is open to the outside wider than ' +
+             f1(2 * Math.min(rMax, R_LADDER[R_LADDER.length - 1])) + ' mm. Aim into a slot, a crack or a notch, at its wall' };
+  }
 
-    /* The pocket, slab by slab from the seed's, down and up. */
+  /* The reading: the seed's gap, then the pocket slab by slab down and up.
+     -> { ok, ... } with live wasm objects the caller hands to release(). */
+  function read(W, soup, aim, opts) {
+    var lap = lapper(opts.timings);
+    var A = aimAt(W, soup, aim, opts, lap);
+    if (!A.ok) return A;
+    var P = A.P, cuts = P.cuts, nS = P.nS, js = A.js, r = A.r, first = A.first, g, j;
     var pockets = new Array(nS), helds = new Array(nS);
-    pockets[js] = first; helds[js] = held0;
+    pockets[js] = first; helds[js] = A.held0;
     var lo = js, hi = js;
     for (var dir = -1; dir <= 1; dir += 2) {
-      var prev = first, j = js + dir;
+      var prev = first;
+      j = js + dir;
       while (j >= 0 && j < nS) {
-        var Gj = gapsAt(W, m, mid(j), r), keep = [];
+        var Gj = gapsAt(W, sectionAt(P, j), r), keep = [];
         for (g = 0; g < Gj.gaps.length; g++) { if (overlaps(Gj.gaps[g], prev)) keep.push(Gj.gaps[g]); else Gj.gaps[g].delete(); }
         if (!keep.length) { Gj.held.delete(); break; }
         var u = unionAll(W, keep);
@@ -328,16 +392,17 @@
         j += dir;
       }
     }
+    lap('pocket');
     /* Plate: a gap that ends just above the plate over air (a part of the
        piece standing a hair proud of the plate) drops to the plate - the foam
        stands on the plate the way spray foam does. Its bottom slab's pocket
        carries down, inside that slab's held outline. */
     var plate = lo === 0;
-    if (!plate && cuts[lo] - zmin <= PLATE_REACH) {
+    if (!plate && cuts[lo] - P.zmin <= PLATE_REACH) {
       var air = true;
       for (j = lo - 1; j >= 0 && air; j--) {
-        var Sb = m.slice(mid(j)), x = pockets[lo].intersect(Sb), ar = x.area();
-        Sb.delete(); x.delete();
+        var x = pockets[lo].intersect(sectionAt(P, j)), ar = x.area();
+        x.delete();
         if (ar > 0.01 * pockets[lo].area()) air = false;
       }
       if (air) {
@@ -345,13 +410,12 @@
         lo = 0; plate = true;
       }
     }
-    return { ok: true, F: F, m: m, cuts: cuts, lo: lo, hi: hi, pockets: pockets, helds: helds, r: r, zmin: zmin, zmax: zmax,
+    return { ok: true, F: P.F, m: P.m, cuts: cuts, lo: lo, hi: hi, pockets: pockets, helds: helds, r: r, zmin: P.zmin, zmax: P.zmax,
              reachesPlate: plate, reachesFace: hi === nS - 1, nS: nS };
   }
   function release(R) {
     if (!R || !R.ok) return;
     for (var i = 0; i < R.nS; i++) { if (R.pockets[i]) R.pockets[i].delete(); if (R.helds[i]) R.helds[i].delete(); }
-    R.m.delete();
   }
 
   /* Paint: a painted face the foam would reach stands it down. A face is reached
@@ -371,6 +435,34 @@
       }
     }
     return null;
+  }
+
+  /* Read the piece now (the kernel's solid and its slab cuts), so the first
+     probe and spray do not wait for it. -> Promise of { ok, reason } */
+  function prepare(piece, opts) {
+    opts = opts || {};
+    var soup = piece && (piece.rawTris || piece.soup || piece);
+    if (!soup || soup.length < 9) return Promise.resolve({ ok: false, reason: 'no piece' });
+    return wasmOf(opts).then(function (W) {
+      var P = pieceOf(W, soup, opts.up, lapper(opts.timings));
+      return P.bad ? { ok: false, reason: 'GUN: ' + P.bad + '.' } : { ok: true, slabs: P.nS };
+    });
+  }
+
+  /* The hover's question: is that a gap the gun can fill? Only the seed's own
+     slab is read (the piece itself is read once and kept), so it is quick
+     enough to ask as the mouse moves. -> Promise of { ok, kind, reason, bridge } */
+  function probe(piece, aim, opts) {
+    opts = opts || {};
+    var soup = piece && (piece.rawTris || piece.soup || piece);
+    if (!soup || soup.length < 9) return Promise.resolve({ ok: false, kind: 'nothing', reason: 'no piece' });
+    return wasmOf(opts).then(function (W) {
+      var A = aimAt(W, soup, aim || {}, opts, lapper(opts.timings));
+      if (!A.ok) return { ok: false, kind: A.kind, reason: 'GUN: ' + A.reason + '.' };
+      var out = { ok: true, bridge: A.r, area: A.first.area() };
+      A.first.delete(); A.held0.delete();
+      return out;
+    });
   }
 
   function pocket(piece, aim, opts) {
@@ -409,13 +501,31 @@
 
         /* The foam: each slab's pocket, grown into the walls but kept inside
            the closed outline, stood up its slab's height. */
-        /* Slabs whose pockets are the same shape go up as one prism: a gap
-           with straight walls is one extrusion, plate to face. */
-        var runs = [];
+        /* Each slab's foam outline: its pocket grown GROW into the walls, never
+           past the closed outline, simplified. Slabs whose outlines are the same
+           shape go up as one prism: a gap with straight walls is one
+           extrusion, plate to face. */
+        var areas = {}, prevPocket = null, prevArea = null;
         for (var j = R.lo; j <= R.hi; j++) {
           if (R.cuts[j] >= level) break;
+          if (prevPocket && sameShape(prevPocket, R.pockets[j])) {
+            /* Same pocket: the outline is the same unless the held outline
+               changed where the foam reaches. */
+            var grownJ = R.pockets[j].offset(GROW, 'Miter'), aJ0 = grownJ.intersect(R.helds[j]);
+            made.push(grownJ, aJ0);
+            var aJ = aJ0.simplify(FOAM_SIMPLIFY); made.push(aJ);
+            areas[j] = sameShape(prevArea, aJ, FOAM_SIMPLIFY) ? prevArea : aJ;   // outlines this close are one: the foam reaches GROW past both
+          } else {
+            var grown = R.pockets[j].offset(GROW, 'Miter'), area0 = grown.intersect(R.helds[j]), area = area0.simplify(FOAM_SIMPLIFY);
+            made.push(grown, area0, area);
+            areas[j] = area;
+          }
+          prevPocket = R.pockets[j]; prevArea = areas[j];
+        }
+        var runs = [];
+        for (j = R.lo; j <= R.hi && areas[j]; j++) {
           var last = runs[runs.length - 1];
-          if (last && sameShape(R.pockets[last.j1], R.pockets[j]) && sameShape(R.helds[last.j1], R.helds[j])) last.j1 = j;
+          if (last && areas[last.j1] === areas[j]) last.j1 = j;
           else runs.push({ j0: j, j1: j });
         }
         var slabs = [];
@@ -425,19 +535,21 @@
           if (run.j1 === R.hi) z1 += R.reachesFace ? OVER : GROW;
           else z1 += GROW;                                            // runs overlap: no shared face to weld
           if (z1 > level && level < zhi - WELD) z1 = level;
-          var grown = R.pockets[run.j0].offset(GROW, 'Miter'), area = grown.intersect(R.helds[run.j0]);
-          made.push(grown, area);
-          var ex = area.extrude(z1 - z0).translate([0, 0, z0]);
+          var ex = areas[run.j0].extrude(z1 - z0).translate([0, 0, z0]);
           made.push(ex);
           slabs.push(ex);
         }
+        if (opts.timings) opts.timings.prisms = slabs.length;
         if (!slabs.length) { base.reason = 'GUN: the amount is too small to fill anything yet. Nothing changed.'; return base; }
+        var lap = lapper(opts.timings);
         var foam = slabs.length === 1 ? slabs[0] : W.Manifold.union(slabs);
         if (slabs.length > 1) made.push(foam);
         var u = R.m.add(foam);
         made.push(u);
         /* Back to the piece's own ends: the overshoot goes. */
+        lap('union');
         var t1 = u.trimByPlane([0, 0, -1], -R.zmax), t2 = t1.trimByPlane([0, 0, 1], R.zmin);
+        lap('trim');
         made.push(t1, t2);
         if (t2.status() !== 'NoError' || t2.isEmpty()) return refusal(soup, 'kernel', 'GUN: the kernel could not weld the foam in (' + t2.status() + '). Nothing changed.');
         /* Corners closer than the weld radius - the input's own needles and
@@ -446,12 +558,14 @@
         if (typeof t2.simplify === 'function') { var t3 = t2.simplify(WELD); made.push(t3); if (t3.status() === 'NoError' && !t3.isEmpty()) t2 = t3; }
         var added = t2.volume() - R.m.volume();
         if (!(added > 1e-9)) { base.reason = 'GUN: nothing was filled - the gap is already solid there. Nothing changed.'; return base; }
+        lap('simplify');
         var mesh = manifoldToSoup(t2, R.F), foamSoup = null;
         if (opts.preview !== false) {
           var f1 = foam.trimByPlane([0, 0, -1], -R.zmax), f2 = f1.trimByPlane([0, 0, 1], R.zmin);
           made.push(f1, f2);
           foamSoup = manifoldToSoup(f2, R.F);
         }
+        lap('kernelOut');
         result = { ok: true, changed: true, kind: 'set', mesh: mesh, foam: foamSoup, up: R.F.n.slice(), addedVolume: added, level: level, span: [zlo, zhi],
                    reachesPlate: R.reachesPlate, reachesFace: R.reachesFace, bridge: R.r, slabs: R.hi - R.lo + 1, amount: amount,
                    genusBefore: R.m.genus(), genusAfter: t2.genus() };
@@ -474,7 +588,7 @@
   }
   function readout(added) { return '+' + grouped(added) + ' mm³'; }
 
-  var api = { spray: spray, pocket: pocket, readout: readout, frameFor: frameFor,
+  var api = { spray: spray, probe: probe, prepare: prepare, pocket: pocket, forget: forget, readout: readout, frameFor: frameFor,
               STEP: STEP, GROW: GROW, OVER: OVER, R_LADDER: R_LADDER };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_FoamGun = api;
