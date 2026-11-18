@@ -144,6 +144,33 @@ function soupOfManifold(m) {
   check('from the side: enters in from the strand\'s +z edge, the full height across', near(flank.box.max[2], 10.5 + N.OVERSHOOT_MM) && near(flank.box.min[2], 9.5) && near(flank.box.max[1] - flank.box.min[1], 4 + 2 * N.NOTCH_MARGIN_MM),
     JSON.stringify(flank.box));
 
+  console.log('notch on a section with an inside: fitted to the face clicked');
+  // A U-channel 40 long (x): floor y 0..4 across z 0..20, walls z 0..4 and 16..20 standing to y 14.
+  // Its section at x = 20 is one blob, but not convex: its bounding box is the whole U, and a notch
+  // fitted to that went in from the outer edge across the whole part. Clicked on the inside of the
+  // left wall (z = 4, facing +z) it must go into THAT wall: from z = 4 toward -z, across the face
+  // from the floor (an inside corner - flush) to the wall's top (an outside corner - the margin past).
+  const U = wasm.Manifold.union([
+    soupToManifold(wasm, N.boxSoup({ min: [0, 0, 0], max: [40, 4, 20] })),
+    soupToManifold(wasm, N.boxSoup({ min: [0, 4, 0], max: [40, 14, 4] })),
+    soupToManifold(wasm, N.boxSoup({ min: [0, 4, 16], max: [40, 14, 20] }))]);
+  const ucl = N.sectionClusters(soupOfManifold(U), 0, 20);
+  check('the U\'s section is one blob, and not convex', ucl.length === 1 && !N.sectionConvex(ucl[0], 1, 2), String(ucl.length));
+  check('a bar\'s section is convex', N.sectionConvex(mid, 2, 1));
+  const ue = N.entryFor(0, [0, 0, 1], [0, 1, 0]);
+  const un = N.notchBox({ axis: 0, dAxis: ue.dAxis, wAxis: ue.wAxis, sign: ue.sign, plane: 20, depth: 2, kerf: 1, wCentre: 9, dStart: 4 }, ucl[0]);
+  check('it goes in from the clicked face (z = 4), 2 deep', near(un.box.max[2], 4 + N.OVERSHOOT_MM) && near(un.box.min[2], 2), JSON.stringify(un.box));
+  check('across the face: flush with the floor, the margin past the top', near(un.box.min[1], 4, 1e-3) && near(un.box.max[1], 14 + N.NOTCH_MARGIN_MM, 1e-3), JSON.stringify(un.box));
+  const uc = U.subtract(soupToManifold(wasm, N.boxSoup(un.box)));
+  check('it takes 1 x 10 x 2 from that wall and nothing else, one solid', near(U.volume() - uc.volume(), 20, 1e-3) && uc.decompose().length === 1,
+    (U.volume() - uc.volume()).toFixed(4) + ' of 20');
+  const uFloor = N.notchBox({ axis: 0, dAxis: 1, wAxis: 2, sign: -1, plane: 20, depth: 1, kerf: 1, wCentre: 10, dStart: 4 }, ucl[0]);
+  check('the floor between the walls: from wall to wall, flush both ends', near(uFloor.box.min[2], 4, 1e-3) && near(uFloor.box.max[2], 16, 1e-3) && near(uFloor.box.min[1], 3),
+    JSON.stringify(uFloor.box));
+  const uOut = N.notchBox({ axis: 0, dAxis: 2, wAxis: 1, sign: -1, plane: 20, depth: 1, kerf: 1, wCentre: 7, dStart: 20 }, ucl[0]);
+  check('the outside of a wall: the whole side, the margin past both open ends', near(uOut.box.min[1], -N.NOTCH_MARGIN_MM, 1e-3) && near(uOut.box.max[1], 14 + N.NOTCH_MARGIN_MM, 1e-3) && near(uOut.box.min[2], 19),
+    JSON.stringify(uOut.box));
+
   console.log('notch sizes');
   const ns = N.sizes({ mode: 'notch', nwidth: 2.5, ndepth: 0.7 });
   check('notch mode reads its own width (kerf) and depth', ns.kerf === 2.5 && ns.depth === 0.7, JSON.stringify(ns));

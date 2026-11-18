@@ -552,7 +552,9 @@ function cutBladeSpec(info) {
   let box, sizes = s, miss = false;
   if (notch && strand) {
     const nb = NSO_Notch.notchBox({ axis: k, dAxis: entry.dAxis, wAxis: entry.wAxis, sign: entry.sign,
-      plane: info.plane, depth: s.depth, kerf: s.kerf }, strand);
+      plane: info.plane, depth: s.depth, kerf: s.kerf,
+      // the click on the plane: a section with an inside (a channel, a U) is notched at the face clicked, not its outer edge
+      wCentre: p ? wCentre : null, dStart: p ? dStart : null }, strand);
     box = nb.box;
     sizes = { width: nb.spec.width, depth: s.depth, kerf: s.kerf };
   } else {

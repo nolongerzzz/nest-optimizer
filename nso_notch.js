@@ -253,16 +253,182 @@
   /* Notch mode: the blade fitted to one strand. The strand's section is
      `cluster`; the blade is as wide across as the strand plus the margin, and
      goes in from the strand's own edge on the side it enters from, `depth`
-     deep. `a` is bladeBox's argument less what this fills in. */
+     deep. `a` is bladeBox's argument less what this fills in.
+
+     That holds for a strand: a cord, a bar - a section with no inside to it.
+     A section that has an inside (a channel, a U, a slot in a wall) is one
+     blob too, but its bounding box is not the wall that was clicked: the notch
+     went in from the far outer edge and across the whole part. So when the
+     section is not convex and the click is known (a.wCentre, a.dStart: the
+     click carried onto the plane), the notch is fitted to the FACE under the
+     click instead (faceRun): as wide as that face runs across, going in from
+     it. Where the face ends in an inside corner the notch stops flush with
+     the wall it meets; where it ends at an outside corner it runs the margin
+     past, into air. */
   function notchBox(a, cluster) {
     var lo = cluster.min[a.wAxis], hi = cluster.max[a.wAxis];
     var edge = a.sign < 0 ? cluster.max[a.dAxis] : cluster.min[a.dAxis];
+    var width = hi - lo + 2 * NOTCH_MARGIN_MM, centre = (lo + hi) / 2, face = null;
+    if (a.wCentre != null && a.dStart != null && !sectionConvex(cluster, a.wAxis, a.dAxis)) {
+      face = faceRun(cluster, a);
+      if (face) { edge = face.edge; width = face.hi - face.lo; centre = (face.lo + face.hi) / 2; }
+    }
     var spec = {
       axis: a.axis, dAxis: a.dAxis, wAxis: a.wAxis, sign: a.sign, plane: a.plane,
-      wCentre: (lo + hi) / 2, dStart: edge,
-      width: hi - lo + 2 * NOTCH_MARGIN_MM, depth: a.depth, kerf: a.kerf
+      wCentre: centre, dStart: edge, width: width, depth: a.depth, kerf: a.kerf
     };
-    return { box: bladeBox(spec), spec: spec, edge: edge };
+    return { box: bladeBox(spec), spec: spec, edge: edge, face: face };
+  }
+
+  /* The section's outline as flat arrays in (w, u): w across, u = sign * d,
+     so "going in" is always +u. */
+  function outlineWU(cluster, wAxis, dAxis, sign) {
+    var S = cluster.segs, n = S.length, w0 = new Float64Array(n), u0 = new Float64Array(n),
+        w1 = new Float64Array(n), u1 = new Float64Array(n);
+    for (var i = 0; i < n; i++) {
+      w0[i] = S[i][0][wAxis]; u0[i] = sign * S[i][0][dAxis];
+      w1[i] = S[i][1][wAxis]; u1[i] = sign * S[i][1][dAxis];
+    }
+    return { n: n, w0: w0, u0: u0, w1: w1, u1: u1 };
+  }
+
+  /* Where the line across at `w` crosses the outline, sorted by u. Half-open
+     on w so a line through a vertex counts the two segments there once. */
+  function crossingsAt(O, w) {
+    var out = [];
+    for (var i = 0; i < O.n; i++) {
+      var a = O.w0[i], b = O.w1[i];
+      if (a === b) continue;
+      var lo = a < b ? a : b, hi = a < b ? b : a;
+      if (!(w >= lo && w < hi)) continue;
+      out.push(O.u0[i] + (O.u1[i] - O.u0[i]) * (w - a) / (b - a));
+    }
+    out.sort(function (x, y) { return x - y; });
+    return out;
+  }
+
+  /* Convex (near enough): no line across, either way, meets the outline more
+     than twice. Sampled; a cord, a bar or a rounded strand passes, a channel
+     or a U does not. */
+  function sectionConvex(cluster, wAxis, dAxis) {
+    var axes = [[wAxis, dAxis], [dAxis, wAxis]], SAMPLES = 48;
+    for (var k = 0; k < 2; k++) {
+      var O = outlineWU(cluster, axes[k][0], axes[k][1], 1);
+      var lo = cluster.min[axes[k][0]], hi = cluster.max[axes[k][0]];
+      if (!(hi > lo)) continue;
+      for (var s = 1; s < SAMPLES; s++) {
+        var w = lo + (hi - lo) * (s + 0.37) / SAMPLES;    // off the round numbers a modelled vertex sits on
+        if (crossingsAt(O, w).length > 2) return false;
+      }
+    }
+    return true;
+  }
+
+  /* The face under the click, on the plane: from the click's column, step
+     across while the surface the blade would go in through stays on the
+     clicked face - an entry into the material, turning less than FACE_TURN off
+     the line it started on. Returns its ends across (margin included where the
+     end is open) and its outermost point on the way in, or null when the
+     click's column has no surface to go in through. */
+  var FACE_STEP_MM = 0.1, FACE_TURN = Math.tan(30 * Math.PI / 180), FACE_SNAP_MM = 2;
+  function faceRun(cluster, a) {
+    var O = outlineWU(cluster, a.wAxis, a.dAxis, a.sign);
+    var u0 = a.sign * a.dStart, w0 = a.wCentre;
+    /* The entry into material in column w nearest uExp: crossings sorted by u, the even ones go in. */
+    function entryNear(w, uExp, tol) {
+      var c = crossingsAt(O, w), best = null;
+      for (var i = 0; i < c.length; i += 2) {
+        var e = Math.abs(c[i] - uExp);
+        if (e <= tol && (best === null || e < Math.abs(best - uExp))) best = c[i];
+      }
+      return best;
+    }
+    var start = entryNear(w0, u0, FACE_SNAP_MM);
+    if (start === null) return null;
+    var span = (cluster.max[a.wAxis] - cluster.min[a.wAxis]) + 1;
+    var ends = [], uMin = start;
+    for (var dir = -1; dir <= 1; dir += 2) {
+      /* The face runs at the slope of its first step out of the click. A step stays on it while the
+         surface there heads within FACE_TURN of that slope, so a gently curved face is followed until it
+         has turned that far, and a corner - a fillet included - is not walked round. */
+      var first = entryNear(w0 + dir * FACE_STEP_MM, start, FACE_STEP_MM * FACE_TURN + 1e-6);
+      var ang0 = Math.atan(first === null ? 0 : (first - start) / FACE_STEP_MM);
+      var TURN = Math.atan(FACE_TURN);
+      var onFace = function (wFrom, uFrom, w) {
+        var r = Math.abs(w - wFrom);
+        if (!(r > 0)) return uFrom;
+        var u = entryNear(w, uFrom + Math.tan(ang0) * r, r * 4 + 1e-4);
+        if (u === null) return null;
+        return Math.abs(Math.atan((u - uFrom) / r) - ang0) <= TURN + 1e-9 ? u : null;
+      };
+      var wg = w0, ug = start;
+      while (Math.abs(wg - w0) < span) {
+        var u = onFace(wg, ug, wg + dir * FACE_STEP_MM);
+        if (u === null) break;
+        wg += dir * FACE_STEP_MM; ug = u;
+        if (u < uMin) uMin = u;
+      }
+      // the end lies between wg (on the face) and one step on (off it): halve onto it
+      var g = wg, b = wg + dir * FACE_STEP_MM, ugEnd = ug;
+      for (var it = 0; it < 20; it++) {
+        var m = (g + b) / 2, um = onFace(wg, ug, m);
+        if (um === null) b = m; else { g = m; ugEnd = um; }
+      }
+      ends.push({ w: g, u: ugEnd, dir: dir });
+      if (ugEnd < uMin) uMin = ugEnd;
+    }
+    /* Margin: past an open end - nothing in the blade's way beyond it - the
+       blade runs on into air so the nick is clean across. Past an inside
+       corner there is material in the way: the notch stops flush there. */
+    var depth = a.depth;
+    function clearAt(w) {
+      var c = crossingsAt(O, w), lo = uMin - OVERSHOOT_MM, hi = uMin + depth;
+      var inside = 0;
+      for (var i = 0; i < c.length; i++) {
+        if (c[i] <= lo) { inside ^= 1; continue; }
+        if (c[i] < hi) return false;                      // the outline passes through the blade's band
+        break;
+      }
+      return !inside;                                      // and no material spans the band whole
+    }
+    /* Material at u in column w: an odd number of crossings before it. */
+    function insideAt(w, u) {
+      var c = crossingsAt(O, w), k = 0;
+      while (k < c.length && c[k] < u) k++;
+      return (k & 1) === 1;
+    }
+    /* An inside corner: past the end the surface falls back toward the blade (a fillet, a chamfer) into
+       the wall the face meets, and there the material stands in front of where the blade starts. The
+       notch is carried through the fillet to that wall, flush with it - stopped short, a fin of the
+       fillet would be left standing. -> the wall's w, or null where the end is an outside corner. */
+    var FILLET_MAX_MM = 5;
+    function wallPast(e) {
+      var w = e.w, u = e.u, front = uMin - OVERSHOOT_MM / 2;
+      for (var i = 0; i * FACE_STEP_MM < FILLET_MAX_MM; i++) {
+        var w2 = w + e.dir * FACE_STEP_MM;
+        if (insideAt(w2, front)) {
+          var g = w, b = w2;
+          for (var it = 0; it < 20; it++) { var m = (g + b) / 2; if (insideAt(m, front)) b = m; else g = m; }
+          return b;
+        }
+        var c = crossingsAt(O, w2), nu = null;
+        for (var j = 0; j < c.length; j += 2) if (c[j] <= u + 1e-6 && c[j] >= front) nu = c[j];
+        if (nu === null) return null;
+        w = w2; u = nu;
+      }
+      return null;
+    }
+    var out = [], closed = [];
+    for (var k = 0; k < 2; k++) {
+      var e = ends[k], wall = wallPast(e), w2 = e.w + e.dir * NOTCH_MARGIN_MM;
+      if (wall !== null) { out.push(wall); closed.push(true); continue; }
+      closed.push(false);
+      out.push(clearAt(w2) && clearAt(e.w + e.dir * NOTCH_MARGIN_MM / 2) ? w2 : e.w);
+    }
+    var wlo = Math.min(out[0], out[1]), whi = Math.max(out[0], out[1]);
+    if (!(whi - wlo >= MIN_WIDTH_MM)) return null;
+    return { lo: wlo, hi: whi, edge: a.sign * uMin,
+             open: [!closed[0] && out[0] !== ends[0].w, !closed[1] && out[1] !== ends[1].w], wall: closed };
   }
 
   var round = function (v) { return Math.round(v * 100) / 100; };
@@ -279,7 +445,7 @@
   var api = {
     MIN_KERF_MM: MIN_KERF_MM, MIN_WIDTH_MM: MIN_WIDTH_MM, MIN_DEPTH_MM: MIN_DEPTH_MM,
     OVERSHOOT_MM: OVERSHOOT_MM, LEAN_MIN: LEAN_MIN, DEFAULTS: DEFAULTS,
-    sizes: sizes, entryFor: entryFor, sectionClusters: sectionClusters, nearestCluster: nearestCluster, notchBox: notchBox,
+    sizes: sizes, entryFor: entryFor, sectionClusters: sectionClusters, nearestCluster: nearestCluster, notchBox: notchBox, faceRun: faceRun, sectionConvex: sectionConvex,
     NOTCH_DEFAULTS: NOTCH_DEFAULTS, NOTCH_MARGIN_MM: NOTCH_MARGIN_MM, bladeBox: bladeBox, boxSoup: boxSoup,
     transformSoup: transformSoup, refusal: refusal, report: report
   };
