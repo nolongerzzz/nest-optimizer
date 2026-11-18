@@ -7,7 +7,7 @@
       wall - every point of the guide on the traced outline, round the fillet - not by a chord across it.
    2. Alt held on the second click: the straight chord (two points). Corner to corner across the mouth stays a
       straight guide (the way round is far longer); Alt there follows the walls round.
-   3. A Drawing Line across the mouth that stops 0.3 mm short of the right wall: Fill area inside still fills
+   3. A Drawing Line across the mouth whose bead stops 0.3 mm short of the right wall: Fill area inside still fills
       (the gap closed), and says so; with gaps set to 0 it is refused as open.
    4. Welded at piece height: the channel is solid (its volume the outer box, its 0.02 over the top, the line's
       bead above the mouth), mesh_validate.py clean. */
@@ -107,7 +107,7 @@ withApp(async (page) => {
   console.log('3. Fill area closes a small gap');
   await page.click('#dr-kind-line');
   await page.click('#dr-side-centre');
-  await page.evaluate(([a, b]) => { const k = NSO_DrawEditor.sketch(); k.objects.push({ kind: 'line', align: 'centre', width: 1.2, pts: [a, b] }); NSO_DrawEditor.setSketch(k); }, [P([-13, 10]), P([12.7, 10])]);
+  await page.evaluate(([a, b]) => { const k = NSO_DrawEditor.sketch(); k.objects.push({ kind: 'line', align: 'centre', width: 1.2, pts: [a, b] }); NSO_DrawEditor.setSketch(k); }, [P([-13, 10]), P([12.1, 10])]);   // its round end 0.6 past that: the bead stops 0.3 short of the wall
   await page.click('#dr-tool-area');
   await page.fill('#dr-gap', '0'); await page.dispatchEvent('#dr-gap', 'change');
   let s0 = await sp(P([0, 0])); await page.mouse.click(s0[0], s0[1]); await page.waitForTimeout(120);
@@ -116,8 +116,9 @@ withApp(async (page) => {
   await page.mouse.click(s0[0], s0[1]); await page.waitForTimeout(150);
   const f = await last();
   check('gaps 0.5: filled, and the hint says the gap was closed', f.kind === 'fill' && /gap under 0.5 mm was closed/.test(await page.textContent('#dr-hint')), await page.textContent('#dr-hint'));
+  if (process.env.DBG) console.log('fillpts', JSON.stringify(f.pts.map(q => [+(q[0] + ob.cx - (tb.x0 + tb.x1) / 2).toFixed(3), +(q[1] + ob.cy - (tb.y0 + tb.y1) / 2).toFixed(3)])));
   const own = f.pts.map(q => [q[0] + ob.cx - (tb.x0 + tb.x1) / 2, q[1] + ob.cy - (tb.y0 + tb.y1) / 2]), fb = SK.bounds([{ kind: 'fill', pts: own }]);
-  check('...hugging the inside (and 0.3 into the walls), not spilling out of the channel', near(fb.x0, -13.3, 0.06) && near(fb.x1, 13.3, 0.06) && near(fb.y0, -8.3, 0.06) && fb.y1 < 10.7, JSON.stringify([fb.x0, fb.x1, fb.y0, fb.y1].map(v => +v.toFixed(3))));
+  check('...hugging the inside exactly (0.1 into the walls), and stopping inside the line\'s bead (under its middle), not past it', near(fb.x0, -13.1, 1e-6) && near(fb.x1, 13.1, 1e-6) && near(fb.y0, -8.1, 1e-6) && fb.y1 < 10, JSON.stringify([fb.x0, fb.x1, fb.y0, fb.y1].map(v => +v.toFixed(3))));
   await page.click('#dr-done');
 
   console.log('4. welded');

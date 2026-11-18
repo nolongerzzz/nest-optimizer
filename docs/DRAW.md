@@ -152,6 +152,34 @@ pocket** — it hugs the traced curve exactly and bites *Fill area grows* into t
 walls and beads round it (lower it for a smaller bite). Draw a guide only to cut
 a space off, and let it follow the edges.
 
+#### The fill's edge is exact; how much it has to bite
+
+The grid finds the space; it does not draw its edge. Every point of the grid's outline
+(a staircase a cell off the walls, which showed at 2000% zoom) is put back exactly:
+beside a guide, on the guide's line, 0.02 mm past it; beside any other boundary,
+exactly **bite** from it on the wall's side — so the fill's edge is the wall's own
+curve moved bite into it. Where two boundaries that touch or cross meet, the point
+goes where their two moved lines cross: a sharp corner, not a chamfer. A ring that
+would still fold (two boundaries pulling a point both ways) has its spikes taken
+out, and one the triangulation would not take falls back to the grid's outline.
+
+Lines bound a Fill area **by their bead as built** (with a Bead side, the path is the
+bead's outer edge: a fill bounded by the path bit past the bead).
+
+**Can it just kiss the wall and weld?** No — measured on the owner's
+`thicken_oneside.stl`, its channel filled at each Fill area grows:
+
+| bite | weld |
+|---|---|
+| 0 (the fill exactly on the wall) | refused: "the two pieces do not touch" — two solids that only share a face have nothing to fuse |
+| 0.05 mm | clean (mesh_validate: 0 open, 0 non-manifold, 0 degenerate, 0 piercing) |
+| 0.1 mm | clean |
+| 0.3 mm | clean |
+
+The bite is inside the wall, so it does not show after the weld. The default is now
+**0.1 mm** (was 0.3): the least with a margin over the 0.05 that held. At 0 the
+refusal says to raise it.
+
 #### The Line tool's snaps
 
 First that applies: a **corner** (a traced corner, or a point of something drawn,

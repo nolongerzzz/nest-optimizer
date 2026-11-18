@@ -9,7 +9,7 @@
    1. Line tool, Guide: a click 3 px off the inner corner of one leg lands on it ("corner"); the pointer 1 mm
       short of the other leg's corner and a degree or two off square: the point is held square to the walls and
       stops exactly where that line meets the other leg ("meets the edge") - the guide runs at exactly 10 degrees.
-   2. Fill area: a click inside the channel is a fill whose mouth side lies exactly on the guide, grown 0.3 mm
+   2. Fill area: a click inside the channel is a fill whose mouth side lies exactly on the guide, grown 0.1 mm (Fill area grows)
       into the three walls; a click outside the piece, or in the channel with no guide, is refused in words.
    3. The guide is never built: the drawing is one fill.
    4. Connect where drawn, Piece height, Weld: the channel is a solid block - volume the outer box (and the fill's
@@ -86,11 +86,11 @@ withApp(async (page) => {
   const gd = p => ((p[0] - cL[0]) * (cR[1] - cL[1]) - (p[1] - cL[1]) * (cR[0] - cL[0])) / Math.hypot(cR[0] - cL[0], cR[1] - cL[1]);
   const onGuide = f ? f.pts.filter(p => near(Math.abs(gd(p)), SK.FLUSH_GAP, 1e-6)) : [];
   check('...its mouth side runs along the guide, exactly 0.02 past it (two corners there)', onGuide.length === 2 && Math.max(...f.pts.map(p => Math.sign(gd(onGuide[0])) * gd(p))) <= SK.FLUSH_GAP + 1e-9, onGuide.length);
-  /* in the channel's own frame: the inside is x -13..13, y -8..10; grown 0.3 into the three walls */
+  /* in the channel's own frame: the inside is x -13..13, y -8..10; grown 0.1 into the three walls */
   const inv = q => { const c = [(tb.x0 + tb.x1) / 2, (tb.y0 + tb.y1) / 2], d = [q[0] - c[0] + ob.cx, q[1] - c[1] + ob.cy]; return [d[0] * Math.cos(-TILT) - d[1] * Math.sin(-TILT), d[0] * Math.sin(-TILT) + d[1] * Math.cos(-TILT)]; };
   const own = f ? f.pts.map(inv) : [];
   const bx = SK.bounds([{ kind: 'fill', pts: own }]);
-  check('...grown 0.3 into the side walls and the floor, 0.02 past the mouth', bx && near(bx.x0, -13.3, 0.06) && near(bx.x1, 13.3, 0.06) && near(bx.y0, -8.3, 0.06) && near(bx.y1, 10 + SK.FLUSH_GAP, 1e-6), bx && JSON.stringify([bx.x0, bx.x1, bx.y0, bx.y1].map(v => +v.toFixed(3))));
+  check('...grown exactly 0.1 into the side walls and the floor (sharp corners), 0.02 past the mouth', bx && near(bx.x0, -13.1, 1e-6) && near(bx.x1, 13.1, 1e-6) && near(bx.y0, -8.1, 1e-6) && near(bx.y1, 10 + SK.FLUSH_GAP, 1e-6), bx && JSON.stringify([bx.x0, bx.x1, bx.y0, bx.y1].map(v => +v.toFixed(3))));
   fs.mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: path.join(OUT, '9-fill-area.png') });
 

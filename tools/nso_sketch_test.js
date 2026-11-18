@@ -208,6 +208,29 @@ console.log('fill area');
   check('a guide is never built: one part, and the drawing\'s box is the fill\'s', built.ok && built.parts.length === 1 && near(built.box.h, b.h, 1e-9));
 }
 
+console.log('fill area: the rim exact');
+{
+  const U = [[0, 0], [20, 0], [20, 10], [18, 10], [18, 2], [2, 2], [2, 10], [0, 10]], g = { pts: [[2, 10], [18, 10]], guide: true };
+  const r0 = SK.regionAt([10, 5], [{ pts: U, closed: true }, g], { bite: 0 });
+  check('bite 0: exactly the space - its four corners, the mouth 0.02 past the guide', r0.ok && r0.exact && r0.pts.length === 4 && near(r0.area, 16 * 8.02, 1e-9), r0.ok && JSON.stringify(r0.pts));
+  const r1 = SK.regionAt([10, 5], [{ pts: U, closed: true }, g], { bite: 0.1 });
+  check('bite 0.1: every side exactly 0.1 out, the corners sharp (no staircase, no chamfer)', r1.ok && r1.pts.length === 4 && near(r1.area, 16.2 * 8.12, 1e-9), r1.ok && JSON.stringify(r1.pts));
+  const R = 3, F = [[-15, -10], [15, -10], [15, 10], [13, 10]];
+  for (let i = 0; i <= 12; i++) { const a = i / 12 * Math.PI / 2; F.push([13 - R + R * Math.cos(a), -8 + R - R * Math.sin(a)]); }
+  for (let i = 0; i <= 12; i++) { const a = Math.PI / 2 + i / 12 * Math.PI / 2; F.push([-13 + R + R * Math.cos(a), -8 + R - R * Math.sin(a)]); }
+  F.push([-13, 10], [-15, 10]);
+  const off = p => { let b = Infinity; for (let i = 0; i < F.length; i++) { const a = F[i], c = F[(i + 1) % F.length], dx = c[0] - a[0], dy = c[1] - a[1], l2 = dx * dx + dy * dy, t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)); b = Math.min(b, Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t)); } return b; };
+  const f0 = SK.regionAt([0, 0], [{ pts: F, closed: true }, { pts: [[-13, 10], [13, 10]], guide: true }], { bite: 0 });
+  const w0 = Math.max(...f0.pts.filter(p => p[1] < 10).map(off));
+  check('a filleted channel, bite 0: every point of the fill on the wall (round the fillets too)', f0.ok && f0.exact && w0 < 1e-9, w0);
+  const f1 = SK.regionAt([0, 0], [{ pts: F, closed: true }, { pts: [[-13, 10], [13, 10]], guide: true }], { bite: 0.1 });
+  const d1 = f1.pts.filter(p => p[1] < 9.9).map(off);
+  check('...bite 0.1: every point 0.1 from the wall (to the curve\'s chords), the floor exactly -8.1', f1.ok && f1.exact && Math.max(...d1.map(d => Math.abs(d - 0.1))) < 0.005 && f1.pts.some(p => near(p[1], -8.1, 1e-9)), Math.max(...d1.map(d => Math.abs(d - 0.1))));
+  const bead = SK.outlines({ kind: 'line', pts: [[2, 10], [18, 10]], width: 1, align: 'right' }).regions[0];
+  const fb = SK.regionAt([10, 5], [{ pts: U, closed: true }, { pts: bead[0], closed: true }], { bite: 0.1 });
+  check('bounded by a bead as built (its path its top edge): the fill bites 0.1 into the bead, never past it', fb.ok && near(SK.bounds([{ kind: 'fill', pts: fb.pts }]).y1, 9.1, 1e-9), fb.ok && SK.bounds([{ kind: 'fill', pts: fb.pts }]).y1);
+}
+
 console.log('bead side');
 {
   const bx = o => { const r = SK.outlines(o); return r.ok ? SK.bounds([{ kind: 'fill', pts: [].concat(...r.regions.map(g => g[0])) }]) : null; };

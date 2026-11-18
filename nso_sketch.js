@@ -852,6 +852,7 @@
       }
     }
     if (!fill) return { ok: false, reason: 'that space is open to the outside' + (gap > 0 ? ' (by more than ' + gap + ' mm)' : '') + ' - draw a line or a guide across the opening first (it snaps to the traced corners), then fill', open: true };
+    var F0 = new Uint8Array(fill);                                   // the space itself, before the bite
     /* grown by bite: a walk out from the flood of at most bite (Euclidean, from the cell it left the flood at),
        never onto a guide's cells */
     var b = Math.round(bite / res);
@@ -892,26 +893,116 @@
     var loops = traceMask(fill, W, H), best = null, bestA = 0;
     loops.forEach(function (L) { var a = signedArea(L); if (a > bestA) { bestA = a; best = L; } });
     if (!best) return { ok: false, reason: 'nothing to fill there' };
-    var pts = best.map(function (p) { return [lo[0] + p[0] * res, lo[1] + p[1] * res]; });
-    pts = rdp(pts.concat([pts[0]]), 0.6 * res).slice(0, -1);
-    /* The side along a guide: on it, and stood `proud` (FLUSH_GAP) past it - a face flush with the ends of the walls
-       it closes is coplanar with them, the seam the weld cannot close (2 non-manifold edges, measured on a channel
-       closed flush; 0.02 mm out or in both welded clean). */
+    var raw = best.map(function (p) { return [lo[0] + p[0] * res, lo[1] + p[1] * res]; });
     var proud = num(opts.proud, FLUSH_GAP);
-    if (guides.length) {
-      pts = pts.map(function (p) {
-        var best = null, bd = 1.5 * res;
-        fences.forEach(function (F) {
-          var dx = p[0] - F.a[0], dy = p[1] - F.a[1], t = dx * F.u[0] + dy * F.u[1];
-          var q = [F.a[0] + F.u[0] * t - F.n[0] * F.side * proud, F.a[1] + F.u[1] * t - F.n[1] * F.side * proud], d = Math.abs(dx * F.n[0] + dy * F.n[1]);
-          if (t > -0.05 * F.L && t < 1.05 * F.L && d < bd) { bd = d; best = q; }
-        });
-        return best || p;
+    /* THE RIM, EXACT. The grid's outline is a staircase a cell (a few hundredths of a mm) off the true walls. Every
+       point of it is put back where it belongs: beside a guide, on the guide's line, stood `proud` (FLUSH_GAP) past it
+       (a face flush with the ends of the walls it closes is coplanar with them, the seam the weld cannot close); beside
+       any other boundary, exactly `bite` from its nearest segment, on the wall's side of it (the side the space is
+       not on) - so the fill's edge is the wall's own curve moved bite into it, and with bite 0 the wall itself. */
+    var walls = segs.filter(function (sg) { return !sg.guide; }), reach = bite + 3 * res, cellH = Math.max(0.25, 2 * reach), hash = {};
+    walls.forEach(function (sg, i) {
+      var x0 = Math.floor(Math.min(sg[0][0], sg[1][0]) / cellH), x1 = Math.floor(Math.max(sg[0][0], sg[1][0]) / cellH);
+      var y0 = Math.floor(Math.min(sg[0][1], sg[1][1]) / cellH), y1 = Math.floor(Math.max(sg[0][1], sg[1][1]) / cellH);
+      for (var hx = x0; hx <= x1; hx++) for (var hy = y0; hy <= y1; hy++) (hash[hx + ',' + hy] = hash[hx + ',' + hy] || []).push(i);
+    });
+    function inSpace(p) {
+      var x = Math.floor((p[0] - lo[0]) / res), y = Math.floor((p[1] - lo[1]) / res);
+      return x >= 0 && y >= 0 && x < W && y < H && !!F0[y * W + x];
+    }
+    function meetsSeg(A, B) {
+      var tol = 1e-4;
+      function ds(p, a, e) { var dx = e[0] - a[0], dy = e[1] - a[1], l2 = dx * dx + dy * dy, t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0; return Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t); }
+      return ds(A.a, B.a, B.e) < tol || ds(A.e, B.a, B.e) < tol || ds(B.a, A.a, A.e) < tol || ds(B.e, A.a, A.e) < tol || !!segX(A.a, A.e, B.a, B.e);
+    }
+    /* a wall segment's line moved bite onto the wall's side (away from the space) */
+    function offsetLine(c) {
+      var s1 = [c.q[0] + c.n[0] * 1.5 * res, c.q[1] + c.n[1] * 1.5 * res], w = inSpace(s1) ? [-c.n[0], -c.n[1]] : c.n;
+      return { p: [c.q[0] + w[0] * bite, c.q[1] + w[1] * bite], u: c.u };
+    }
+    /* every couple of cells a point to put back - the grid's outline keeps only its turns, so a long straight run
+       would otherwise come back as its two ends */
+    var dense = densify(raw, 2 * res);
+    var exact = dense.map(function (p) {
+      var gb = null, gd = 2.5 * res, gu = null;
+      fences.forEach(function (F) {
+        var dx = p[0] - F.a[0], dy = p[1] - F.a[1], t = dx * F.u[0] + dy * F.u[1], d = Math.abs(dx * F.n[0] + dy * F.n[1]);
+        if (t > -0.05 * F.L && t < 1.05 * F.L && d < gd) { gd = d; gu = F.u; gb = [F.a[0] + F.u[0] * t - F.n[0] * F.side * proud, F.a[1] + F.u[1] * t - F.n[1] * F.side * proud]; }
       });
-      pts = rdp(dedupe(pts, 1e-6, true).concat([pts[0]]), 0.01).slice(0, -1);
+      var cx2 = Math.floor(p[0] / cellH), cy2 = Math.floor(p[1] / cellH), cand = [], seen = {};
+      for (var hx = cx2 - 1; hx <= cx2 + 1; hx++) for (var hy = cy2 - 1; hy <= cy2 + 1; hy++) {
+        (hash[hx + ',' + hy] || []).forEach(function (i) {
+          if (seen[i]) return;
+          seen[i] = 1;
+          var a = walls[i][0], e = walls[i][1], dx = e[0] - a[0], dy = e[1] - a[1], l2 = dx * dx + dy * dy;
+          if (!l2) return;
+          var t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2, tc = Math.max(0, Math.min(1, t)), q = [a[0] + dx * tc, a[1] + dy * tc], d = d2(p, q);
+          if (d < reach) { var L = Math.sqrt(l2); cand.push({ q: q, d: d, a: a, e: e, u: [dx / L, dy / L], n: [-dy / L, dx / L], end: t < 0 || t > 1 }); }
+        });
+      }
+      cand.sort(function (x, y) { return x.d - y.d; });
+      if (gb) {                                                       // on a guide: and where it meets a wall, exactly that corner
+        for (var gi = 0; gi < cand.length; gi++) {
+          var C = cand[gi];
+          if (Math.abs(gu[0] * C.u[1] - gu[1] * C.u[0]) < Math.sin(20 * Math.PI / 180)) continue;
+          var LC = offsetLine(C), den2 = gu[0] * LC.u[1] - gu[1] * LC.u[0];
+          var t2 = ((LC.p[0] - gb[0]) * LC.u[1] - (LC.p[1] - gb[1]) * LC.u[0]) / den2, X2 = [gb[0] + gu[0] * t2, gb[1] + gu[1] * t2];
+          if (d2(X2, p) <= 2 * reach) return X2;
+          break;
+        }
+        return gb;
+      }
+      if (!cand.length) return p;
+      var A = cand[0], LA = offsetLine(A);
+      /* two walls meeting near it (not running the same way): the point their moved lines cross - a sharp corner */
+      for (var j = 1; j < cand.length; j++) {
+        var B = cand[j];
+        if (B.d > A.d + 2 * res) break;
+        if (Math.abs(A.u[0] * B.u[1] - A.u[1] * B.u[0]) < Math.sin(20 * Math.PI / 180)) continue;
+        if (!meetsSeg(A, B)) continue;                               // a real corner: the two touch or cross
+        var LB = offsetLine(B), den = LA.u[0] * LB.u[1] - LA.u[1] * LB.u[0];
+        var tt = ((LB.p[0] - LA.p[0]) * LB.u[1] - (LB.p[1] - LA.p[1]) * LB.u[0]) / den, X = [LA.p[0] + LA.u[0] * tt, LA.p[1] + LA.u[1] * tt];
+        if (d2(X, p) <= 2 * reach) return X;
+      }
+      if (A.end && bite > 0) {                                        // round the end of a wall: on a circle of bite about it
+        var r0 = d2(p, A.q);
+        return r0 > 1e-9 ? [A.q[0] + (p[0] - A.q[0]) / r0 * bite, A.q[1] + (p[1] - A.q[1]) / r0 * bite] : p;
+      }
+      return LA.p;
+    });
+    var pts = cleanRing(rdp(dedupe(exact, 1e-6, true).concat([exact[0]]), 0.004).slice(0, -1));
+    var fellBack = false;
+    if (pts.length < 3 || selfCross(pts, true) || !fillable(pts)) {                    // a fold where two boundaries pull a point both ways: the grid's own outline
+      fellBack = true;
+      pts = cleanRing(rdp(raw.concat([raw[0]]), 0.6 * res).slice(0, -1));
+      if (selfCross(pts, true) || !fillable(pts)) return { ok: false, reason: 'the space\'s outline folds onto itself there - try a smaller Fill area grows, or close it with a guide' };
     }
     if (signedArea(pts) < 0) pts.reverse();
-    return { ok: true, pts: pts, area: Math.abs(signedArea(pts)), res: res, cells: n, closedGap: closedGap };
+    return { ok: true, pts: pts, area: Math.abs(signedArea(pts)), res: res, cells: n, closedGap: closedGap, exact: !fellBack };
+  }
+
+  /* A ring with its slivers taken out: points under a thousandth of a millimetre apart made one, and spikes - a point
+     the ring runs out to and straight back from (where two boundaries pulled neighbouring points opposite ways) -
+     dropped, until none is left. */
+  function cleanRing(P) {
+    var Q = dedupe(P, 1e-3, true), changed = true, guard = 0;
+    while (changed && Q.length > 3 && guard++ < 50) {
+      changed = false;
+      for (var i = 0; i < Q.length && Q.length > 3; i++) {
+        var a = Q[(i - 1 + Q.length) % Q.length], b = Q[i], c = Q[(i + 1) % Q.length];
+        var u = [b[0] - a[0], b[1] - a[1]], v = [c[0] - b[0], c[1] - b[1]], lu = Math.hypot(u[0], u[1]), lv = Math.hypot(v[0], v[1]);
+        if (lu < 1e-3 || lv < 1e-3 || (u[0] * v[0] + u[1] * v[1]) / (lu * lv) < -0.995) { Q.splice(i, 1); i--; changed = true; }
+      }
+    }
+    return Q;
+  }
+  /* will the triangulation take it as one outline (it is what extrude will do) */
+  function fillable(P) {
+    var lib = CDT();
+    if (!lib) return true;
+    var D = densify(P, MAX_EDGE), segs = D.map(function (_, i) { return [i, (i + 1) % D.length]; });
+    var tr = lib.triangulate(D, segs);
+    return !!(tr && tr.tris && !tr.split && !tr.reason);
   }
 
   /* the boundary loops of a 0/1 mask, as lattice points, counter-clockwise round filled cells */

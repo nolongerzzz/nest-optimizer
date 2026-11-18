@@ -589,7 +589,10 @@
       label: 'Welding the drawing in',
       noJoin: function (name) { return 'the drawing would not be joined to ' + name + ' there - lift it less, or move it onto the face'; }
     });
-    if (!w.ok) return w;
+    if (!w.ok) {
+      if (/do not touch|not be joined/.test(w.reason || '')) w.reason += ' - a drawing that only touches a wall cannot be welded to it: it has to reach into it a little (Fill area grows, in the Draw editor: 0.05 mm or more)';
+      return w;
+    }
     var td = tidy(w.soup);
     w.soup = td.soup;
     var r = { ok: false, reason: 'the commit was rejected' };

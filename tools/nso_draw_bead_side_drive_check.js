@@ -57,14 +57,14 @@ withApp(async (page) => {
   let o = await line([tb.x1, tb.y1], [tb.x1, tb.y0]);
   check('the path runs corner to corner on the face', o.pts.length === 2 && near(o.pts[0][0], tb.x1) && near(o.pts[1][0], tb.x1) && near(o.pts[0][1], tb.y1) && near(o.pts[1][1], tb.y0), JSON.stringify(o.pts));
   let b = await outline(o);
-  check('its bead lies outside the wall: to 1.2 out from the face (the path), and 0.3 back into the wall so the weld bites', o.bite === 0.3 && near(b.x0, tb.x1 - 0.3, 1e-9) && near(b.x1, tb.x1 + W, 1e-9) && near(b.y0, tb.y0, 1e-9) && near(b.y1, tb.y1, 1e-9), JSON.stringify(b));
+  check('its bead lies outside the wall: to 1.2 out from the face (the path), and 0.1 back into the wall so the weld bites', o.bite === 0.1 && near(b.x0, tb.x1 - 0.1, 1e-9) && near(b.x1, tb.x1 + W, 1e-9) && near(b.y0, tb.y0, 1e-9) && near(b.y1, tb.y1, 1e-9), JSON.stringify(b));
   check('...and the list says the path is its edge', /edge, bead (left|right)/.test(await page.textContent('#dr-objects')));
   await page.screenshot({ path: path.join(__dirname, 'draw-out', '14-bead-off-wall.png') });
 
   console.log('2. the other way round');
   const o2 = await line([tb.x1, tb.y0], [tb.x1, tb.y1]);
   const b2 = await outline(o2);
-  check('run up the face instead, the bead is still outside the wall', near(b2.x0, tb.x1 - 0.3, 1e-9) && near(b2.x1, tb.x1 + W, 1e-9) && o2.align !== o.align, o.align + ' / ' + o2.align);
+  check('run up the face instead, the bead is still outside the wall', near(b2.x0, tb.x1 - 0.1, 1e-9) && near(b2.x1, tb.x1 + W, 1e-9) && o2.align !== o.align, o.align + ' / ' + o2.align);
   await page.focus('#dr-canvas'); await page.keyboard.press('Control+z');
 
   console.log('3. Flip, Centre, Undo');
@@ -79,7 +79,7 @@ withApp(async (page) => {
   check('Centre: it straddles the face', near(b.x0, tb.x1 - W / 2, 1e-9) && near(b.x1, tb.x1 + W / 2, 1e-9), JSON.stringify(b));
   await page.focus('#dr-canvas'); await page.keyboard.press('Control+z'); await page.keyboard.press('Control+z');
   b = await outline(await last());
-  check('Ctrl+Z twice: back outside the wall', near(b.x0, tb.x1 - 0.3, 1e-9) && near(b.x1, tb.x1 + W, 1e-9), JSON.stringify(b));
+  check('Ctrl+Z twice: back outside the wall', near(b.x0, tb.x1 - 0.1, 1e-9) && near(b.x1, tb.x1 + W, 1e-9), JSON.stringify(b));
   console.log('3b. Left and Right are the screen\'s, whichever way a line is drawn (the owner drew one up, one down)');
   await page.click('#dr-side-right');
   const ox = tb.x1 + 10;                                          // open sheet, clear of the wall
@@ -118,8 +118,8 @@ withApp(async (page) => {
   let xmax = -Infinity;
   for (let i = 0; i < soup.length; i += 3) xmax = Math.max(xmax, soup[i]);
   check('the wall\'s +x face is now exactly 1.2 further out', near(xmax, tb.x1 + W, 1e-4), xmax + ' vs ' + (tb.x1 + W));
-  const v = Math.abs(FX.volume(soup)), want = 2 * 40 * 30 + W * 40 * 30.02 + 0.3 * 40 * 0.02;
-  check('volume: the wall and the bead (its 0.02 over the top, the 0.3 it reaches into the wall too)', near(v, want, 0.02), v.toFixed(3) + ' vs ' + want.toFixed(3));
+  const v = Math.abs(FX.volume(soup)), want = 2 * 40 * 30 + W * 40 * 30.02 + 0.1 * 40 * 0.02;
+  check('volume: the wall and the bead (its 0.02 over the top, the 0.1 it reaches into the wall too)', near(v, want, 0.02), v.toFixed(3) + ' vs ' + want.toFixed(3));
   fs.writeFileSync(path.join(tmp, 'w.stl'), FX.stl(soup));
   const mv = meshValidate(path.join(tmp, 'w.stl'));
   check('mesh_validate.py clean', mv.open_edges === 0 && mv.nonmanifold_edges === 0 && mv.degenerate_tris === 0 && mv.self_intersection.pierce === 0,

@@ -139,7 +139,7 @@
     }
     if (!all || hit * 2 < all) return 0;
     var v = parseFloat(($('dr-bite') || {}).value);
-    return v >= 0 ? v : 0.3;
+    return v >= 0 ? v : 0.1;
   }
   function setLineSide(o, align) { o.align = align; o.bite = wallBite(o.pts, o.width, o.closed, align); }
   function setBeadSide(v) {
@@ -703,9 +703,18 @@
   function fillArea(p) {
     var bounds = [];
     if (sketch.trace) sketch.trace.loops.forEach(function (L) { bounds.push({ pts: L, closed: true }); });
-    sketch.objects.forEach(function (o) { bounds.push({ pts: o.pts, closed: o.kind === 'fill' || o.closed, guide: o.kind === 'guide' }); });
+    /* a guide by its path; a line by the bead as it will be built (with a Bead side its path is its OUTER edge - a fill
+       bounded by the path bit past the bead); a fill by its outline */
+    sketch.objects.forEach(function (o) {
+      if (o.kind === 'guide') { bounds.push({ pts: o.pts, closed: !!o.closed, guide: true }); return; }
+      if (o.kind === 'line') {
+        var ol = outlineOf(o);
+        if (ol) { ol.forEach(function (reg) { reg.forEach(function (L) { bounds.push({ pts: L, closed: true }); }); }); return; }
+      }
+      bounds.push({ pts: o.pts, closed: o.kind === 'fill' || o.closed });
+    });
     var bite = parseFloat($('dr-bite').value);
-    if (!(bite >= 0)) bite = 0.3;
+    if (!(bite >= 0)) bite = 0.1;
     var gap = parseFloat(($('dr-gap') || {}).value);
     if (!(gap >= 0)) gap = 0.5;
     var r = SK.regionAt(p, bounds, { bite: bite, gap: gap });
@@ -1309,7 +1318,7 @@
       ]),
       h('div', { cls: 'dr-row' }, [field('dr-gap', 'closes gaps to', 'A space whose lines stop a little short of a wall is still filled, as if they met, when the gap is no wider than this, mm. 0: only a space closed all round', 'mm', { min: '0', step: '0.1', value: '0.5' })]),
       h('label', { cls: 'dr-check', title: 'Line tool: two points one after the other on the same edge (a traced wall, or something drawn) are joined along that edge - round its fillets and curves - when the way along it is short and smooth (no sharp corner); a line across a mouth stays straight. The preview shows which. Alt held while clicking: the other one' }, [h('input', { type: 'checkbox', id: 'dr-follow' }), h('span', { text: ' Line follows edges (Alt: the other way)' })]),
-      h('div', { cls: 'dr-row' }, [field('dr-bite', 'Fill area grows', 'How far a Fill area reaches into the walls round it, mm - so a weld bites solid material instead of sharing a face (a seam the weld cannot close). Keep it under the walls\' thickness', 'mm', { min: '0', step: '0.05', value: '0.3' })]),
+      h('div', { cls: 'dr-row' }, [field('dr-bite', 'Fill area grows', 'How far a Fill area (and a bead laid along a wall) reaches into the walls round it, mm. It is inside the wall, so it does not show after the weld - but some is needed: at 0 the fill only touches the wall and the weld refuses it (measured on the owner\'s piece: 0 refused, 0.05 / 0.1 / 0.3 all welded clean). Keep it under the walls\' thickness', 'mm', { min: '0', step: '0.05', value: '0.1' })]),
       h('label', { cls: 'dr-check', title: 'Line points, shape corners and the ends of a pencil stroke land on the traced outline when near it' }, [h('input', { type: 'checkbox', id: 'dr-snap-edge' }), h('span', { text: ' Snap to the traced edges' })]),
       h('div', { cls: 'dr-side-title', text: 'Drawing' }),
       field('dr-sheet-height', 'Height', 'How far the whole drawing stands out of the face it is put on, mm (an object with its own height keeps it)', 'mm', { min: String(SK.MIN_HEIGHT) }),

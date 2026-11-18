@@ -49,6 +49,7 @@ merging its list by hand. The list below is generated.
 - [Detach / Reattach - a detected flange off the hull, and back on elsewhere (2026-09-26)](handoff/detach-reattach-a-detected-flange-off-the-hull-and-back-on.md)
 - [Draw: Bead side - the path drawn is the bead's edge, laid off the wall; wall-corner snaps (2026-11-18)](handoff/draw-bead-side.md)
 - [DRAW: the Connect card renamed, a flat Draw editor, and Connect as a stage with a ghost (2026-11-16)](handoff/draw-card-editor-and-connect-stage.md)
+- [Draw: Fill area's edge exact (no staircase, sharp corners), bounded by beads as built, bite default 0.1 (2026-11-18)](handoff/draw-fill-area-exact-rim.md)
 - [Draw: the Line tool follows edges; Fill area closes small gaps (2026-11-18)](handoff/draw-follow-edges-close-gaps.md)
 - [Draw: Guide lines, Fill area, Line tool snaps held to the walls, a tidy after the weld (2026-11-18)](handoff/draw-guide-fill-area-wall-snaps.md)
 - [Draw: Line assist - rough strokes made straight walls, true arcs, or left smooth (2026-11-16)](handoff/draw-line-assist.md)
