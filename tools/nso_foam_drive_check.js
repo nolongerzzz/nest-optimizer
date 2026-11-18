@@ -605,6 +605,26 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(150);
   check('Escape puts the gun away', await page.evaluate(() => !window.nsoFoamGun.on() && document.getElementById('foam-gun-panel').hidden));
 
+  /* The card closing puts it away: the gun does not follow you to another card. */
+  await openFinishMenu(page);
+  await page.evaluate(() => { document.getElementById('menu-fillfix').open = true; });
+  await page.click('#btn-foam-gun');
+  await page.waitForFunction(() => window.nsoFoamGun.on() && !window.nsoFoamGun.info().preparing, null, { timeout: 30000 });
+  await page.click('#menu-fillfix > summary');
+  await page.waitForTimeout(200);
+  const shut = await page.evaluate(() => ({ open: document.getElementById('menu-fillfix').open, on: window.nsoFoamGun.on(),
+    cursor: state.renderer.domElement.style.cursor, controls: state.controls.enabled }));
+  check('closing the Fill & fix card puts the gun away: disarmed, the cursor back to the page\'s own, the orbit back',
+        !shut.open && !shut.on && shut.cursor === '' && shut.controls, JSON.stringify(shut));
+  check('...and says so', /GUN put away - the Fill & fix card was closed/.test(await statusOf(page)), await statusOf(page));
+  await page.evaluate(() => { document.getElementById('menu-fillfix').open = true; });
+  await page.click('#btn-foam');
+  await page.waitForTimeout(200);
+  await page.evaluate(() => { document.getElementById('menu-add').open = true; document.getElementById('menu-fillfix').open = false; });
+  await page.waitForTimeout(200);
+  check('another card opening puts Foam\'s box away too', await page.evaluate(() => !window.nsoFoamBox.on() && !window.NSO_CropCard.lent()));
+  await page.evaluate(() => { document.getElementById('menu-add').open = false; });
+
   const errs = logs.filter(l => /pageerror|Uncaught|TypeError|ReferenceError/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 }).then(() => {

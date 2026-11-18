@@ -1350,6 +1350,23 @@
       s.dataset.nsoWired = '1';
       s.addEventListener('input', function () { setHeight(parseFloat(s.value)); });
     }
+    /* Foam's tools live in the Fill & fix card and are armed only while it is
+       open: shutting it - by its summary, by another card opening, or by the
+       leave-tool gesture - puts whichever is out away (sprays already set
+       stay). A MutationObserver on `open`, as Brush and Carve do: it sees a
+       programmatic close as well as a click. */
+    var card = $('menu-fillfix');
+    if (card && card.dataset.nsoFoamCardWired !== '1' && typeof MutationObserver === 'function') {
+      card.dataset.nsoFoamCardWired = '1';
+      new MutationObserver(function () {
+        if (card.open) return;
+        var was = P.on ? 'GUN' : (G.on ? 'Foam box' : (on ? 'Foam' : null));
+        if (P.on) gunCancel(true);
+        if (G.on) boxCancel(true);
+        if (on) cancel(true);
+        if (was) say(was + ' put away - the Fill & fix card was closed. ' + (was === 'Foam' ? 'Nothing changed.' : 'Sprays already set stay.'));
+      }).observe(card, { attributes: true, attributeFilter: ['open'] });
+    }
     if (typeof state === 'undefined' || !state.renderer || !state.renderer.domElement || state._foamBound) return;
     state._foamBound = true;
     state.renderer.domElement.addEventListener('pointerdown', onDown, true);
