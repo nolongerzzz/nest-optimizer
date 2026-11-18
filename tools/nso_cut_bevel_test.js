@@ -267,7 +267,7 @@ withApp(async (page, logs) => {
     check(tag + 'the blade came up ' + r.before.toFixed(2) + '° off plumb', r.before > 15);
     check(tag + 'PLUMB stands it vertical (' + r.after.toFixed(3) + '° off) with bevel ' + r.bevel + '°', r.after <= 0.5 && r.bevel !== 0);
     check(tag + 'the mitre is untouched (' + r.mitre + ')', r.mitre === (which === 'flat' ? 0 : 20));
-    check(tag + 'the readout shows the bevel it applied', r.readout.indexOf(', bevel ' + r.bevel + '° (plumb)') >= 0 && r.field === String(r.bevel), r.readout);
+    check(tag + 'the readout shows the bevel it applied', r.readout.indexOf(', bevel ' + r.bevel + '° (plumb)') >= 0 && r.field === r.bevel + '°', r.readout);
     check(tag + 'the button reads Plumb, the status names the bevel', r.label === 'Plumb' && r.status.indexOf('bevel ' + r.bevel + '°') >= 0, r.status);
     check(tag + 'the cut faces it makes are vertical (' + r.faces.map(f => elev(f.n).toFixed(2)).join(', ') + '° off horizontal)',
       r.faces.length === 2 && r.faces.every(f => f.area > 10 && elev(f.n) < 0.5));

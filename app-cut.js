@@ -714,12 +714,10 @@ function syncCutMiterUI() {
   const deg = cutMiterDeg();
   const turn = document.getElementById('cut-dial-turn');
   if (turn) turn.setAttribute('transform', 'rotate(' + deg + ' 50 50)');
-  const text = document.getElementById('cut-dial-deg');
-  if (text) text.textContent = deg + '°';
   const dial = document.getElementById('cut-miter-dial');
   if (dial) dial.setAttribute('aria-valuenow', String(deg));
-  const input = document.getElementById('cut-miter-deg');
-  if (input && document.activeElement !== input) input.value = String(deg);
+  const input = document.getElementById('cut-miter-deg');                 // the wheel's centre: its readout and its box
+  if (input && document.activeElement !== input) input.value = deg + '°';
   syncCutBevelUI();
   if (typeof syncCutRotateUI === 'function') syncCutRotateUI();
 }
@@ -737,12 +735,10 @@ function syncCutBevelUI() {
     darts.setAttribute('transform', 'rotate(' + at + ' 50 50)');
     darts.dataset.at = String(at);
   }
-  const text = document.getElementById('cut-bevel-dial-deg');
-  if (text) text.textContent = deg + '°';
   const dial = document.getElementById('cut-bevel-dial');
   if (dial) dial.setAttribute('aria-valuenow', String(deg));
   const input = document.getElementById('cut-bevel-deg');
-  if (input && document.activeElement !== input) input.value = String(deg);
+  if (input && document.activeElement !== input) input.value = deg + '°';
 }
 
 function syncCutUI() {
@@ -886,9 +882,7 @@ function updateCutterUI() {
     status.textContent = cutting
       ? (typeof cutPlateOn === 'function' && cutPlateOn()
         ? 'Whole plate: the blade crosses every piece. Set its height, then Cut.'
-        : getActiveModel() && state.cutHelper
-        ? ''                                   // a blade is placed: nothing to say, and the line takes no room (styles.css, :empty)
-        : 'Click a piece to drop a square blade on it.')
+        : '')                                  // no instructions on the card: the line is empty and takes no room (styles.css, :empty)
       : 'Cutter off.';
   }
   if (cutBtn) cutBtn.disabled = !cutting || !getActiveModel() || !state.cutHelper || cutBladeHidden();
@@ -1066,11 +1060,7 @@ function cutWireMiterDial() {
     ev.preventDefault();
     ev.stopPropagation();
   });
-  const typed = document.getElementById('cut-miter-deg');
-  if (typed) typed.addEventListener('change', function () {
-    const v = parseFloat(typed.value);
-    setCutMiter(isFinite(v) ? v : 0);
-  });
+  cutWireDialInput('cut-miter-deg', { read: cutMiterDeg, apply: setCutMiter, nudge: function (d) { setCutMiter(cutMiterDeg() + d); }, sync: syncCutUI });
   const square = document.getElementById('btn-cut-square');
   if (square) square.addEventListener('click', function () { setCutMiter(0); });
   const quarter = document.getElementById('btn-cut-miter-90');
@@ -1160,11 +1150,7 @@ function cutWireBevelDial() {
     ev.preventDefault();
     ev.stopPropagation();
   });
-  const typed = document.getElementById('cut-bevel-deg');
-  if (typed) typed.addEventListener('change', function () {
-    const v = parseFloat(typed.value);
-    setCutBevel(isFinite(v) ? v : 0);
-  });
+  cutWireDialInput('cut-bevel-deg', { read: cutBevelDeg, apply: setCutBevel, nudge: function (d) { setCutBevel(cutBevelDeg() + d); }, sync: syncCutUI });
   const plumb = document.getElementById('btn-cut-plumb');
   if (plumb) plumb.addEventListener('click', function () { cutPlumb(); });
   cutWireMiterStep('btn-cut-bevel-minus', -1, 'bevel');
@@ -1444,38 +1430,15 @@ function cutWireRotateDial() {
     ev.preventDefault();
     ev.stopPropagation();
   });
-  /* The centre of the wheel is also its box. A click in it selects the reading, so typing replaces it (the text is left as it
-     is: rewriting it on focus races the selection); Enter or leaving it sets the piece to what was typed (the degree sign is
-     ignored; one Undo point), Esc puts the reading back, Up / Down step it as the arrow keys do on the wheel (1 degree,
-     Shift 0.1). Typed nothing new, nothing is turned. */
-  const typed = document.getElementById('cut-rotate-deg');
-  if (typed) {
-    let from = '';                                                   // the bare reading the box held when it was clicked into
-    const bare = function () { const r = cutRotateReading(); return r == null ? '' : String(r); };
-    typed.addEventListener('focus', function () {
-      from = bare();
-      requestAnimationFrame(function () { if (document.activeElement === typed) typed.select(); });
-    });
-    typed.addEventListener('blur', function () {
-      const text = typed.value.replace(/[°\s]/g, '').replace(/^\u2212/, '-');
-      const v = parseFloat(text), cur = cutRotateReading();
-      if (text !== from && isFinite(v) && cur != null) {
-        const d = cutRotateWrap(v - cur);
-        if (Math.abs(d) > 1e-6) cutRotateDial.undoAt = 0, cutRotateBy(d);
-      }
-      syncCutRotateUI();                                             // the box shows what the piece reads now, degree sign back
-    });
-    typed.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Enter') typed.blur();
-      else if (ev.key === 'Escape') { typed.value = from + '°'; typed.blur(); }
-      else if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
-        const step = (ev.shiftKey ? CUT_MITER_STEP_SHIFT_DEG : CUT_MITER_STEP_DEG) * (ev.key === 'ArrowUp' ? 1 : -1);
-        if (cutRotateBy(step)) { from = bare(); typed.value = from + '°'; typed.select(); }
-      } else return;
-      ev.preventDefault();
-      ev.stopPropagation();
-    });
-  }
+  cutWireDialInput('cut-rotate-deg', {
+    read: cutRotateReading,
+    apply: function (v) {
+      const d = cutRotateWrap(v - cutRotateReading());
+      if (Math.abs(d) > 1e-6) { cutRotateDial.undoAt = 0; cutRotateBy(d); }     // a typed turn is a step of its own
+    },
+    nudge: function (d) { return cutRotateBy(d); },
+    sync: syncCutRotateUI
+  });
   // One axis at a time: ticking one clears the others, and the one in use cannot be cleared (the wheel needs an axis)
   Object.keys(CUT_ROTATE_AXES).forEach(function (k) {
     const el = document.getElementById(CUT_ROTATE_AXES[k]);
@@ -1494,6 +1457,40 @@ function cutWireRotateDial() {
   cutWireMiterStep('btn-cut-rotate-minus', -1, 'rotate');
   cutWireMiterStep('btn-cut-rotate-plus', 1, 'rotate');
   syncCutRotateUI();
+}
+
+/* The centre of a wheel is also its number box (Mitre, Bevel and Rotate): an input laid over the middle of the rail (index.html,
+   .cut-dialwrap). It reads out as the wheel turns - `45°`, kept by the card's sync while it is not being typed in - and a click
+   in it selects the reading, so typing replaces it. Enter or leaving it sets the wheel to what was typed (the degree sign is
+   ignored), Esc puts the reading back, Up / Down step it (1 degree, Shift 0.1). A value equal to the reading changes nothing,
+   so a click and a click away is a no-op; a `change` event set by a script commits the same way.
+   The text is deliberately NOT rewritten on focus: that races the selection (a value typed over `50` came out `500`).
+   `o`: read() the wheel's reading (null with nothing to turn), apply(v) set it to v, nudge(d) step it by d (false = refused),
+   sync() draw the card from the state again. */
+function cutWireDialInput(id, o) {
+  const typed = document.getElementById(id);
+  if (!typed || typed.dataset.nsoWired === '1') return;
+  typed.dataset.nsoWired = '1';
+  const bare = function () { const r = o.read(); return r == null ? '' : String(r); };
+  const commit = function () {
+    const v = parseFloat(typed.value.replace(/[°\s]/g, '').replace(/^\u2212/, '-')), cur = o.read();
+    if (isFinite(v) && cur != null && v !== cur) o.apply(v);
+  };
+  typed.addEventListener('focus', function () {
+    requestAnimationFrame(function () { if (document.activeElement === typed) typed.select(); });
+  });
+  typed.addEventListener('change', commit);
+  typed.addEventListener('blur', function () { commit(); o.sync(); });   // sync: the box shows what the wheel reads now, degree sign back
+  typed.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') typed.blur();
+    else if (ev.key === 'Escape') { typed.value = bare() + '°'; typed.blur(); }
+    else if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
+      const d = (ev.shiftKey ? 0.1 : 1) * (ev.key === 'ArrowUp' ? 1 : -1);
+      if (o.nudge(d) !== false) { typed.value = bare() + '°'; typed.select(); }
+    } else return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
 }
 
 /* One − / + button under the wheel. A press steps the mitre through

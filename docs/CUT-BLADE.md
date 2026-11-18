@@ -50,10 +50,15 @@ a click on the piece is how the blade is placed, a click that lands on the ball 
 is a handle where it stands clear of the piece. A strip where the blade's plane met the plate used to do this job; it floated off
 the blade wherever the blade lay near-flat (a piece leaned past upright) and is gone.
 
-**Mitre buttons.** Under the Mitre wheel, beside its box, **Square** sets the mitre to 0 and **90°** to 90 - the
-opposite blade direction, a quarter-turn about the vertical - without dragging the wheel or typing an angle.
+**The three wheels (Mitre, Rotate, Bevel) have their number IN the centre and their name at the wheel's top-left corner.** The centre
+reads out as the wheel turns (`30°`) and is also the number box: click it, type, Enter (Esc puts the reading back; Up / Down step
+1 degree, Shift 0.1). There is no box under any wheel and no hint text on the card.
 
-**Rotate piece** is a wheel beside the Mitre wheel, for turning or leaning a piece close up. It
+**Mitre buttons.** Under the Mitre wheel's - / +, side by side, **Square** sets the mitre to 0 and **90°** to 90 - the
+opposite blade direction, a quarter-turn about the vertical - without dragging the wheel or typing an angle. **Plumb** sits beside the
+Bevel wheel.
+
+**Rotate** (the Rotate piece wheel) is a wheel beside the Mitre wheel, for turning or leaning a piece close up. It
 replaces the rotate rings, which Cut no longer shows (they stood too far out of view on a small
 piece). Its number is the **centre of the wheel**: it reads out as the wheel turns, and a click in it
 selects it so you can type one (Enter, or leaving it, sets the piece; Esc puts the reading back; Up / Down
@@ -78,10 +83,9 @@ clockwise quarter turn). A lean: the tilt of the piece's upright from the vertic
 re-based to the nearest upright face. After an Undo or a Redo the wheel reads the pose that came
 back. The wheel is a jog, not a pointer: pressing the rail does nothing until the pointer moves,
 then the piece follows the pointer's turn about the wheel, resting on a 45 degree tick it passes
-within 3. The box takes a reading; the - / + buttons under the wheel step 1 degree (Shift 0.1, Alt 5,
+within 3. The centre takes a reading; the - / + buttons under the wheel step 1 degree (Shift 0.1, Alt 5,
 hold to repeat) and so do the arrow keys on the wheel. The blade goes with the piece. Each wheel has
-its - / + directly under it, and under those its name and number box (the Mitre's with Square beside
-it). Real-browser check: `npm run rotate-dial:drive`.
+its - / + directly under it (the Mitre's with Square and 90° under those, Rotate's with the axis ticks). Real-browser check: `npm run rotate-dial:drive`.
 
 Files: `nso_notch.js` (the geometry, THREE-free, `npm run notch:test`),
 `app-cut.js` (`cutBladeSpec`, `cutBuildSizedBlade`, `cutNotchAt`, the card

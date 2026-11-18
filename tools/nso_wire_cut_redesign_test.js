@@ -268,16 +268,16 @@ withApp(async (page, logs) => {
     // is hidden until a Cut refuses an inside-out piece.)
     const order = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools button, #cutter-tools input, #cutter-tools svg')]
       .filter(e => !e.hidden).map(e => e.id));
-    check('the Cut card is: Hide blade, mitre dial + Rotate piece dial (the Rotate piece number is the centre of its wheel; − / + under each, the mitre box and Square under its − / +; the Rotate piece axes under its −/+), bevel dial, − / +, Plumb, slider, ← number →, Blade, Cut',
-      order.join(' ') === 'chk-cut-hide-blade cut-miter-dial btn-cut-miter-minus btn-cut-miter-plus cut-miter-deg btn-cut-square btn-cut-miter-90 ' +
+    check('the Cut card is: Hide blade, mitre dial + Rotate piece dial (each wheel number is its centre; − / + under each, Square and 90 under the mitre − / +, the Rotate axes under its − / +), bevel dial, − / +, Plumb, slider, ← number →, Blade, Cut',
+      order.join(' ') === 'chk-cut-hide-blade cut-miter-dial cut-miter-deg btn-cut-miter-minus btn-cut-miter-plus btn-cut-square btn-cut-miter-90 ' +
         'cut-rotate-dial cut-rotate-deg btn-cut-rotate-minus btn-cut-rotate-plus chk-cut-rot-h chk-cut-rot-fb chk-cut-rot-ss ' +
-        'cut-bevel-dial cut-bevel-deg btn-cut-bevel-minus btn-cut-bevel-plus btn-cut-plumb ' +
+        'cut-bevel-dial cut-bevel-deg btn-cut-plumb btn-cut-bevel-minus btn-cut-bevel-plus ' +
         'cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p ' +
         'btn-cut-blade-full btn-cut-blade-sized btn-cut-blade-notch btn-cut-blade-plate ' +
         'cut-blade-width-s cut-blade-width cut-blade-depth-s cut-blade-depth cut-blade-kerf-s cut-blade-kerf ' +
         'chk-cut-follow ' +
         'cut-plate-height-s cut-plate-height btn-cut-plate-above btn-cut-plate-below ' +
-        'cut-notch-width-s cut-notch-width cut-notch-depth-s cut-notch-depth chk-cut-notch-follow ' +
+        'cut-notch-width-s cut-notch-width cut-notch-depth-s cut-notch-depth cut-notch-from cut-notch-to chk-cut-notch-follow ' +
         'cut-follow-slice-s cut-follow-slice btn-cut-follow-back btn-cut-follow-fwd btn-cut',
       order.join(' '));
     const cards = await page.evaluate(() => ({
@@ -422,10 +422,10 @@ withApp(async (page, logs) => {
     await page.mouse.down();
     for (const p of pts.path) await page.mouse.move(p.x, p.y);
     await page.mouse.up();
-    const dial = await page.evaluate(() => ({ deg: state.cutMiterDeg, text: document.getElementById('cut-dial-deg').textContent,
+    const dial = await page.evaluate(() => ({ deg: state.cutMiterDeg, text: document.getElementById('cut-miter-deg').value,
       typed: document.getElementById('cut-miter-deg').value, readout: document.getElementById('cut-readout').textContent }));
     check(route + ': dragging the handle round the rail set the mitre to about 30°',
-      Math.abs(dial.deg - 30) <= 1 && dial.text === dial.deg + '°' && dial.typed === String(dial.deg),
+      Math.abs(dial.deg - 30) <= 1 && dial.text === dial.deg + '°' && dial.typed === dial.deg + '°',
       JSON.stringify(dial));
     const deg = dial.deg;
     const L = await page.evaluate(id => __longWorld(id), id);
@@ -492,7 +492,7 @@ withApp(async (page, logs) => {
       const c = at(dial, 50, 50), h = at(document.getElementById('cut-dial-handle'), 50, 10);
       return { state: state.cutMiterDeg,
                handle: (Math.atan2(h.x - c.x, -(h.y - c.y)) * 180 / Math.PI + 360) % 360,
-               text: document.getElementById('cut-dial-deg').textContent,
+               text: document.getElementById('cut-miter-deg').value,
                field: document.getElementById('cut-miter-deg').value,
                aria: dial.getAttribute('aria-valuenow'),
                readout: document.getElementById('cut-readout').textContent,
@@ -505,7 +505,7 @@ withApp(async (page, logs) => {
       const bladeOff = s.blade ? angleDeg(s.blade.n, nWant) : NaN;
       const readoutOk = want ? s.readout.includes(', mitre ' + want + '°') : !/mitre/.test(s.readout);
       check(what + ' -> ' + want + '°: wheel, number, readout and blade agree',
-        s.state === want && Math.abs(off) < 1e-3 && s.text === want + '°' && s.field === String(want) &&
+        s.state === want && Math.abs(off) < 1e-3 && s.text === want + '°' && s.field === want + '°' &&
         s.aria === String(want) && bladeOff < 1e-4 && readoutOk,
         'state ' + s.state + ', handle ' + s.handle.toFixed(6) + '°, wheel "' + s.text + '", box "' + s.field +
         '", blade ' + bladeOff.toExponential(1) + '° off');
@@ -529,7 +529,7 @@ withApp(async (page, logs) => {
         await agree((mod ? mod + '-' : '') + (sign > 0 ? '+' : '−'), want);
       }
     };
-    const typeMitre = async v => { await page.fill('#cut-miter-deg', String(v)); await page.dispatchEvent('#cut-miter-deg', 'change'); };
+    const typeMitre = async v => { await page.fill('#cut-miter-deg', String(v)); await page.dispatchEvent('#cut-miter-deg', 'change'); await page.press('#cut-miter-deg', 'Tab'); };   // Tab: leaving the box puts its degree sign back
 
     const geo = await page.evaluate(() => {
       const d = document.getElementById('cut-miter-dial').getBoundingClientRect();

@@ -96,8 +96,22 @@ withApp(async (page, logs) => {
   check('the wheels are side by side, Rotate piece on the right', Math.abs(md.cy - rd.cy) < 3 && rd.x > md.r - 1, JSON.stringify({ mitreX: md.x, rotX: rd.x }));
   check('each wheel has its - / + directly under it, inside its width', mm.y - md.b >= 0 && mm.y - md.b < 14 && rm.y - rd.b >= 0 && rm.y - rd.b < 14 &&
     mm.x >= md.x - 0.5 && mp.r <= md.r + 0.5 && rm.x >= rd.x - 0.5 && rp.r <= rd.r + 0.5, JSON.stringify({ mitre: mm.y - md.b, rotate: rm.y - rd.b }));
-  check('the Mitre box and Square are under the Mitre wheel (and its - / +), side by side', mdeg.y >= mm.b - 1 && sq.y >= mm.b - 1 && Math.abs(sq.cy - mdeg.cy) < 16 && sq.r <= rd.x + 4 && mdeg.x >= md.x - 20,
-    JSON.stringify({ steps: mm.b, box: mdeg.y, square: sq.y }));
+  const r90a = await R('btn-cut-miter-90');
+  check('the Mitre number is the CENTRE of its wheel (no box under it)', Math.abs(mdeg.cx - (md.x + md.w / 2)) < 3 && Math.abs(mdeg.cy - (md.y + md.h / 2)) < 3 && mdeg.w < md.w * 0.7 && mdeg.y < mm.y,
+    JSON.stringify({ box: [mdeg.cx, mdeg.cy], wheel: [md.x + md.w / 2, md.y + md.h / 2] }));
+  check('Square and 90 sit side by side under the Mitre - / +, inside the Mitre column', sq.y >= mm.b - 1 && Math.abs(sq.cy - r90a.cy) < 2 && r90a.x >= sq.r - 1 && r90a.r <= rd.x + 4 && sq.x >= md.x - 20,
+    JSON.stringify({ steps: mm.b, square: [sq.x, sq.y, sq.r], ninety: [r90a.x, r90a.y, r90a.r] }));
+  const bd = await R('cut-bevel-dial'), bdeg = await R('cut-bevel-deg'), plumbR = await R('btn-cut-plumb'), bm = await R('btn-cut-bevel-minus');
+  check('the Bevel number is the CENTRE of its wheel, Plumb is beside the wheel and its - / + under it', Math.abs(bdeg.cx - (bd.x + bd.w / 2)) < 3 && Math.abs(bdeg.cy - (bd.y + bd.h / 2)) < 3 && plumbR.x >= bd.r - 1 && bm.y >= bd.b - 1 && bm.y - bd.b < 14,
+    JSON.stringify({ box: [bdeg.cx, bdeg.cy], wheel: [bd.x + bd.w / 2, bd.y + bd.h / 2], plumb: [plumbR.x, plumbR.y] }));
+  {
+    const labs = await page.evaluate(() => [...document.querySelectorAll('.cut-dial-label')].map(l => { const r = l.getBoundingClientRect(), w = l.parentElement.getBoundingClientRect(); return { t: l.textContent, dx: r.left - w.left, dy: r.top - w.top, w: r.width }; }));
+    check('the three wheel names sit at the wheels\' top-left corners, and Rotate is just "Rotate"', labs.map(l => l.t).join() === 'Mitre,Rotate,Bevel' && labs.every(l => l.dx >= 0 && l.dx < 6 && l.dy >= 0 && l.dy < 6 && l.w < 45), JSON.stringify(labs));
+    const stat = await page.evaluate(() => { const e = document.getElementById('cutter-status'); return { text: e.textContent, shown: e.offsetParent !== null }; });
+    check('no instructions on the card: the status line is empty and takes no room', stat.text === '' && !stat.shown, JSON.stringify(stat));
+    const hints = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools .hint')].filter(e => e.offsetParent !== null).map(e => e.textContent));
+    check('...and no hint lines under the wheels', hints.length === 0, JSON.stringify(hints));
+  }
   check('the Rotate piece number is the CENTRE of its wheel (no box under it): inside the rail, on its middle', Math.abs(rdeg.cx - (rd.x + rd.w / 2)) < 3 && Math.abs(rdeg.cy - (rd.y + rd.h / 2)) < 3 && rdeg.w < rd.w * 0.7 && rdeg.y < rm.y,
     JSON.stringify({ box: [rdeg.cx, rdeg.cy], wheel: [rd.x + rd.w / 2, rd.y + rd.h / 2] }));
   check('nothing sticks out of the card', rp.r < 440 && sq.r < rd.x + 8, 'right edge ' + rp.r);
@@ -105,15 +119,15 @@ withApp(async (page, logs) => {
   console.log('the Mitre 90 button');
   {
     const r90 = await R('btn-cut-miter-90');
-    check('90 sits under Square, the same width and in line with it', r90.y >= sq.b - 1 && r90.y - sq.b < 12 && Math.abs(r90.x - sq.x) < 1 && Math.abs(r90.w - sq.w) < 1.5, JSON.stringify({ squareBottom: sq.b, ninetyTop: r90.y, x: [sq.x, r90.x] }));
-    check('...and is beside the Mitre box, inside the Mitre column', r90.x > mdeg.r - 2 && r90.r <= rd.x + 4, JSON.stringify({ boxRight: mdeg.r, ninety: [r90.x, r90.r], rotateWheel: rd.x }));
+    check('90 sits beside Square, in line with it and the same width', Math.abs(r90.cy - sq.cy) < 2 && r90.x >= sq.r - 1 && Math.abs(r90.w - sq.w) < 1.5, JSON.stringify({ square: [sq.x, sq.r, sq.cy], ninety: [r90.x, r90.r, r90.cy] }));
+    check('...inside the Mitre column', r90.r <= rd.x + 4, JSON.stringify({ ninetyRight: r90.r, rotateWheel: rd.x }));
     const n0 = await page.evaluate(() => getCutPlaneLocal(getActiveModel()).normalWorld.toArray());
     await page.click('#btn-cut-miter-90');
     await page.waitForTimeout(100);
     const n1 = await page.evaluate(() => getCutPlaneLocal(getActiveModel()).normalWorld.toArray());
-    const mit = await page.evaluate(() => ({ deg: state.cutMiterDeg, box: document.getElementById('cut-miter-deg').value, wheel: document.getElementById('cut-dial-deg').textContent }));
+    const mit = await page.evaluate(() => ({ deg: state.cutMiterDeg, box: document.getElementById('cut-miter-deg').value, wheel: document.getElementById('cut-miter-deg').value }));
     const dot0 = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2];
-    check('pressing 90 sets the mitre to 90 (box and wheel too)', mit.deg === 90 && mit.box === '90' && mit.wheel === '90°', JSON.stringify(mit));
+    check('pressing 90 sets the mitre to 90 (the wheel centre reads 90°)', mit.deg === 90 && mit.box === '90°', JSON.stringify(mit));
     check('...and the blade has turned a quarter-turn: its normal is square to what it was', Math.abs(dot0) < 1e-6, 'n.n0 = ' + dot0.toFixed(6));
     await page.click('#btn-cut-square');
     await page.waitForTimeout(100);
@@ -158,6 +172,34 @@ withApp(async (page, logs) => {
     check('leaving the box with nothing typed turns nothing and puts the degree sign back', Math.abs((await heading()) - 136.9) < 0.051 && (await page.inputValue('#cut-rotate-deg')) === '136.9°');
     await page.fill('#cut-rotate-deg', '90'); await page.press('#cut-rotate-deg', 'Tab'); await page.waitForTimeout(150);   // back to 90 for what follows
     check('and back at 90 for the gates below', (await heading()) === 90);
+  }
+
+  console.log('the Mitre and Bevel centres are boxes too');
+  {
+    const mi = await R('cut-miter-deg');
+    await page.mouse.click(mi.cx, mi.cy); await page.waitForTimeout(120);
+    const f = await page.evaluate(() => { const e = document.getElementById('cut-miter-deg'); return { active: document.activeElement === e, sel: e.value.slice(e.selectionStart, e.selectionEnd), v: e.value }; });
+    check('a click in the Mitre centre selects its reading', f.active && f.sel === f.v && f.v === '0°', JSON.stringify(f));
+    await page.keyboard.type('30'); await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+    check('typing 30 + Enter sets the mitre to 30 and the centre reads 30°', (await page.evaluate(() => state.cutMiterDeg)) === 30 && (await page.inputValue('#cut-miter-deg')) === '30°');
+    check('...and the wheel handle turned with it', /rotate\(30 /.test(await page.evaluate(() => document.getElementById('cut-dial-turn').getAttribute('transform'))));
+    await page.mouse.click(mi.cx, mi.cy); await page.waitForTimeout(80);
+    await page.keyboard.type('77'); await page.keyboard.press('Escape'); await page.waitForTimeout(120);
+    check('Esc puts the Mitre reading back', (await page.evaluate(() => state.cutMiterDeg)) === 30 && (await page.inputValue('#cut-miter-deg')) === '30°');
+    await page.mouse.click(mi.cx, mi.cy); await page.waitForTimeout(80);
+    await page.keyboard.press('ArrowUp'); await page.keyboard.press('Shift+ArrowDown'); await page.waitForTimeout(100);
+    check('Up / Down step the mitre 1 degree (Shift 0.1): 30 -> 31 -> 30.9', Math.abs((await page.evaluate(() => state.cutMiterDeg)) - 30.9) < 0.051 && (await page.inputValue('#cut-miter-deg')) === '30.9°');
+    await page.keyboard.press('Tab'); await page.click('#btn-cut-square'); await page.waitForTimeout(100);
+    check('Square takes it back to 0°', (await page.evaluate(() => state.cutMiterDeg)) === 0 && (await page.inputValue('#cut-miter-deg')) === '0°');
+    const bv = await R('cut-bevel-deg');
+    await page.mouse.click(bv.cx, bv.cy); await page.waitForTimeout(120);
+    await page.keyboard.type('-12.5'); await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+    check('typing -12.5 in the Bevel centre sets the bevel and it reads -12.5°', (await page.evaluate(() => state.cutBevelDeg)) === -12.5 && (await page.inputValue('#cut-bevel-deg')) === '-12.5°', String(await page.evaluate(() => state.cutBevelDeg)));
+    await page.click('#btn-cut-bevel-plus'); await page.waitForTimeout(100);
+    check('the Bevel + button steps it and the centre follows (-11.5°)', (await page.inputValue('#cut-bevel-deg')) === '-11.5°');
+    await page.mouse.click(bv.cx, bv.cy); await page.waitForTimeout(80);
+    await page.keyboard.type('0'); await page.keyboard.press('Enter'); await page.waitForTimeout(100);
+    check('and 0 puts it back to plumb', (await page.evaluate(() => state.cutBevelDeg)) === 0 && (await page.inputValue('#cut-bevel-deg')) === '0°');
   }
 
   console.log('drag');
