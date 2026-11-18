@@ -60,14 +60,16 @@
     ['pencil', 'Pencil', 'P', 'Press and drag to draw freehand. It is smoothed when you let go; end where you began to close it.'],
     ['line', 'Line', 'L', 'Click point after point; double-click or Enter ends it, a click on the first point closes it. Shift: 15° steps.'],
     ['rect', 'Rectangle', 'R', 'Drag a rectangle. Shift: a square.'],
-    ['ellipse', 'Ellipse', 'E', 'Drag an ellipse. Shift: a circle.']
+    ['ellipse', 'Ellipse', 'E', 'Drag an ellipse. Shift: a circle.'],
+    ['area', 'Fill area', 'B', 'Click inside a space the traced walls (and any lines you drew) close round: it becomes a fill of exactly that space, grown a little into the walls so a weld bites them. Open to the outside? Draw a line across its mouth first.']
   ];
   var ICON = {
     select: 'M5 3l14 8-6 2 4 7-3 1-4-7-5 4z',
     pencil: 'M4 20l1-5L16 4l4 4L9 19zM14 6l4 4',
     line: 'M4 18L10 8l5 6 5-9',
     rect: 'M4 6h16v12H4z',
-    ellipse: 'M12 6c5 0 8 3 8 6s-3 6-8 6-8-3-8-6 3-6 8-6z'
+    ellipse: 'M12 6c5 0 8 3 8 6s-3 6-8 6-8-3-8-6 3-6 8-6z',
+    area: 'M5 11l7-7 7 7-7 7zM19 15c0 0 2 2.5 2 4a2 2 0 0 1-4 0c0-1.5 2-4 2-4zM5 11h14'
   };
 
   var root = null, cv = null, ctx = null;
@@ -87,10 +89,25 @@
       : 'Line assist Auto: straight where it is straight, a true arc where it curves, smooth where it does neither.');
   }
   /* the traced walls' own directions, for the assist to square up to */
+  /* The traced outline with its tessellation merged away: a straight wall that came in as a hundred little edges is
+     one edge again (to 0.02 mm), so its corners are real corners and its direction is one direction. */
+  var simpleCache = { t: null, loops: null };
+  function traceSimple() {
+    var T = sketch.trace;
+    if (!T) return [];
+    if (simpleCache.t !== T) {
+      simpleCache.t = T;
+      simpleCache.loops = T.loops.map(function (L) {
+        var r = SK.rdp(L.concat([L[0]]), 0.02).slice(0, -1);
+        return r.length >= 3 ? r : L;
+      });
+    }
+    return simpleCache.loops;
+  }
   function traceDirs() {
     var T = sketch.trace, out = [];
     if (!T) return null;
-    T.loops.forEach(function (L) {
+    traceSimple().forEach(function (L) {
       for (var i = 0; i < L.length; i++) {
         var a = L[i], b = L[(i + 1) % L.length];
         if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 2) continue;
@@ -185,7 +202,7 @@
   function byId(id) { return sketch.objects.find(function (o) { return o.id === id; }) || null; }
   function selected() { return D ? D.sel.map(byId).filter(Boolean) : []; }
   function nextName(kind) {
-    var base = kind === 'fill' ? 'Free Fill ' : 'Free Line ', n = 1;
+    var base = kind === 'fill' ? 'Free Fill ' : kind === 'guide' ? 'Guide ' : 'Free Line ', n = 1;
     sketch.objects.forEach(function (o) { var m = new RegExp('^' + base + '(\\d+)$').exec(o.name); if (m) n = Math.max(n, +m[1] + 1); });
     return base + n;
   }
@@ -203,6 +220,7 @@
   /* Each object's outline check, kept until the object changes: a red object and the reason. */
   var checked = new WeakMap();
   function problem(o) {
+    if (o.kind === 'guide') return '';                                // drawn to snap and fill to; never built
     var key = JSON.stringify([o.kind, o.closed, o.width, o.pts]), c = checked.get(o);
     if (c && c.key === key) return c.bad;
     var r = SK.outlines(o);
@@ -300,7 +318,12 @@
     sketch.objects.forEach(function (o) {
       var sel = D.sel.indexOf(o.id) >= 0, bad = problem(o);
       var edge = bad ? COL.bad : (sel ? COL.sel : COL.line);
-      if (o.kind === 'fill') {
+      if (o.kind === 'guide') {
+        ctx.save();
+        pathOf(o.pts, o.closed);
+        ctx.setLineDash([6, 4]); ctx.lineWidth = sel ? 2 : 1.5; ctx.strokeStyle = sel ? COL.sel : '#e879f9';
+        ctx.stroke(); ctx.restore();
+      } else if (o.kind === 'fill') {
         pathOf(o.pts, true);
         ctx.fillStyle = bad ? 'rgba(248,113,113,0.3)' : (sel ? 'rgba(163,230,53,0.3)' : COL.fill);
         ctx.fill('evenodd');
@@ -313,6 +336,17 @@
         ctx.lineWidth = 1; ctx.strokeStyle = edge; ctx.stroke();
       }
     });
+    /* what the Line tool's point is snapped to */
+    if (D.hint && D.tool === 'line') {
+      var hs = toScreen(D.hint.at);
+      ctx.save();
+      ctx.strokeStyle = '#facc15'; ctx.fillStyle = 'rgba(250,204,21,0.25)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(hs[0], hs[1] - 6); ctx.lineTo(hs[0] + 6, hs[1]); ctx.lineTo(hs[0], hs[1] + 6); ctx.lineTo(hs[0] - 6, hs[1]); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.font = '11px ' + getComputedStyle(document.body).fontFamily; ctx.fillStyle = '#facc15';
+      ctx.fillText(D.hint.label, hs[0] + 10, hs[1] - 8);
+      ctx.restore();
+    }
     /* the stroke being drawn */
     if (D.draft && D.draft.pts.length) {
       ctx.save();
@@ -453,10 +487,85 @@
     return [Math.round(p[0] / s) * s, Math.round(p[1] / s) * s];
   }
   /* onto the traced outline: a corner within 10 px, else the nearest point of an edge within 8 px */
+  /* ---------------------------------------------------------------- the Line tool's snaps
+     What a click (or the point following the pointer) lands on, first that applies:
+       corner     a traced corner, or a point of something drawn, within 10 px;
+       meets      on a line held to a wall's angle (below), where it crosses a traced edge or a drawn line, within
+                  24 px of the pointer - the point that stops exactly on the wall;
+       angle      from the last point, along a traced wall's own direction or square to it (within 4 degrees;
+                  with Shift, every 15 degrees too, within 8);
+       edge       the nearest point of a traced edge within 8 px;
+       grid       Snap 0.5 mm, when it is on.
+     D.hint says which, and is drawn at the point. */
+  function snapTargets() {
+    var segs = [], pts = [];
+    if (sketch.trace && D.snapEdge) traceSimple().forEach(function (L) { L.forEach(function (p, i) { pts.push(p); segs.push([p, L[(i + 1) % L.length]]); }); });
+    sketch.objects.forEach(function (o) {
+      var P = o.pts, closed = o.kind === 'fill' || o.closed;
+      P.forEach(function (p, i) { pts.push(p); if (closed || i < P.length - 1) segs.push([p, P[(i + 1) % P.length]]); });
+    });
+    return { segs: segs, pts: pts };
+  }
+  function lineSnap(prev, p, shift) {
+    var T = snapTargets(), px = 1 / D.view.z, best = null, bd = 10 * px;
+    T.pts.forEach(function (q) { var d = Math.hypot(p[0] - q[0], p[1] - q[1]); if (d < bd) { bd = d; best = q; } });
+    if (best) return { p: best.slice(), label: 'corner' };
+    if (prev) {
+      var dx = p[0] - prev[0], dy = p[1] - prev[1], L = Math.hypot(dx, dy);
+      if (L > 4 * px) {
+        var a = Math.atan2(dy, dx) * 180 / Math.PI, cand = [], dirs = traceDirs() || [];
+        dirs.forEach(function (x) { cand.push([x, 'along the wall'], [x + 90, 'square to the wall']); });
+        if (shift) for (var k = 0; k < 12; k++) cand.push([k * 15, (k * 15) + '°']);
+        var pick = null, pd = shift ? 8 : 4;
+        cand.forEach(function (c) {
+          var dd = ((a - c[0]) % 180 + 180) % 180, diff = Math.min(dd, 180 - dd);   // the angle to the line through c, either way
+          if (diff < pd) { pd = diff; pick = c; }
+        });
+        if (pick) {
+          var r = pick[0] * Math.PI / 180, u = [Math.cos(r), Math.sin(r)];
+          if (u[0] * dx + u[1] * dy < 0) u = [-u[0], -u[1]];
+          var t = u[0] * dx + u[1] * dy, on = [prev[0] + u[0] * t, prev[1] + u[1] * t];
+          /* where that line crosses an edge, near the pointer: it stops exactly on the wall */
+          var hit = null, hd = 24 * px;
+          T.segs.forEach(function (sg) {
+            var a0 = sg[0], b0 = sg[1], ex = b0[0] - a0[0], ey = b0[1] - a0[1], den = u[0] * ey - u[1] * ex;
+            if (Math.abs(den) < 1e-9) return;
+            var wx = a0[0] - prev[0], wy = a0[1] - prev[1], tt = (wx * ey - wy * ex) / den, ss = (wx * u[1] - wy * u[0]) / den;
+            if (tt <= 1e-6 || ss < -1e-9 || ss > 1 + 1e-9) return;
+            var X = [prev[0] + u[0] * tt, prev[1] + u[1] * tt], d = Math.hypot(X[0] - on[0], X[1] - on[1]);
+            if (d < hd) { hd = d; hit = X; }
+          });
+          if (hit) return { p: hit, label: 'meets the edge, ' + pick[1] };
+          return { p: on, label: pick[1] };
+        }
+      }
+    }
+    var e = edgeSnap(p);
+    if (e) return { p: e, label: 'on the edge' };
+    if (D.snap) return { p: [Math.round(p[0] / 0.5) * 0.5, Math.round(p[1] / 0.5) * 0.5], label: 'grid' };
+    return { p: p.slice(), label: '' };
+  }
+
+  /* ---------------------------------------------------------------- Fill area */
+  function fillArea(p) {
+    var bounds = [];
+    if (sketch.trace) sketch.trace.loops.forEach(function (L) { bounds.push({ pts: L, closed: true }); });
+    sketch.objects.forEach(function (o) { bounds.push({ pts: o.pts, closed: o.kind === 'fill' || o.closed, guide: o.kind === 'guide' }); });
+    var bite = parseFloat($('dr-bite').value);
+    if (!(bite >= 0)) bite = 0.3;
+    var r = SK.regionAt(p, bounds, { bite: bite });
+    if (!r.ok) { say(r.reason, true); return null; }
+    var n = 1;
+    sketch.objects.forEach(function (o) { var m = /^Fill area (\d+)$/.exec(o.name); if (m) n = Math.max(n, +m[1] + 1); });
+    var o = addObject({ kind: 'fill', closed: true, width: defaults.width, pts: r.pts, name: 'Fill area ' + n });
+    say(o.name + ': ' + f2(r.area) + ' mm², grown ' + f2(bite) + ' mm into the walls round it so the weld bites them. Ctrl+Z takes it off.');
+    return o;
+  }
+
   function edgeSnap(p) {
     if (!D.snapEdge || !sketch.trace) return null;
     var best = null, bd = 8 / D.view.z, cd = 10 / D.view.z, corner = null;
-    sketch.trace.loops.forEach(function (L) {
+    traceSimple().forEach(function (L) {
       for (var i = 0; i < L.length; i++) {
         var a = L[i], b = L[(i + 1) % L.length], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
         var dc = Math.hypot(p[0] - a[0], p[1] - a[1]);
@@ -558,14 +667,16 @@
     if (D.tool === 'pencil') {
       D.draft = { kind: 'pencil', pts: [p], raw: [p] };
       D.drag = { kind: 'pencil' };
+    } else if (D.tool === 'area') {
+      fillArea(p);
     } else if (D.tool === 'line') {
-      var q = snapMm(p);
-      if (!D.draft || D.draft.kind !== 'line') D.draft = { kind: 'line', pts: [q, q] };
+      if (!D.draft || D.draft.kind !== 'line') { var q0 = lineSnap(null, p, e.shiftKey).p; D.draft = { kind: 'line', pts: [q0, q0.slice()] }; }
       else {
+        var prev0 = D.draft.pts[D.draft.pts.length - 2], sn = lineSnap(prev0, p, e.shiftKey), q = sn.p;
         var first = D.draft.pts[0], close = D.draft.pts.length > 3 && Math.hypot(toScreen(first)[0] - toScreen(q)[0], toScreen(first)[1] - toScreen(q)[1]) < 9;
         if (close) { D.draft.pts.pop(); finishLine(true); return; }
-        D.draft.pts[D.draft.pts.length - 1] = e.shiftKey ? angleSnap(D.draft.pts[D.draft.pts.length - 2], q) : q;
-        D.draft.pts.push(D.draft.pts[D.draft.pts.length - 1].slice());
+        D.draft.pts[D.draft.pts.length - 1] = q;
+        D.draft.pts.push(q.slice());
       }
     } else if (D.tool === 'rect' || D.tool === 'ellipse') {
       var s = snapMm(p);
@@ -640,9 +751,11 @@
       D.sel = dr.add ? dr.base.concat(inBox.filter(function (id) { return dr.base.indexOf(id) < 0; })) : inBox;
       sync(); draw(); return;
     }
-    if (D.draft && D.draft.kind === 'line') {
-      var q = snapMm(p), prev = D.draft.pts[D.draft.pts.length - 2];
-      D.draft.pts[D.draft.pts.length - 1] = e.shiftKey ? angleSnap(prev, q) : q;
+    D.hint = null;
+    if (D.tool === 'line') {
+      var lprev = D.draft && D.draft.kind === 'line' ? D.draft.pts[D.draft.pts.length - 2] : null, ls = lineSnap(lprev, p, e.shiftKey);
+      if (lprev) D.draft.pts[D.draft.pts.length - 1] = ls.p;
+      D.hint = ls.label ? { at: ls.p, label: ls.label } : null;
       draw();
     }
     cv.style.cursor = D.space ? 'grab' : (D.tool === 'select' ? (hitObject(p) ? 'move' : 'default') : 'crosshair');
@@ -700,7 +813,8 @@
     var clean = [];
     pts.forEach(function (p) { if (!clean.length || Math.hypot(p[0] - clean[clean.length - 1][0], p[1] - clean[clean.length - 1][1]) > 1e-6) clean.push(p); });
     if (clean.length < (closed ? 3 : 2)) { draw(); return; }
-    addObject({ kind: closed ? defaults.kind : 'line', closed: closed && defaults.kind === 'line', width: defaults.width, pts: clean });
+    var k = closed ? defaults.kind : (defaults.kind === 'fill' ? 'line' : defaults.kind);
+    addObject({ kind: k, closed: closed && k !== 'fill', width: defaults.width, pts: clean });
   }
 
   function onDbl(e) {
@@ -744,7 +858,7 @@
       remember(); moveBy(dx, dy); return;
     }
     if (mod) return;
-    var map = { v: 'select', p: 'pencil', l: 'line', r: 'rect', e: 'ellipse' };
+    var map = { v: 'select', p: 'pencil', l: 'line', r: 'rect', e: 'ellipse', b: 'area' };
     if (map[k.toLowerCase()]) { setTool(map[k.toLowerCase()]); return; }
     if (k.toLowerCase() === 'f') fit();
   }
@@ -790,7 +904,7 @@
         if (o.kind === kind) return;
         o.kind = kind;
         if (kind === 'fill') o.closed = true;
-        o.name = o.name.replace(/^Free (Line|Fill)/, kind === 'fill' ? 'Free Fill' : 'Free Line');
+        o.name = o.name.replace(/^(Free Line|Free Fill|Guide)/, kind === 'fill' ? 'Free Fill' : kind === 'guide' ? 'Guide' : 'Free Line');
       });
       changed(true);
     } else sync();
@@ -850,7 +964,7 @@
       var bad = problem(o);
       var row = h('button', { type: 'button', cls: 'dr-obj' + (D.sel.indexOf(o.id) >= 0 ? ' is-on' : '') + (bad ? ' is-bad' : ''), 'data-dr-obj': String(o.id), title: bad || (o.name + ' - click to pick, Shift-click to add') }, [
         thumb(o),
-        h('span', { cls: 'dr-obj-text' }, [h('span', { cls: 'dr-obj-name', text: o.name }), h('span', { cls: 'dr-obj-kind', text: (o.kind === 'fill' ? 'Drawing Fill' : 'Drawing Line' + (o.closed ? ' · ring' : '')) + (o.height != null ? ' · ' + f2(o.height) + ' mm' : '') })])
+        h('span', { cls: 'dr-obj-text' }, [h('span', { cls: 'dr-obj-name', text: o.name }), h('span', { cls: 'dr-obj-kind', text: (o.kind === 'fill' ? 'Drawing Fill' : o.kind === 'guide' ? 'Guide · not built' : 'Drawing Line' + (o.closed ? ' · ring' : '')) + (o.height != null ? ' · ' + f2(o.height) + ' mm' : '') })])
       ]);
       row.addEventListener('click', function (e) {
         if (e.shiftKey) { var i = D.sel.indexOf(o.id); if (i >= 0) D.sel.splice(i, 1); else D.sel.push(o.id); }
@@ -896,7 +1010,8 @@
 
     var kindSeg = h('div', { cls: 'dr-seg', role: 'group', 'aria-label': 'Process type' }, [
       h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-kind': 'line', id: 'dr-kind-line', text: 'Drawing Line', title: 'The stroke given a Width: a bead, a rib, a ring standing out of the face' }),
-      h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-kind': 'fill', id: 'dr-kind-fill', text: 'Drawing Fill', title: 'The area the stroke goes round, solid' })
+      h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-kind': 'fill', id: 'dr-kind-fill', text: 'Drawing Fill', title: 'The area the stroke goes round, solid' }),
+      h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-kind': 'guide', id: 'dr-kind-guide', text: 'Guide', title: 'A construction line: drawn and snapped to, never built. Draw one across the mouth of a space, then Fill area stops exactly on it - a straight face, flush with the wall ends' })
     ]);
     var top = h('div', { cls: 'dr-top' }, [
       group('Edit', [btn('dr-undo', '↶', 'Undo (Ctrl+Z)'), btn('dr-redo', '↷', 'Redo (Ctrl+Shift+Z)')]),
@@ -929,6 +1044,7 @@
         btn('dr-trace-go', 'Trace', 'Lay this piece\'s outline, seen from above, under the sheet - in plate millimetres, so Connect puts the drawing exactly where it is drawn'),
         btn('dr-trace-clear', 'Clear', 'Take the traced outline off the sheet')
       ]),
+      h('div', { cls: 'dr-row' }, [field('dr-bite', 'Fill area grows', 'How far a Fill area reaches into the walls round it, mm - so a weld bites solid material instead of sharing a face (a seam the weld cannot close). Keep it under the walls\' thickness', 'mm', { min: '0', step: '0.05', value: '0.3' })]),
       h('label', { cls: 'dr-check', title: 'Line points, shape corners and the ends of a pencil stroke land on the traced outline when near it' }, [h('input', { type: 'checkbox', id: 'dr-snap-edge' }), h('span', { text: ' Snap to the traced edges' })]),
       h('div', { cls: 'dr-side-title', text: 'Drawing' }),
       field('dr-sheet-height', 'Height', 'How far the whole drawing stands out of the face it is put on, mm (an object with its own height keeps it)', 'mm', { min: String(SK.MIN_HEIGHT) }),
@@ -1108,6 +1224,8 @@
     screenOf: function (p) { if (!D) return null; var r = cv.getBoundingClientRect(), s = toScreen(p); return [r.left + s[0], r.top + s[1]]; },
     trace: function (id, at) { if (!D) return { ok: false, reason: 'the editor is shut' }; $('dr-trace-piece').value = String(id); $('dr-trace-at').value = at == null ? '' : String(at); return { ok: doTrace(), trace: sketch.trace }; },
     assist: function (m) { if (m) setAssist(m); return assistMode; },
+    fillAt: function (p) { if (!D) return null; return fillArea(p); },
+    snapAt: function (prev, p, shift) { return D ? lineSnap(prev, p, !!shift) : null; },
     info: function () { return D ? { tool: D.tool, sel: D.sel.slice(), objects: sketch.objects.length, kind: defaults.kind, view: clone(D.view), history: D.history.length } : null; }
   };
 

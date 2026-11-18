@@ -190,6 +190,24 @@ console.log('line assist');
   check('the assisted U still builds as a line', built.ok, built.reason);
 }
 
+console.log('fill area');
+{
+  const U = [[0, 0], [20, 0], [20, 10], [18, 10], [18, 2], [2, 2], [2, 10], [0, 10]];
+  const open = SK.regionAt([10, 5], [{ pts: U, closed: true }]);
+  check('a channel open at its mouth is refused, in words', !open.ok && open.open && /open to the outside/.test(open.reason), open.reason);
+  const g = { pts: [[2, 10], [18, 10]], guide: true };
+  const r = SK.regionAt([10, 5], [{ pts: U, closed: true }, g], { bite: 0.3 });
+  const b = r.ok && SK.bounds([{ kind: 'fill', pts: r.pts }]);
+  check('closed by a guide: the inside, grown 0.3 into the walls, 0.02 past the guide', r.ok && near(b.x0, 1.7, 0.03) && near(b.x1, 18.3, 0.03) && near(b.y0, 1.7, 0.03) && near(b.y1, 10 + SK.FLUSH_GAP, 1e-9), b && JSON.stringify([b.x0, b.x1, b.y0, b.y1]));
+  check('...the side along the guide is one straight edge, and nothing wraps round the wall ends', r.ok && r.pts.filter(p => near(p[1], 10.02, 1e-9)).length === 2 && r.pts.every(p => p[1] <= 10.02 + 1e-9) && !SK.selfCross(r.pts, true));
+  const plain = SK.regionAt([10, 5], [{ pts: U, closed: true }, { pts: [[2, 10], [18, 10]] }], { bite: 0.3 });
+  check('closed by a drawn line instead: the bite crosses it (a line is built; a guide is not)', plain.ok && SK.bounds([{ kind: 'fill', pts: plain.pts }]).y1 > 10.2);
+  const onLine = SK.regionAt([10, 10], [{ pts: U, closed: true }, g]);
+  check('a click on a line is refused', !onLine.ok);
+  const built = SK.solids({ height: 2, objects: [{ kind: 'fill', pts: r.pts }, { kind: 'guide', pts: g.pts }] });
+  check('a guide is never built: one part, and the drawing\'s box is the fill\'s', built.ok && built.parts.length === 1 && near(built.box.h, b.h, 1e-9));
+}
+
 console.log('normalize / describe');
 {
   const n = SK.normalize({ height: 2, objects: [{ kind: 'fill', pts: [[0, 0], [1, 0], [0, 1]] }, { kind: 'line', pts: [[0, 0]] }, { kind: 'line', id: 7, pts: [[0, 0], [3, 0]] }] });

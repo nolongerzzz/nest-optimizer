@@ -558,6 +558,24 @@
     return n ? n + ' painted face(s) on ' + names.join(', ') + ' - the boolean replaces every triangle on a piece and cannot hold a face still. Clear the paint first, or add the drawing as its own piece.' : '';
   }
 
+  /* The boolean's result, tidied by Check & repair's own pass (NSO_Repair.commit): where a drawing meets a piece's
+     curved or filleted walls the union can leave a handful of zero-area triangles whose corners lie under a ten
+     thousandth of a millimetre apart - closed by the kernel's own count, non-manifold by mesh_validate.py's (weld
+     1e-4). Measured on the owner's Thicken output: 6 such triangles, removed, nothing else changed. Kept only when it
+     changed something and the volume did not move (1e-6 of it). -> the soup to commit, and the words for it. */
+  function tidy(soup) {
+    if (typeof NSO_Repair === 'undefined' || !NSO_Repair.commit) return { soup: soup, words: '' };
+    var r;
+    try { r = NSO_Repair.commit(soup, {}); } catch (e) { return { soup: soup, words: '' }; }
+    if (!r || !r.ok || !r.report || !r.report.applied || !r.rawTris) return { soup: soup, words: '' };
+    var v0 = Math.abs(K.soupVolume(soup)), v1 = Math.abs(K.soupVolume(r.rawTris));
+    if (!(Math.abs(v1 - v0) <= 1e-6 * Math.max(1, v0))) return { soup: soup, words: '' };
+    var gone = (r.report.stages || []).filter(function (st) { return st.applied; }).map(function (st) {
+      return st.name === 'degenerate' ? st.removed + ' zero-area triangle' + (st.removed === 1 ? '' : 's') : st.name;
+    });
+    return { soup: r.rawTris, words: gone.length ? 'tidied ' + gone.join(', ') : '' };
+  }
+
   /* one piece: Step / Boss's union and commit - the piece keeps its identity */
   async function weldOne(P, tool) {
     var piece = L.host.piece, pl = piece.placed;
@@ -572,9 +590,11 @@
       noJoin: function (name) { return 'the drawing would not be joined to ' + name + ' there - lift it less, or move it onto the face'; }
     });
     if (!w.ok) return w;
+    var td = tidy(w.soup);
+    w.soup = td.soup;
     var r = { ok: false, reason: 'the commit was rejected' };
     await K.asOneStep('Undo: Draw > Connect reverted', async function () {
-      if (K.commitShare(w, 'drawConnectReplace')) r = { ok: true, text: 'drawing welded into ' + K.nameOf(piece) + (w.raise > 1e-6 ? ' (raised ' + f2(w.raise) + ' mm: it reaches under the plate)' : '') };
+      if (K.commitShare(w, 'drawConnectReplace')) r = { ok: true, tidied: td.words, text: 'drawing welded into ' + K.nameOf(piece) + (w.raise > 1e-6 ? ' (raised ' + f2(w.raise) + ' mm: it reaches under the plate)' : '') + (td.words ? ' (' + td.words + ')' : '') };
     });
     return r;
   }
@@ -594,13 +614,15 @@
       if (vu > vp + vAcc - 1e-4) return { ok: false, reason: 'the drawing does not reach ' + K.nameOf(p) + ' - move it so it bites both, or weld only one' };
       acc = u.soup; vAcc = vu;
     }
+    var tdm = tidy(acc);
+    acc = tdm.soup;
     var stats = typeof NSO_edgeStats === 'function' ? NSO_edgeStats(acc) : null;
     if (stats && (stats.open > 0 || stats.nm > 0)) return { ok: false, reason: 'the result came back open (' + stats.open + ' open, ' + stats.nm + ' non-manifold edges)' };
     var models = P.touched.map(function (p) { return state.models.find(function (x) { return x && x.id === p.id; }); });
     var names = P.touched.map(function (p) { return K.nameOf(p); });       // before they leave the plate
     var c = NSO_connectCommit(toZUp(acc), models, 'drawing');
     if (!c.ok) return c;
-    return { ok: true, text: 'drawing welded - ' + names.join(' and ') + ' are one piece', id: c.id };
+    return { ok: true, tidied: tdm.words, text: 'drawing welded - ' + names.join(' and ') + ' are one piece' + (tdm.words ? ' (' + tdm.words + ')' : ''), id: c.id };
   }
 
   /* cut: into every piece it reaches; the host must be cut */
@@ -614,6 +636,7 @@
         if (p === L.host.piece) return w;
         continue;                                          // its box met the drawing's, the drawing does not
       }
+      w.soup = tidy(w.soup).soup;
       shares.push(w);
     }
     if (!shares.length) return { ok: false, reason: 'nothing would be cut' };

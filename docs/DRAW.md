@@ -16,7 +16,7 @@ DRAW
 | geometry | `nso_sketch.js` (`window.NSO_Sketch`, headless) — outlines, solids |
 | editor | `app-draw-editor.js` (`window.NSO_DrawEditor`) |
 | connect | `app-draw-connect.js` — a SOLO mode on the Assemble editor's stage (`NSO_AsmEditor.mode('drawconnect')`), as Step / Boss is |
-| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`), `npm run draw:assist` (`tools/nso_draw_assist_drive_check.js`), `npm run draw:trace` (`tools/nso_draw_trace_drive_check.js`: trace, snap, where drawn, stretch, weld; `TRACE_STL=` / `TRACE_BLOCK=` run it on a piece of your own); screenshots to `tools/draw-out/` |
+| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`), `npm run draw:assist` (`tools/nso_draw_assist_drive_check.js`), `npm run draw:fill-area` (`tools/nso_draw_fill_area_drive_check.js`), `npm run draw:trace` (`tools/nso_draw_trace_drive_check.js`: trace, snap, where drawn, stretch, weld; `TRACE_STL=` / `TRACE_BLOCK=` run it on a piece of your own); screenshots to `tools/draw-out/` |
 
 ## Why
 
@@ -71,6 +71,47 @@ changes until **Connect** or **Add to plate**. The drawing is kept in this
 browser (`localStorage` `nso.sketch.v1`, a convenience).
 
 **Add to plate** makes the drawing a piece of its own, flat on the plate.
+
+### Furring a space solid: Guide + Fill area
+
+The owner's case (2026-11-18): fill a channel of a bent sheet solid, with straight
+faces meeting the walls — by hand on a grid that the walls run 10° off, impossible;
+by crop-and-glue, a seam that would not seal (their glued attempt: 6 non-manifold
+edges, 1 068 self-intersections).
+
+1. **Guide** (Process type): a construction line — drawn dashed, snapped to, never
+   built. With the **Line tool**, draw one across the mouth of the space.
+2. **Fill area** (tool, B): click inside the space. It becomes a fill of exactly that
+   space — found on a fine grid (≤ 0.1 mm), flooded out to the traced walls, drawn
+   lines and guides — **grown 0.3 mm into the walls** (*Fill area grows*), so a weld
+   bites solid material instead of sharing the wall's face. It **stops on a guide**:
+   the bite never crosses one (nor wraps round the wall ends beside it), and that
+   side is put exactly on the guide's line, stood **0.02 mm** past it (a face flush
+   with the wall ends is coplanar with them: on a channel closed flush the weld left
+   2 non-manifold edges; 0.02 out or in, none). A space open to the outside, or a
+   click outside everything, is refused in words.
+3. **Connect → Piece height → Weld it in.**
+
+#### The Line tool's snaps
+
+First that applies: a **corner** (a traced corner, or a point of something drawn,
+within 10 px); on a line held to a wall's angle, where it **meets** a traced edge or
+a drawn line, within 24 px of the pointer — the point that stops exactly on the
+wall; the **angle** — along a traced wall or square to it, within 4° (Shift: every
+15° too, within 8°); the nearest point of an **edge** within 8 px; the 0.5 mm grid.
+A yellow diamond and a word show which. The traced outline is simplified first
+(collinear tessellation merged to 0.02 mm) so a long wall's corners are its real
+corners and its direction one direction.
+
+#### A tidy after the weld
+
+Where a drawing meets curved or filleted walls the union can leave a few zero-area
+triangles whose corners lie under 1e-4 mm apart: closed and manifold by the kernel's
+own count, non-manifold by `mesh_validate.py` at its 1e-4 weld (clean at 1e-5).
+Draw > Connect runs Check & repair's own pass (`NSO_Repair.commit`) on each weld or
+cut, and keeps it only when it changed something and the volume did not move; the
+status says so (`tidied 6 zero-area triangles`). Measured on the owner's
+`thicken_oneside.stl`, its middle channel filled: 6 → 0, volume unchanged.
 
 ### Line assist
 

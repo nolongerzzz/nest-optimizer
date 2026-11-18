@@ -91,6 +91,7 @@
     "draw:drive": {"weight":28000,"note":"drive: DRAW card, Draw editor strokes, Draw > Connect weld across two pieces, cut, own piece; ~23 s locally on a 2-core box (2026-11-16), not yet measured on a runner"},
     "draw:trace": {"weight":20000,"note":"drive: Draw editor trace of a wall, edge snap, Connect where drawn, stretch handle, weld; ~15 s locally on a 2-core box (2026-11-16), not yet measured on a runner"},
     "draw:assist": {"weight":12000,"note":"drive: Draw editor Line assist - Straight, Off, Shift, Clean up, real pencil strokes; ~8 s locally on a 2-core box (2026-11-16), not yet measured on a runner"},
+    "draw:fill-area": {"weight":20000,"note":"drive: a guide held to a tilted channel's walls, Fill area, weld to a solid block, mesh_validate; ~15 s locally on a 2-core box (2026-11-18), not yet measured on a runner"},
     "boss:drive": {"weight":30000,"note":"drive: ADD > Step / Boss, its editor, real clicks and drags, two kernel unions; ~25 s locally on a 2-core box (2026-11-16), not yet measured on a runner"},
     "assemble:canonical": {"weight":2050,"note":""},
     "beds:test": {"weight":600,"note":"Node only, lifts the plate code and app-beds.js into a vm; measured under a second locally, three.js start-up dominates"},

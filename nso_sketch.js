@@ -123,6 +123,7 @@
   function bounds(objs) {
     var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
     (objs || []).forEach(function (o) {
+      if (o && o.kind === 'guide') return;                          // a guide is drawn, never built
       var r = (o && o.width ? o.width / 2 : 0) * (o && o.kind === 'line' ? 1 : 0);
       (o.pts || []).forEach(function (p) {
         b.x0 = Math.min(b.x0, p[0] - r); b.y0 = Math.min(b.y0, p[1] - r);
@@ -373,7 +374,7 @@
      -> { ok, parts: [{ soup, volume, obj, region }], area, box } */
   function solids(sketch, opts) {
     opts = opts || {};
-    var objs = (sketch && sketch.objects || []).filter(function (o) { return o && o.hidden !== true; });
+    var objs = (sketch && sketch.objects || []).filter(function (o) { return o && o.hidden !== true && o.kind !== 'guide'; });
     if (!objs.length) return { ok: false, reason: 'the drawing is empty - draw something in the Draw editor first' };
     var sc = num(opts.scale, 1), mx = opts.mirror === 'x' ? -1 : 1, my = opts.mirror === 'y' ? -1 : 1;
     /* stretch: the drawing pulled along its own x and y (a line's width is not stretched) */
@@ -450,7 +451,7 @@
     ((sk && sk.objects) || []).forEach(function (o) {
       if (!o || !Array.isArray(o.pts) || o.pts.length < 2) return;
       s.objects.push({
-        id: o.id != null ? o.id : null, name: String(o.name || ''), kind: o.kind === 'fill' ? 'fill' : 'line',
+        id: o.id != null ? o.id : null, name: String(o.name || ''), kind: o.kind === 'fill' || o.kind === 'guide' ? o.kind : 'line',
         closed: !!o.closed, width: Math.max(MIN_WIDTH, num(o.width, 1.2)),
         height: o.height == null || o.height === '' ? null : Math.max(MIN_HEIGHT, num(o.height, 1)),
         pts: o.pts.map(function (p) { return [num(p[0], 0), num(p[1], 0)]; })
@@ -476,11 +477,12 @@
   }
 
   function describe(sk) {
-    var o = (sk && sk.objects) || [], lines = o.filter(function (x) { return x.kind !== 'fill'; }).length, fills = o.length - lines, b = bounds(o);
+    var all = (sk && sk.objects) || [], o = all.filter(function (x) { return x.kind !== 'guide'; }), guides = all.length - o.length;
+    var lines = o.filter(function (x) { return x.kind !== 'fill'; }).length, fills = o.length - lines, b = bounds(o);
     var words = [];
     if (lines) words.push(lines + ' line' + (lines > 1 ? 's' : ''));
     if (fills) words.push(fills + ' fill' + (fills > 1 ? 's' : ''));
-    return (words.join(' + ') || 'nothing drawn') + (b ? ', ' + f2(b.w) + ' × ' + f2(b.h) + ' mm' : '');
+    return (words.join(' + ') || 'nothing drawn') + (b ? ', ' + f2(b.w) + ' × ' + f2(b.h) + ' mm' : '') + (guides ? ' (' + guides + ' guide' + (guides > 1 ? 's' : '') + ')' : '');
   }
 
   /* ---------------------------------------------------------------- line assist
@@ -715,11 +717,165 @@
     }) };
   }
 
+  /* ---------------------------------------------------------------- fill area (the bucket)
+     The space round a point that the given boundaries enclose - the traced walls, lines drawn across an opening -
+     as one fill outline, grown `bite` mm into the walls so a weld bites solid material (a fill that only touches a
+     wall's face shares that face with it: a seam the boolean cannot close).
+     On a grid of `res` mm: the boundaries are drawn into it (every cell a segment passes through), the point's
+     cell flooded out to them (4-connected; reaching the grid's edge is "not enclosed"), the flood grown by bite
+     (a disc), and its outer edge walked round and straightened (RDP to 0.6 of a cell). Islands inside it are
+     material of the piece, and are filled over.
+     A boundary marked `guide` (a line drawn across a mouth) is a fence: the fill stops ON it - the bite does not
+     cross it (the growth is a walk of at most bite that cannot step onto a guide's cells), and the outline's
+     points that lie within a cell and a half of a guide are put exactly on it, so that side is the guide's straight
+     line - stood FLUSH_GAP past it (opts.proud).
+     boundaries: [{ pts, closed, guide }]   -> { ok, pts, area, res } | { ok: false, reason, open } */
+  function regionAt(at, boundaries, opts) {
+    opts = opts || {};
+    var segs = [], guides = [];
+    (boundaries || []).forEach(function (b) {
+      var P = b.pts || [], m = b.closed ? P.length : P.length - 1;
+      for (var i = 0; i < m; i++) { var sg = [P[i], P[(i + 1) % P.length]]; sg.guide = !!b.guide; segs.push(sg); if (b.guide) guides.push(sg); }
+    });
+    if (!segs.length) return { ok: false, reason: 'there is nothing round it to fill up to - trace a piece or draw its edges first', open: true };
+    var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+    segs.forEach(function (sg) { sg.forEach(function (p) { lo[0] = Math.min(lo[0], p[0]); lo[1] = Math.min(lo[1], p[1]); hi[0] = Math.max(hi[0], p[0]); hi[1] = Math.max(hi[1], p[1]); }); });
+    if (at[0] <= lo[0] || at[0] >= hi[0] || at[1] <= lo[1] || at[1] >= hi[1]) return { ok: false, reason: 'that is outside everything drawn - nothing encloses it', open: true };
+    var bite = Math.max(0, num(opts.bite, 0.3));
+    var res = num(opts.res, Math.max(0.02, Math.min(0.1, Math.max(hi[0] - lo[0], hi[1] - lo[1]) / 1400)));
+    var pad = bite + 3 * res;
+    lo = [lo[0] - pad, lo[1] - pad]; hi = [hi[0] + pad, hi[1] + pad];
+    var W = Math.ceil((hi[0] - lo[0]) / res) + 1, H = Math.ceil((hi[1] - lo[1]) / res) + 1;
+    if (W * H > 9e6) return { ok: false, reason: 'too large to fill at this detail' };
+    var wall = new Uint8Array(W * H);
+    function cx(x) { return Math.floor((x - lo[0]) / res); }
+    function cy(y) { return Math.floor((y - lo[1]) / res); }
+    segs.forEach(function (sg) {                        // every cell the segment passes through (Amanatides-Woo)
+      var x0 = (sg[0][0] - lo[0]) / res, y0 = (sg[0][1] - lo[1]) / res, x1 = (sg[1][0] - lo[0]) / res, y1 = (sg[1][1] - lo[1]) / res;
+      var ix = Math.floor(x0), iy = Math.floor(y0), ex = Math.floor(x1), ey = Math.floor(y1);
+      var dx = x1 - x0, dy = y1 - y0, sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1;
+      var tdx = dx !== 0 ? Math.abs(1 / dx) : Infinity, tdy = dy !== 0 ? Math.abs(1 / dy) : Infinity;
+      var tx = dx !== 0 ? ((dx > 0 ? ix + 1 - x0 : x0 - ix) * tdx) : Infinity, ty = dy !== 0 ? ((dy > 0 ? iy + 1 - y0 : y0 - iy) * tdy) : Infinity;
+      for (var guard = 0; guard < W + H + 4; guard++) {
+        if (ix >= 0 && iy >= 0 && ix < W && iy < H) wall[iy * W + ix] = sg.guide ? 2 : (wall[iy * W + ix] || 1);
+        if (ix === ex && iy === ey) break;
+        if (tx < ty) { tx += tdx; ix += sx; } else { ty += tdy; iy += sy; }
+      }
+    });
+    var start = cy(at[1]) * W + cx(at[0]);
+    if (wall[start]) return { ok: false, reason: 'that is on a line - click inside the space' };
+    var fill = new Uint8Array(W * H), stack = [start], n = 0, open = false;
+    fill[start] = 1;
+    while (stack.length) {
+      var c = stack.pop(), x = c % W, y = (c - x) / W;
+      n++;
+      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) { open = true; break; }
+      var nb = [c - 1, c + 1, c - W, c + W];
+      for (var k = 0; k < 4; k++) { var q = nb[k]; if (!fill[q] && !wall[q]) { fill[q] = 1; stack.push(q); } }
+    }
+    if (open) return { ok: false, reason: 'that space is open to the outside - draw a line across its mouth first (it snaps to the traced corners), then fill', open: true };
+    /* grown by bite: a walk out from the flood of at most bite (Euclidean, from the cell it left the flood at),
+       never onto a guide's cells */
+    var b = Math.round(bite / res);
+    /* past a guide is out: a cell on the far side of a guide's line from the point clicked, within bite of the guide
+       or of the line run on past its ends, is not grown into (the wall ends at a mouth are not wrapped round) */
+    var fences = guides.map(function (g) {
+      var a = g[0], e = g[1], L = d2(a, e) || 1, u = [(e[0] - a[0]) / L, (e[1] - a[1]) / L], n2 = [-u[1], u[0]];
+      var side = (at[0] - a[0]) * n2[0] + (at[1] - a[1]) * n2[1] >= 0 ? 1 : -1;
+      return { a: a, u: u, n: n2, L: L, side: side };
+    });
+    function fenced(cx1, cy1) {
+      if (!fences.length) return false;
+      var x = lo[0] + (cx1 + 0.5) * res, y = lo[1] + (cy1 + 0.5) * res;
+      for (var f = 0; f < fences.length; f++) {
+        var F = fences[f], dx = x - F.a[0], dy = y - F.a[1], t = dx * F.u[0] + dy * F.u[1], sd = (dx * F.n[0] + dy * F.n[1]) * F.side;
+        if (sd < 0 && t > -bite - res && t < F.L + bite + res) return true;
+      }
+      return false;
+    }
+    if (b > 0) {
+      var src = new Int32Array(W * H).fill(-1), queue = [];
+      for (var c0 = 0; c0 < W * H; c0++) if (fill[c0]) { src[c0] = c0; queue.push(c0); }
+      for (var qi = 0; qi < queue.length; qi++) {
+        var cc = queue[qi], cx0 = cc % W, cy0 = (cc - cx0) / W, sc = src[cc], sx0 = sc % W, sy0 = (sc - sx0) / W;
+        var nb2 = [cc - 1, cc + 1, cc - W, cc + W], ok2 = [cx0 > 0, cx0 < W - 1, cy0 > 0, cy0 < H - 1];
+        for (var k2 = 0; k2 < 4; k2++) {
+          if (!ok2[k2]) continue;
+          var q2 = nb2[k2];
+          if (src[q2] >= 0 || wall[q2] === 2) continue;
+          var qx = q2 % W, qy = (q2 - qx) / W;
+          if ((qx - sx0) * (qx - sx0) + (qy - sy0) * (qy - sy0) > b * b) continue;
+          if (fenced(qx, qy)) continue;
+          src[q2] = sc; fill[q2] = 1; queue.push(q2);
+        }
+      }
+    }
+    /* the outer edge: walk the cell edges between filled and empty, keeping the filled cell on the left */
+    var loops = traceMask(fill, W, H), best = null, bestA = 0;
+    loops.forEach(function (L) { var a = signedArea(L); if (a > bestA) { bestA = a; best = L; } });
+    if (!best) return { ok: false, reason: 'nothing to fill there' };
+    var pts = best.map(function (p) { return [lo[0] + p[0] * res, lo[1] + p[1] * res]; });
+    pts = rdp(pts.concat([pts[0]]), 0.6 * res).slice(0, -1);
+    /* The side along a guide: on it, and stood `proud` (FLUSH_GAP) past it - a face flush with the ends of the walls
+       it closes is coplanar with them, the seam the weld cannot close (2 non-manifold edges, measured on a channel
+       closed flush; 0.02 mm out or in both welded clean). */
+    var proud = num(opts.proud, FLUSH_GAP);
+    if (guides.length) {
+      pts = pts.map(function (p) {
+        var best = null, bd = 1.5 * res;
+        fences.forEach(function (F) {
+          var dx = p[0] - F.a[0], dy = p[1] - F.a[1], t = dx * F.u[0] + dy * F.u[1];
+          var q = [F.a[0] + F.u[0] * t - F.n[0] * F.side * proud, F.a[1] + F.u[1] * t - F.n[1] * F.side * proud], d = Math.abs(dx * F.n[0] + dy * F.n[1]);
+          if (t > -0.05 * F.L && t < 1.05 * F.L && d < bd) { bd = d; best = q; }
+        });
+        return best || p;
+      });
+      pts = rdp(dedupe(pts, 1e-6, true).concat([pts[0]]), 0.01).slice(0, -1);
+    }
+    if (signedArea(pts) < 0) pts.reverse();
+    return { ok: true, pts: pts, area: Math.abs(signedArea(pts)), res: res, cells: n };
+  }
+
+  /* the boundary loops of a 0/1 mask, as lattice points, counter-clockwise round filled cells */
+  function traceMask(M, W, H) {
+    function at(x, y) { return x >= 0 && y >= 0 && x < W && y < H && M[y * W + x] ? 1 : 0; }
+    var used = new Uint8Array((W + 1) * (H + 1) * 4), loops = [];
+    /* a directed edge per filled/empty pair: from lattice point (x, y), direction d (0 +x, 1 +y, 2 -x, 3 -y) */
+    function isEdge(x, y, d) {
+      if (d === 0) return at(x, y) && !at(x, y - 1);          // along the bottom of cell (x, y)
+      if (d === 1) return at(x - 1, y) && !at(x, y);          // up the right side of cell (x-1, y)
+      if (d === 2) return at(x - 1, y - 1) && !at(x - 1, y);  // along the top of cell (x-1, y-1)
+      return at(x, y - 1) && !at(x - 1, y - 1);               // down the left side of cell (x, y-1)
+    }
+    var DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
+    for (var y = 0; y <= H; y++) for (var x = 0; x <= W; x++) {
+      if (!isEdge(x, y, 0) || used[(y * (W + 1) + x) * 4]) continue;
+      var L = [], px = x, py = y, d = 0, guard = 0;
+      do {
+        used[(py * (W + 1) + px) * 4 + d] = 1;
+        L.push([px, py]);
+        px += DX[d]; py += DY[d];
+        /* turn left first (keeps the filled cell on the left), then straight, then right */
+        var nd = -1, tries = [(d + 1) % 4, d, (d + 3) % 4];
+        for (var t = 0; t < 3; t++) if (isEdge(px, py, tries[t])) { nd = tries[t]; break; }
+        if (nd < 0) break;
+        d = nd;
+      } while (!(px === x && py === y && d === 0) && ++guard < 4 * (W + 1) * (H + 1));
+      /* drop the points where the walk went straight on */
+      var C = L.filter(function (p, i) {
+        var a = L[(i - 1 + L.length) % L.length], b = L[(i + 1) % L.length];
+        return (p[0] - a[0]) * (b[1] - p[1]) - (p[1] - a[1]) * (b[0] - p[0]) !== 0;
+      });
+      if (C.length >= 3) loops.push(C);
+    }
+    return loops;
+  }
+
   var API = {
     smooth: smooth, chaikin: chaikin, rdp: rdp, outlines: outlines, extrude: extrude, solids: solids, overlapGroups: overlapGroups,
     concat: concat, normalize: normalize, bounds: bounds, transform: transform, rectPts: rectPts, ellipsePts: ellipsePts,
     describe: describe, signedArea: signedArea, signedVolume: signedVolume, selfCross: selfCross, pathLength: pathLength,
-    assist: assist, fitCircle: fitCircle, fitLine: fitLine, FLUSH_GAP: FLUSH_GAP, MAX_EDGE: MAX_EDGE, MIN_WIDTH: MIN_WIDTH, MIN_HEIGHT: MIN_HEIGHT
+    regionAt: regionAt, assist: assist, fitCircle: fitCircle, fitLine: fitLine, FLUSH_GAP: FLUSH_GAP, MAX_EDGE: MAX_EDGE, MIN_WIDTH: MIN_WIDTH, MIN_HEIGHT: MIN_HEIGHT
   };
   root.NSO_Sketch = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
