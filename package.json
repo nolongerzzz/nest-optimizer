@@ -364,6 +364,7 @@
     "cut:plate": "node tools/nso_cut_plate_test.js",
     "cut:plate-drive": "node tools/nso_cut_plate_drive_check.js",
     "notch:drive": "node tools/nso_cut_notch_drive_check.js",
+    "notch:span:drive": "node tools/nso_cut_notch_span_drive_check.js",
     "notch:strand-drive": "node tools/nso_cut_strand_drive_check.js",
     "strand:test": "node tools/nso_strand_test.js",
     "follow:drive": "node tools/nso_cut_follow_drive_check.js",

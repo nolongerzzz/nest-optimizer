@@ -183,7 +183,8 @@ to parts' analysis (6 s).
 2. **Click the face** the blade should go into. It anchors there and goes in
    *against that face's normal*: a click on a top face comes down, on a side face
    comes in from the side. The readout says which. A face lying in the cut plane
-   has no sideways lean to read, so the blade comes down from above.
+   has no sideways lean to read, so the blade comes down from above - or, with
+   the blade lying flat, goes in through the section edge nearest the click.
 3. Slide it along the piece with the slider / arrows; angle it with the mitre and
    bevel. The blade is drawn as the box it will cut. (Clicking *inside* the
    blade's own box still drags the blade, as it always did; click the piece
@@ -213,6 +214,32 @@ from the click's depth ends up buried.
   a Notch whose plane crosses nothing ("slide it onto a strand"), a blade that
   does not reach the piece, a piece that is not a closed solid the kernel can
   cut, or a cut that would leave nothing.
+
+## Notch on a part with an inside, and From / To
+
+A channel, a U, a slot in a wall: the plane's section is one blob, but its
+bounding box is not the wall that was clicked. When the section is not convex
+the notch is fitted to the FACE under the click (nso_notch.js `faceRun`): it
+goes in from that face, as wide as the face runs; where the face ends in an
+inside corner the notch is carried through the fillet and stops flush with the
+wall it meets, and where it ends at an outside corner it runs the 0.5 mm margin
+past - only into air. Cords and bars (convex sections) are notched as before,
+across the whole strand.
+
+With the blade lying flat (mitre 90, bevel 90) a click on the TOP of a wall is
+a face in the blade's own plane: it does not move the blade (the slider sets
+the height), and the blade goes in through the section's edge nearest the
+click (`edgeEntry`) - near a wall's inner edge, the inside face.
+
+**From / To** (Notch fields, app-cut-notch-span.js) set the notch by its two
+ends: the blade goes to the middle and Notch width becomes the gap. With the
+blade flat they are heights up from the bottom of the piece; otherwise they
+are on the slider's scale. The slider steps in 0.1 mm; the notch carries the
+remainder, so the ends are exactly what was typed until the slider moves.
+Checked by `npm run notch:span:drive`.
+
+The blade's handle (ball and bar) is drawn over everything, so a press where
+it is seen takes hold of the blade on every blade, never the face behind it.
 
 ## Not done (said plainly)
 

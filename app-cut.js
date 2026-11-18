@@ -575,14 +575,23 @@ function cutBladeSpec(info) {
       plane: info.plane, wCentre: wCentre, dStart: dStart, width: s.width, depth: s.depth, kerf: s.kerf });
     if (notch) miss = true;                              // nothing under the plane to notch
   }
+  /* Notch From / To (app-cut-notch-span.js): the ends typed are kept exactly. The slider steps in 0.1 mm, so the
+     middle they ask for can sit off its grid; the notch carries that remainder (b.nshift) along the plane's normal -
+     for as long as the slider stays where From / To put it. */
+  let shift = 0;
+  if (notch && b.nshift && b.nshiftAt != null && Math.abs(b.nshiftAt - info.mm) < 1e-9) {
+    shift = b.nshift;
+    box = { min: box.min.slice(), max: box.max.slice() };
+    box.min[k] += shift; box.max[k] += shift;
+  }
   const r = v => Math.round(v * 1000) / 1000;
   const lat = [0, 1, 2].filter(i => i !== k);
-  const key = b.mode + ':' + k + ':' + sizes.kerf + ':' + lat.map(i => r(box.min[i]) + '~' + r(box.max[i])).join(':') +
+  const key = b.mode + ':' + k + ':' + sizes.kerf + ':' + r(shift) + ':' + lat.map(i => r(box.min[i]) + '~' + r(box.max[i])).join(':') +
     (strand ? ':S' + lat.map(i => r(strand.min[i]) + '~' + r(strand.max[i])).join(':') : '');
   const up = info.upCut.getComponent(entry.dAxis);
   const from = Math.abs(up) > 0.7 ? (entry.sign * up < 0 ? 'down from the top' : 'up from below') : 'in from the side';
   return { box: box, entry: entry, sizes: sizes, key: key, from: from, wCentre: wCentre, dStart: dStart,
-           q: q, notch: notch, miss: miss, strand: strand, strands: strands,
+           q: q, notch: notch, miss: miss, strand: strand, strands: strands, shift: shift,
            isolate: !!strand && (notch || cutStrandOn(b)) };
 }
 
@@ -739,6 +748,7 @@ function syncCutBevelUI() {
 function syncCutUI() {
   syncCutMiterUI();
   if (state.cutBlade && state.cutBlade.sized) syncCutBladeUI();
+  if (typeof cutNotchSpanSync === 'function') cutNotchSpanSync();
   const m = getActiveModel();
   const slider = document.getElementById('cut-slider');
   const input = document.getElementById('cut-mm');
@@ -1610,7 +1620,7 @@ function cutBuildSizedBlade(group, f) {
   const size = new THREE.Vector3(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]);
   const mid = new THREE.Vector3((box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2);
   const off = mid.clone().sub(C);
-  off.setComponent(k, 0);
+  off.setComponent(k, mid.getComponent(k) - f.plane);         // centred on the plane - less a Notch From / To remainder
   const geo = new THREE.BoxGeometry(size.x, size.y, size.z);
 
   const blade = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({

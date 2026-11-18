@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=3a498e25" />
+  <link rel="stylesheet" href="styles.css?v=ca2dbf8d" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1504,6 +1504,9 @@
               <div class="cut-slide-row" title="How far in from the strand's edge the nick goes (mm). Less than the strand is thick and it stops short of the far side."><span class="cut-slide-label">Notch depth</span>
               <input type="range" id="cut-notch-depth-s" min="0.2" max="10" step="0.1" value="1" aria-label="Notch depth, mm">
               <input type="number" id="cut-notch-depth" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Notch depth, mm"></div>
+              <div class="cut-slide-row cut-notch-span"><span class="cut-slide-label" id="cut-notch-span-label">From / to</span>
+              <input type="number" id="cut-notch-from" class="cut-no-spin" step="0.01" aria-label="Notch from, mm">
+              <input type="number" id="cut-notch-to" class="cut-no-spin" step="0.01" aria-label="Notch to, mm"></div>
               <label class="cut-switch cut-follow" title="Follow strand: click a cord and the blade turns to stand square across it right there, however it winds, and the nick is cut in from the top of it. Drag the blade or the slider and it slides along the cord, about 90 degrees of it at a time; Back and Forward step it one nick-and-gap, and Cut cuts the nick and moves on to the next place - a row of nicks along a cord. Off: the nick goes in from the face you click."><input type="checkbox" id="chk-cut-notch-follow"><span>Follow strand</span></label>
               </div>
               <div class="cut-blade-sliders" id="cut-follow-fields" hidden>
@@ -3179,7 +3182,7 @@
   <script src="nso_skin.js?v=e0cfc361"></script>
   <script src="nso_skin_patch.js?v=4b2304fa"></script>
   <script src="nso_carve.js?v=c82241ec"></script>
-<script src="nso_notch.js?v=b697e802"></script>
+<script src="nso_notch.js?v=13ca95fd"></script>
 <script src="nso_strand.js?v=b0562762"></script>
 <script src="nso_cut_plate.js?v=0683b280"></script>
   <script src="nso_seat_surface.js?v=293d7ca2"></script>
@@ -3247,7 +3250,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=ab890b91"></script>
+  <script src="app-core.js?v=29942455"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=5b4ec154"></script>
 
@@ -3255,8 +3258,10 @@
 
 
 
-  <script src="app-cut.js?v=0c32c399"></script>
+  <script src="app-cut.js?v=71a86093"></script>
   <!-- Cut card, Follow strand: the sized blade put square across a cord and walked along it (nso_strand.js, docs/CUT-FOLLOW.md). After app-cut.js. -->
+  <!-- Cut card, Notch From / To: the notch set by its two ends. After app-cut.js. -->
+  <script src="app-cut-notch-span.js?v=ec0be9ba"></script>
   <script src="app-cut-follow.js?v=350438ca"></script>
   <!-- Cut card, Whole plate blade: one level blade across every piece. After app-cut.js, whose cutOneSide / cutOverlay
        it calls, and before the Crop card; it commits through app-sculpt.js's NSO_sculptCommitRaw at press time. docs/CUT-PLATE.md. -->
