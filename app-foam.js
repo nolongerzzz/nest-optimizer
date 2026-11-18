@@ -455,7 +455,7 @@
 
   window.nsoFoamTakesPointer = function (event) {
     if (!event || event.button !== 0) return false;
-    if (P.on) return P.spraying || !!gunAim(event);
+    if (P.on) return P.spraying || gunTakes(gunAim(event));
     if (G.on) return G.spraying || boxAims(event);
     if (!on) return false;
     return !!pick(event);
@@ -834,22 +834,74 @@
   /* ---------------------------------------------------------------
      The GUN (docs/FOAM-GUN.md): point into a gap, hold, it fills.
 
-     No box. GUN arms it; a press on the piece aims - the ray's hit on the
-     gap's wall, and the ray, in the piece's raw axes - and nso_foam_gun.js
-     reads the gap there and builds its foam, plate to face, once. While the
-     mouse is held the foam is drawn rising (the piece a ghost, the foam
-     orange, cut at the level), 0 to 100 in GUN_SECONDS. Letting go sets the
-     amount reached as one Undo. The gun stays armed for the next gap. A press
-     that misses the piece is the orbit's. Escape, Cancel or GUN again puts it
-     away.
+     No box. GUN arms it and reads the piece at once (nso_foam_gun.js keeps it).
+     The cursor is a little foam gun, and it says what a press would do before
+     you press:
+
+       ready    green tick  - over a gap the gun can fill: hold now
+       no       red bar     - over the piece, but not in a gap (the top face,
+                              open air beside a wall): nothing to fill there
+       busy     grey dots   - reading the piece (on arming, after a set)
+       spray    orange foam - spraying
+       plain gun            - off the piece: a press there orbits
+
+     While the cursor rests on a gap the foam is built ahead (one spray, kept
+     for that spot), so a press starts the foam rising at once. Hold: it rises
+     from the plate, 0 to 100 in GUN_SECONDS. Let go: the amount reached is set
+     as one Undo, and the foam that went in glows for a moment so you can see
+     it. A tap - let go before the foam has risen at all - sets nothing and
+     says so. Escape, Cancel or GUN again puts it away.
      --------------------------------------------------------------- */
 
+  var TAP_MS = 250;               // let go before this much foam has risen (this long a hold) and nothing is set
+  var GLOW_MS = 1400;             // the foam just set glows this long
+  var PREFETCH_MS = 120;          // the cursor rests this long on a gap before its foam is built ahead
   var P = {
     on: false, m: null, ms: null, base: null, skip: null, up: null, aim: null,
-    spraying: false, finishing: false, amount: 0, sprayT: 0, seq: 0, sprays: 0,
-    full: null, last: null, group: null, foam: null, raf: 0, readout: '—'
+    spraying: false, finishing: false, amount: 0, sprayT: 0, downT: 0, seq: 0, sprays: 0,
+    full: null, last: null, group: null, foam: null, raf: 0, readout: '—',
+    cursor: '', hover: null, hoverSeq: 0, moveRaf: 0, lastMove: null, pre: null, preTimer: 0, preparing: false,
+    glow: null, warmMat: null
   };
   function GM() { return (typeof NSO_FoamGun !== 'undefined') ? NSO_FoamGun : null; }
+
+  /* ---- the cursor: a little foam gun, nozzle tip at the hotspot ---- */
+  var GUN_SVG_BODY =
+    '<path d="M1 9.9 L11.2 8.3 L11.2 12.5 L1 11.1 Z" fill="#ece22a" stroke="#4d4800" stroke-width="0.8" stroke-linejoin="round"/>' +
+    '<rect x="10.4" y="6.8" width="3" height="7.4" rx="1.2" fill="#f4ea3a" stroke="#4d4800" stroke-width="0.8"/>' +
+    '<rect x="13" y="5" width="15.5" height="10" rx="2.6" fill="#2d3184" stroke="#0b0d30" stroke-width="0.9"/>' +
+    '<rect x="20.5" y="3.4" width="4.2" height="3" rx="0.8" fill="#111"/>' +
+    '<path d="M19.2 14.2 L26.4 14.2 L28.8 28.8 Q29 30.6 27.2 30.6 L23.2 30.6 Q21.7 30.6 21.5 29.2 Z" fill="#2d3184" stroke="#0b0d30" stroke-width="0.9" stroke-linejoin="round"/>' +
+    '<path d="M22.8 18.2h4.1M23.2 20.8h4.1M23.6 23.4h4.1M24 26h4.1" stroke="#6d72cc" stroke-width="0.8"/>' +
+    '<path d="M17.6 14.6 Q15.4 21.2 17.1 28.6" fill="none" stroke="#111" stroke-width="2.1" stroke-linecap="round"/>';
+  var GUN_BADGE = {
+    plain: '',
+    ready: '<circle cx="7" cy="24.6" r="5.6" fill="#1f9d55" stroke="#fff" stroke-width="1.3"/>' +
+           '<path d="M4.3 24.8 L6.3 26.8 L9.8 22.8" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+    no:    '<circle cx="7" cy="24.6" r="5.6" fill="#d23b3b" stroke="#fff" stroke-width="1.3"/>' +
+           '<path d="M3.9 24.6 H10.1" stroke="#fff" stroke-width="2" stroke-linecap="round"/>',
+    busy:  '<circle cx="7" cy="24.6" r="5.6" fill="#6b6b6b" stroke="#fff" stroke-width="1.3"/>' +
+           '<circle cx="4.6" cy="24.6" r="0.95" fill="#fff"/><circle cx="7" cy="24.6" r="0.95" fill="#fff"/><circle cx="9.4" cy="24.6" r="0.95" fill="#fff"/>',
+    spray: '<circle cx="4.2" cy="15.6" r="2.4" fill="#ff8a1f" stroke="#8a3f00" stroke-width="0.7"/>' +
+           '<circle cx="8.2" cy="17.6" r="1.8" fill="#ffa64d" stroke="#8a3f00" stroke-width="0.7"/>' +
+           '<circle cx="3.4" cy="20.6" r="1.6" fill="#ff8a1f" stroke="#8a3f00" stroke-width="0.7"/>' +
+           '<circle cx="7.6" cy="22.4" r="1.2" fill="#ffa64d" stroke="#8a3f00" stroke-width="0.6"/>' +
+           '<circle cx="9.4" cy="13.8" r="1.1" fill="#ffa64d" stroke="#8a3f00" stroke-width="0.6"/>'
+  };
+  var GUN_FALLBACK = { plain: 'crosshair', ready: 'crosshair', no: 'not-allowed', busy: 'progress', spray: 'crosshair' };
+  var gunCursorCss = {};
+  function gunCursorOf(kind) {
+    if (!gunCursorCss[kind]) {
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' + GUN_SVG_BODY + (GUN_BADGE[kind] || '') + '</svg>';
+      gunCursorCss[kind] = 'url("data:image/svg+xml;utf8,' + encodeURIComponent(svg) + '") 1 10, ' + GUN_FALLBACK[kind];
+    }
+    return gunCursorCss[kind];
+  }
+  function gunCursor(kind) {
+    P.cursor = kind || '';
+    var el = state.renderer && state.renderer.domElement;
+    if (el) el.style.cursor = kind ? gunCursorOf(kind) : '';
+  }
 
   function gunReadout(text) {
     P.readout = text;
@@ -871,24 +923,28 @@
   }
   /* The level as a world plane: the plate's vertical is world +Y, and the
      level is a height along the piece's raw `up`. */
-  function gunLevelPlane(level) {
-    var f = (typeof nsoRawFrameOf === 'function') ? nsoRawFrameOf(P.m) : null, u = P.full.up;
+  function gunLevelPlane(level, res, ms) {
+    var f = (typeof nsoRawFrameOf === 'function') ? nsoRawFrameOf(P.m) : null, u = res.up;
     var raw = [u[0] * level, u[1] * level, u[2] * level];
     var loc = f ? nsoLocalPointFromRaw(f, raw) : raw;
-    var w = P.ms.localToWorld(new THREE.Vector3(loc[0], loc[1], loc[2]));
+    var w = ms.localToWorld(new THREE.Vector3(loc[0], loc[1], loc[2]));
     return new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), w);
+  }
+  function gunFoamMesh(res) {
+    var mat = foamMaterial();
+    mat.side = THREE.DoubleSide;
+    var o = new THREE.Mesh(localGeo(res.foam, true, P.m), mat);
+    o.geometry.computeVertexNormals();
+    o.renderOrder = 42;
+    o.userData.skipXray = true;
+    o.userData.nsoFoam = true;
+    return o;
   }
   function gunDrawFoam() {
     gunDisposeFoam();
     var res = P.full;
     if (!res || !res.ok || !res.changed || !res.foam || !res.foam.length) return;
-    var mat = foamMaterial();
-    mat.side = THREE.DoubleSide;
-    P.foam = new THREE.Mesh(localGeo(res.foam, true, P.m), mat);
-    P.foam.geometry.computeVertexNormals();
-    P.foam.renderOrder = 42;
-    P.foam.userData.skipXray = true;
-    P.foam.userData.nsoFoam = true;
+    P.foam = gunFoamMesh(res);
     P.group = new THREE.Group();
     P.group.userData.skipXray = true;
     P.group.userData.nsoFoamGroup = true;
@@ -900,65 +956,203 @@
     var res = P.full;
     if (!P.foam || !res || !res.span) return;
     var lv = res.span[0] + P.amount / 100 * (res.span[1] - res.span[0]);
-    P.foam.material.clippingPlanes = [gunLevelPlane(lv + 1e-3)];
-    gunReadout(gunWords(res.addedVolume * P.amount / 100));
+    P.foam.material.clippingPlanes = [gunLevelPlane(lv + 1e-3, res, P.ms)];
+    gunReadout(gunWords(res.addedVolume * P.amount / 100) + ' - holding');
   }
 
-  /* The click's aim, raw: the ray's hit on the piece and its direction. */
+  /* After a set: the foam that went in, drawn over the piece and fading, so
+     what changed can be seen without going to look for it. */
+  function gunGlowOff() {
+    if (!P.glow) return;
+    disposeObj(P.glow.obj);
+    if (P.glow.group.parent) P.glow.group.parent.remove(P.glow.group);
+    P.glow = null;
+  }
+  function gunGlow(res, level, model) {
+    gunGlowOff();
+    var ms = meshOf(model);
+    if (!res.foam || !res.foam.length || !ms) return;
+    var o = gunFoamMesh(res), g = new THREE.Group();
+    o.material.transparent = true;
+    o.material.depthTest = false;
+    o.material.clippingPlanes = [gunLevelPlane(level + 1e-3, res, ms)];
+    g.userData.skipXray = true;
+    g.userData.nsoFoamGroup = true;
+    g.add(o);
+    nsoHelpers.attach(ms, g, 'foam', { interactive: false });
+    var glow = P.glow = { obj: o, group: g }, t0 = performance.now();
+    (function fade() {
+      if (P.glow !== glow) return;
+      var k = (performance.now() - t0) / GLOW_MS;
+      if (k >= 1) { gunGlowOff(); return; }
+      o.material.opacity = 0.85 * (1 - k * k);
+      requestAnimationFrame(fade);
+    })();
+  }
+
+  /* The ray under the mouse, raw: its hit on the piece and its direction. */
   function gunAim(event) {
     var ms = P.m ? meshOf(P.m) : null;
     if (!ms || !state.camera || !state.renderer) return null;
     var r = state.renderer.domElement.getBoundingClientRect();
     var rc = new THREE.Raycaster();
     rc.setFromCamera(new THREE.Vector2(((event.clientX - r.left) / r.width) * 2 - 1, -((event.clientY - r.top) / r.height) * 2 + 1), state.camera);
-    var hits = rc.intersectObject(ms, false);
-    if (!hits.length) return null;
+    var hits = rc.intersectObject(ms, false), through = false;
     ms.updateMatrixWorld(true);
-    var lp = ms.worldToLocal(hits[0].point.clone());
     var inv = new THREE.Matrix4().copy(ms.matrixWorld).invert();
-    var ld = rc.ray.direction.clone().transformDirection(inv);
+    var ld = rc.ray.direction.clone().transformDirection(inv), lp;
+    if (hits.length) lp = ms.worldToLocal(hits[0].point.clone());
+    else {
+      /* Straight down a through-gap the ray meets nothing: aim at the middle
+         of its run through the piece's box instead. */
+      var g = ms.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      var lr = rc.ray.clone().applyMatrix4(inv), a = lr.intersectBox(g.boundingBox, new THREE.Vector3());
+      if (!a) return null;
+      var far = new THREE.Ray(lr.at(1e5, new THREE.Vector3()), lr.direction.clone().negate()).intersectBox(g.boundingBox, new THREE.Vector3());
+      if (!far) return null;
+      lp = a.add(far).multiplyScalar(0.5);
+      through = true;
+    }
     var f = (typeof nsoRawFrameOf === 'function') ? nsoRawFrameOf(P.m) : null;
     var point = f ? nsoRawPointFromLocal(f, [lp.x, lp.y, lp.z]) : [lp.x, -lp.z, lp.y];
     var dir = (typeof nsoRawDirFromLocal === 'function') ? nsoRawDirFromLocal([ld.x, ld.y, ld.z]) : [ld.x, -ld.z, ld.y];
-    return { point: point, dir: dir, ms: ms };
+    return { point: point, dir: dir, ms: ms, through: through };
+  }
+  function sameSpot(a, b) {
+    return !!(a && b) && Math.hypot(a.point[0] - b.point[0], a.point[1] - b.point[1], a.point[2] - b.point[2]) < 0.05 &&
+      a.dir[0] * b.dir[0] + a.dir[1] * b.dir[1] + a.dir[2] * b.dir[2] > 0.9995;
   }
 
-  function gunAsk(amount) {
-    var piece = { rawTris: P.base, skipList: P.skip };
-    return GM().spray(piece, { point: P.aim.point, dir: P.aim.dir }, { up: P.up, amount: amount, preview: amount >= 100 })
+  /* What the GUN needs of the piece as it is now; null (and said) when it cannot spray it. */
+  function gunPiece() {
+    var model = P.m, ms = meshOf(model);
+    if (!ms) return null;
+    if (typeof nsoNonSolid === 'function' && nsoNonSolid(model)) {
+      return { refuse: 'GUN does not apply to "' + model.name + '" - it is flagged non-solid, so it has no closed inside to fill. Nothing changed.' };
+    }
+    var skip = (typeof nsoMaskFaceList === 'function') ? nsoMaskFaceList(model) : [];
+    if (skip === null) {
+      return { refuse: 'GUN stood down - a painted recessed patch has no axis and side to check against the faces the foam ' +
+        'would fill against. Clear that paint to spray. Nothing changed.' };
+    }
+    return { base: model.rawTris, skip: skip, ms: ms, up: upRaw(ms) };
+  }
+  function gunAsk(pc, aim, amount) {
+    return GM().spray({ rawTris: pc.base, skipList: pc.skip }, { point: aim.point, dir: aim.dir }, { up: pc.up, amount: amount, preview: amount >= 100 })
       .catch(function (err) {
         return { ok: false, changed: false, addedVolume: 0, reason: 'GUN: ' + ((err && err.message) || err) + '. Nothing changed.' };
       });
   }
 
-  /* Pull the trigger: read the gap and build its foam (once), then rise. */
+  /* Read the piece now - on arming, and after each set - with the busy cursor. */
+  function gunPrepare() {
+    var pc = gunPiece();
+    if (!pc || pc.refuse) return;
+    P.preparing = true;
+    gunCursor('busy');
+    var seq = P.seq;
+    setTimeout(function () {                           // a frame for the busy cursor first
+      if (!P.on || seq !== P.seq) return;
+      GM().prepare({ rawTris: pc.base }, { up: pc.up }).then(function (r) {
+        P.preparing = false;
+        if (!P.on) return;
+        if (!P.spraying) gunWarm(pc.ms);
+        if (!r.ok) { gunReadout(r.reason); say(r.reason, true); }
+        gunCursor(P.spraying ? 'spray' : 'plain');
+        if (P.lastMove) gunHover(P.lastMove);
+      }, function () { P.preparing = false; gunCursor('plain'); });
+    }, 30);
+  }
+
+  /* The first ghost and the first foam each need a shader the GPU has not
+     built yet - the pause before the ghost showed. Build both now, while the
+     gun is being armed, so the press does not wait for them. */
+  function gunWarm(ms) {
+    var r = state.renderer;
+    if (!r || typeof r.compile !== 'function' || !state.scene || !state.camera || !ms) return;
+    var dummy = null;
+    try {
+      ghost(true, ms);
+      var mat = foamMaterial();
+      mat.side = THREE.DoubleSide;
+      mat.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6)];
+      dummy = new THREE.Mesh(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)), mat);
+      dummy.frustumCulled = false;
+      state.scene.add(dummy);
+      r.compile(state.scene, state.camera);
+    } catch (e) { /* a warm-up only */ }
+    if (dummy) {
+      state.scene.remove(dummy);
+      dummy.geometry.dispose();
+      /* Its material is kept until the gun is put away: while one material
+         holds the foam's shader, the real foam reuses it. */
+      if (P.warmMat && P.warmMat !== dummy.material) P.warmMat.dispose();
+      P.warmMat = dummy.material;
+    }
+    ghost(false);
+  }
+
+  /* ---- hover: what would a press here do? ---- */
+  function gunMove(event) {
+    if (!P.on) return;
+    P.lastMove = { clientX: event.clientX, clientY: event.clientY, buttons: event.buttons };
+    if (P.spraying || P.finishing || P.preparing || P.moveRaf) return;
+    P.moveRaf = requestAnimationFrame(function () {
+      P.moveRaf = 0;
+      if (P.lastMove && !P.spraying && !P.finishing && !P.preparing) gunHover(P.lastMove);
+    });
+  }
+  /* -> Promise of the cursor it settled on. */
+  function gunHover(ev) {
+    if (ev.buttons) return Promise.resolve(P.cursor);  // dragging an orbit
+    var aim = gunAim(ev);
+    if (P.preTimer) { clearTimeout(P.preTimer); P.preTimer = 0; }
+    if (!aim) { P.hover = null; P.hoverSeq++; gunCursor('plain'); return Promise.resolve('plain'); }
+    if (P.hover && sameSpot(P.hover.aim, aim)) return Promise.resolve(P.cursor);
+    var pc = gunPiece();
+    if (!pc || pc.refuse) { gunCursor('no'); P.hover = { aim: aim, ok: false, reason: pc && pc.refuse }; return Promise.resolve('no'); }
+    var seq = ++P.hoverSeq;
+    return GM().probe({ rawTris: pc.base }, aim, { up: pc.up }).then(function (r) {
+      if (seq !== P.hoverSeq || !P.on || P.spraying || P.finishing) return P.cursor;
+      P.hover = { aim: aim, ok: r.ok, reason: r.reason };
+      gunCursor(r.ok ? 'ready' : (aim.through ? 'plain' : 'no'));
+      if (r.ok) {
+        /* Rest here and its foam is built ahead: the press then rises at once. */
+        if (!(P.pre && P.pre.base === pc.base && sameSpot(P.pre.aim, aim))) {
+          P.preTimer = setTimeout(function () {
+            P.preTimer = 0;
+            if (seq !== P.hoverSeq || !P.on || P.spraying || P.finishing || P.m.rawTris !== pc.base) return;
+            gunAsk(pc, aim, 100).then(function (res) { if (P.on && P.m.rawTris === pc.base) P.pre = { base: pc.base, aim: aim, res: res }; });
+          }, PREFETCH_MS);
+        }
+      }
+      return P.cursor;
+    });
+  }
+
+  /* Pull the trigger at `aim`: the ghost and the spraying gun at once, then
+     the foam - built ahead if the cursor rested here, else built now. */
   function gunFire(aim) {
-    var model = P.m, ms = aim.ms || meshOf(model);
-    if (typeof nsoNonSolid === 'function' && nsoNonSolid(model)) {
-      var nr = 'GUN does not apply to "' + model.name + '" - it is flagged non-solid, so it has no closed inside to fill. Nothing changed.';
-      say(nr, true); gunReadout(nr);
-      return false;
-    }
-    var skip = (typeof nsoMaskFaceList === 'function') ? nsoMaskFaceList(model) : [];
-    if (skip === null) {
-      var sr = 'GUN stood down - a painted recessed patch has no axis and side to check against the faces the foam ' +
-        'would fill against. Clear that paint to spray. Nothing changed.';
-      say(sr, true); gunReadout(sr);
-      return false;
-    }
-    P.base = model.rawTris; P.skip = skip; P.ms = ms; P.up = upRaw(ms); P.aim = aim;
-    P.amount = 0; P.sprayT = performance.now(); P.full = null; P.last = null; P.spraying = true;
+    var pc = gunPiece();
+    if (!pc) return false;
+    if (pc.refuse) { say(pc.refuse, true); gunReadout(pc.refuse); return false; }
+    gunGlowOff();
+    if (P.preTimer) { clearTimeout(P.preTimer); P.preTimer = 0; }
+    P.base = pc.base; P.skip = pc.skip; P.ms = pc.ms; P.up = pc.up; P.aim = aim;
+    P.amount = 0; P.sprayT = performance.now(); P.downT = P.sprayT; P.full = null; P.last = null; P.spraying = true;
     var seq = ++P.seq;
-    gunReadout('aiming…');
-    ghost(true, ms);
+    ghost(true, pc.ms);
+    gunCursor('spray');
     if (state.controls) state.controls.enabled = false;
-    gunAsk(100).then(function (res) {
+    function got(res) {
       if (seq !== P.seq || !P.on) return;
       P.full = res;
       if (!res.ok || !res.changed) {
         P.spraying = false;
         if (state.controls) state.controls.enabled = true;
         ghost(false);
+        gunCursor('no');
         gunReadout(res.reason);
         say(res.reason, !res.ok);
         P.last = res;
@@ -966,8 +1160,16 @@
       }
       P.sprayT = performance.now();
       gunDrawFoam();
-      if (!P.spraying) gunSet();                     // let go before the foam was ready: set what was held
-    });
+      gunReadout(gunWords(0) + ' - holding');
+    }
+    var pre = P.pre;
+    if (pre && pre.base === pc.base && sameSpot(pre.aim, aim)) { got(pre.res); return true; }
+    gunReadout('reading the gap…');
+    /* Two frames, so the ghost and the spraying gun show before the work. */
+    requestAnimationFrame(function () { setTimeout(function () {
+      if (seq !== P.seq || !P.on) return;
+      gunAsk(pc, aim, 100).then(got);
+    }, 0); });
     return true;
   }
 
@@ -990,10 +1192,13 @@
     P.raf = requestAnimationFrame(gunTick);
   }
 
+  /* A press the gun takes: on the piece, or down a gap the cursor already
+     calls ready. Anything else is the orbit's. */
+  function gunTakes(aim) { return !!aim && (!aim.through || !!(P.hover && P.hover.ok && sameSpot(P.hover.aim, aim))); }
   function gunDown(event) {
     if (!P.on || event.button !== 0 || P.spraying || P.finishing) return;
     var aim = gunAim(event);
-    if (!aim) return;                                  // off the piece: the orbit's
+    if (!gunTakes(aim)) return;                        // off the piece: the orbit's
     event.stopPropagation();
     event.preventDefault();
     gunFire(aim);
@@ -1002,18 +1207,31 @@
     if (!P.spraying) return;
     P.spraying = false;
     if (state.controls) state.controls.enabled = true;
-    if (P.full) gunSet();                              // else: set as soon as the foam is ready (gunFire)
+    /* Nothing has visibly risen - a tap, or let go while the gap was still
+       being read: set nothing, and say how to spray. */
+    if (!P.full || !P.full.ok || P.amount < 100 / GUN_SECONDS * (TAP_MS / 1000)) {
+      var early = !P.full;
+      P.seq++;
+      ghost(false);
+      gunDisposeFoam();
+      gunCursor(P.hover && P.hover.ok ? 'ready' : 'plain');
+      var t = early ? 'GUN: let go before the foam was ready - nothing set. Hold until you see it rise.'
+                    : 'GUN: that was a tap - nothing set. Hold the mouse down to spray; the foam rises while you hold.';
+      gunReadout(t); say(t);
+      return;
+    }
+    gunSet();
   }
 
   /* Letting go: the amount reached, set as one Undo. All of it is the foam
      already built; part of it is asked again at exactly that amount. */
   function gunSet() {
-    var full = P.full, model = P.m, base = P.base, amount = P.amount;
+    var full = P.full, model = P.m, base = P.base, amount = Math.max(P.amount, 0.5), pc = { base: P.base, skip: P.skip, up: P.up };
     if (!full || !full.ok || !full.changed) return Promise.resolve(full);
-    if (amount <= 0) amount = 100 / GUN_SECONDS * 0.15;    // a click, not a hold: a short burst
     var seq = ++P.seq;
     P.finishing = true;
-    var ask = amount >= 99.5 ? Promise.resolve(full) : gunAsk(amount);
+    gunCursor('busy');
+    var ask = amount >= 99.5 ? Promise.resolve(full) : gunAsk(pc, P.aim, amount);
     return ask.then(function (res) {
       P.finishing = false;
       ghost(false);
@@ -1021,20 +1239,24 @@
       if (!P.on || seq !== P.seq) return res;
       if ((typeof getActiveModel === 'function' && getActiveModel() !== model) || model.rawTris !== base) {
         say('GUN: the piece changed under the spray. Nothing was set.', true);
+        gunCursor('plain');
         return { ok: false, changed: false, reason: 'the piece changed' };
       }
-      if (!res.ok || !res.changed) { gunReadout(res.reason); say(res.reason, !res.ok); P.last = res; return res; }
+      if (!res.ok || !res.changed) { gunReadout(res.reason); say(res.reason, !res.ok); P.last = res; gunCursor('plain'); return res; }
       if (typeof NSO_sculptCommitRaw !== 'function' || !NSO_sculptCommitRaw(model, res.mesh, 'foamReplace', res.reason)) {
         say('GUN: could not commit the result - nothing changed', true);
         gunReadout('GUN: could not commit the result - nothing changed');
+        gunCursor('plain');
         return { ok: false, reason: 'commit failed' };
       }
       P.sprays++;
       P.last = res;
-      gunReadout(gunWords(res.addedVolume));
+      P.pre = null; P.hover = null;
+      gunReadout(gunWords(res.addedVolume) + ' set - ' + (res.amount >= 99.5 ? 'the gap is filled' : Math.round(res.amount) + '% of the gap'));
       say(res.reason);
       if (typeof updateAdjustUI === 'function') updateAdjustUI();
-      flash(meshOf(model));
+      gunGlow(full, res.level, model);
+      gunPrepare();                                    // the piece as it now is, read for the next gap
       return res;
     });
   }
@@ -1057,19 +1279,31 @@
       })();
     });
   }
+  /* For the drive check: what the cursor would say at a screen point. */
+  function gunHoverAt(x, y) {
+    if (!P.on) return Promise.resolve(null);
+    P.hover = null;
+    return gunHover({ clientX: x, clientY: y, buttons: 0 });
+  }
 
   function gunCancel(quiet) {
     if (!P.on) return false;
-    P.seq++;
-    P.spraying = false; P.finishing = false;
+    P.seq++; P.hoverSeq++;
+    P.spraying = false; P.finishing = false; P.preparing = false;
     if (P.raf) { cancelAnimationFrame(P.raf); P.raf = 0; }
+    if (P.moveRaf) { cancelAnimationFrame(P.moveRaf); P.moveRaf = 0; }
+    if (P.preTimer) { clearTimeout(P.preTimer); P.preTimer = 0; }
     ghost(false);
     gunDisposeFoam();
+    gunGlowOff();
+    gunCursor('');
+    if (P.warmMat) { P.warmMat.dispose(); P.warmMat = null; }
     P.on = false;
     if (state.controls) state.controls.enabled = true;
     gunPanel(false);
     gunReadout('—');
-    P.m = null; P.base = null; P.ms = null; P.full = null; P.aim = null;
+    P.m = null; P.base = null; P.ms = null; P.full = null; P.aim = null; P.pre = null; P.hover = null; P.lastMove = null;
+    if (GM()) GM().forget();
     if (!quiet) say('GUN put away - sprays already set stay; Undo takes them back one at a time');
     return true;
   }
@@ -1081,14 +1315,15 @@
     if (G.on) boxCancel(true);
     var model = (typeof getActiveModel === 'function') ? getActiveModel() : null;
     if (!model) { say('Select a piece first', true); return { ok: false, reason: 'no piece' }; }
-    P.on = true; P.m = model; P.sprays = 0; P.last = null;
+    P.on = true; P.m = model; P.sprays = 0; P.last = null; P.pre = null; P.hover = null;
     if (state.renderer) state.renderer.localClippingEnabled = true;
     gunPanel(true);
     gunReadout('—');
-    say('GUN: aim into a gap - at its wall - and hold the mouse. It fills that gap from the plate to the face; let go to set. ' +
-        'Escape puts it away.');
+    say('GUN: move over the piece - the gun shows a green tick over a gap it can fill. Hold the mouse there to spray, ' +
+        'let go to set. Escape puts it away.');
     P.sprayT = performance.now();
     P.raf = requestAnimationFrame(gunTick);
+    gunPrepare();
     return { ok: true };
   }
 
@@ -1113,6 +1348,7 @@
     state.renderer.domElement.addEventListener('pointerdown', onDown, true);
     state.renderer.domElement.addEventListener('pointerdown', boxDown, true);
     state.renderer.domElement.addEventListener('pointerdown', gunDown, true);
+    state.renderer.domElement.addEventListener('pointermove', gunMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
     window.addEventListener('pointerup', boxUp);
@@ -1166,8 +1402,11 @@
     on: function () { return P.on; },
     /* Spray as a press would: aim { point, dir } raw, held to `amount`. */
     sprayAt: function (aim, amount) { return gunSprayAt(aim, amount); },
+    hoverAt: function (x, y) { return gunHoverAt(x, y); },
+    cursor: function () { return P.cursor; },
     info: function () {
-      return P.on ? { spraying: P.spraying, finishing: P.finishing, amount: P.amount, sprays: P.sprays, readout: P.readout,
+      return P.on ? { spraying: P.spraying, finishing: P.finishing, preparing: P.preparing, amount: P.amount, sprays: P.sprays,
+                      readout: P.readout, cursor: P.cursor, prefetched: !!P.pre, glow: !!P.glow,
                       last: P.last, foam: !!P.foam, modelId: P.m.id } : null;
     },
     objects: function () { return { group: P.group, foam: P.foam, mesh: P.ms }; },

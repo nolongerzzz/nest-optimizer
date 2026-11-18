@@ -569,6 +569,14 @@ withApp(async (page, logs) => {
   check('GUN: armed, its panel up, no box anywhere', await page.evaluate(() => window.nsoFoamGun.on() && !window.NSO_CropCard.lent() &&
         !document.getElementById('foam-gun-panel').hidden && document.getElementById('foam-box-panel').hidden &&
         document.getElementById('btn-foam-gun').getAttribute('aria-pressed') === 'true'));
+  await page.waitForFunction(() => !window.nsoFoamGun.info().preparing, null, { timeout: 30000 });
+  const cur0 = await page.evaluate(() => ({ kind: window.nsoFoamGun.cursor(), css: state.renderer.domElement.style.cursor }));
+  check('...the piece is read on arming, and the cursor is the foam gun (an SVG cursor, nozzle tip at the hotspot)',
+        cur0.kind === 'plain' && /^url\("data:image\/svg\+xml;utf8,.*"\) 1 10, crosshair$/.test(cur0.css), cur0.kind + ' ' + cur0.css.slice(0, 40));
+  const offPiece = await page.evaluate(() => { const r = state.renderer.domElement.getBoundingClientRect(); return [r.left + 8, r.top + 8]; });
+  check('...off the piece the cursor is the plain gun (a press there orbits)', (await page.evaluate(p => window.nsoFoamGun.hoverAt(p[0], p[1]), offPiece)) === 'plain');
+  const topSpot = await pieceSpot(page);
+  check('...over the top face, not into a gap, it shows the red bar', (await page.evaluate(p => window.nsoFoamGun.hoverAt(p.x, p.y), topSpot)) === 'no');
   /* A real press on the piece's top face: the ray meets the top, not a gap. */
   await hold(page, 600, await pieceSpot(page));
   await page.waitForTimeout(1500);
@@ -578,12 +586,16 @@ withApp(async (page, logs) => {
         (await raw(page)).every((x, i) => Object.is(x, rawW[i])), giTop.readout);
   /* Into the long slot, at its wall, held to the end. */
   const rW = await page.evaluate(() => window.nsoFoamGun.sprayAt({ point: [-9.7081, -3.4119, 0], dir: [-1, 0, 0] }, 100)
-    .then(r => ({ ok: r.ok, changed: r.changed, reason: r.reason, added: r.addedVolume })));
+    .then(r => ({ ok: r.ok, changed: r.changed, reason: r.reason, added: r.addedVolume, glow: window.nsoFoamGun.info().glow })));
   await page.waitForTimeout(300);
   const afterW = await raw(page), stW = await statusOf(page);
   check('the long slot: filled plate to face, in the engine\'s words', rW.ok && rW.changed && /^Foam sprayed - 1,044 mm³ into the gap, from the plate to the face/.test(stW), stW);
   check('...one undo entry, the piece closed', (await undoDepth(page)) === depthW + 1 && (await census(page, afterW)).closed);
-  check('...the readout is the volume', (await page.evaluate(() => window.nsoFoamGun.info().readout)) === '+1,044 mm³');
+  const giW = await page.evaluate(() => window.nsoFoamGun.info());
+  check('...the readout says what went in', giW.readout === '+1,044 mm³ set - the gap is filled', giW.readout);
+  check('...and the foam that went in glows over the piece for a moment', rW.glow);
+  await page.waitForTimeout(1600);
+  check('...then fades away', !(await page.evaluate(() => window.nsoFoamGun.info().glow)));
   check('...the gun stays armed for the next gap, the piece no longer a ghost', await page.evaluate(() => window.nsoFoamGun.on() &&
         cutMeshOf(getActiveModel()).material.opacity === 1 && !window.nsoFoamGun.objects().foam && state.controls.enabled));
   await page.click('#btn-undo');
