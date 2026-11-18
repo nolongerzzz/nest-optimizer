@@ -79,6 +79,80 @@
   /* LINE ASSIST (NSO_Sketch.assist): what a pencil stroke is made on release - 'off' (smoothed only), 'straight'
      (straight walls, corners sharp, angles to 15 degrees or the traced walls'), 'auto' (lines, true arcs, the
      rest smooth). Kept in this browser. Shift held on release: Straight for that stroke. */
+  /* BEAD SIDE: where a Drawing Line's width goes from the path drawn - 'centre' (straddling it), 'left' / 'right'
+     of the way it was drawn (the path is then the bead's own edge: follow a wall or a grid line with the cross-hairs
+     and the bead's edge follows them), or 'auto' ("Off wall": the side away from the traced piece, worked out per
+     stroke as it is drawn; with nothing traced, centre). Stored on each line as left / right / centre. */
+  var beadSide = (function () { try { var v = window.localStorage && window.localStorage.getItem('nso.sketch.side'); return v === 'left' || v === 'right' || v === 'centre' ? v : 'auto'; } catch (e) { return 'auto'; } })();
+  function insideTrace(p) {
+    var T = sketch.trace, c = false;
+    if (!T) return false;
+    T.loops.forEach(function (L) {
+      for (var i = 0, j = L.length - 1; i < L.length; j = i++) {
+        var a = L[i], b = L[j];
+        if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+      }
+    });
+    return c;
+  }
+  /* which side of a path a bead of width w goes when the side is Off wall: the one with less of the traced piece in it */
+  function resolveSide(pts, w, closed, want) {
+    var mode = want || beadSide;
+    if (mode !== 'auto') return mode;
+    if (!sketch.trace || pts.length < 2) return 'centre';
+    var L = 0, R = 0, n = closed ? pts.length : pts.length - 1, step = Math.max(1, Math.floor(n / 24)), d = w / 2 + 0.05;
+    for (var i = 0; i < n; i += step) {
+      var a = pts[i], b = pts[(i + 1) % pts.length], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+      if (len < 1e-6) continue;
+      var m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], nl = [-dy / len, dx / len];
+      if (insideTrace([m[0] + nl[0] * d, m[1] + nl[1] * d])) L++;
+      if (insideTrace([m[0] - nl[0] * d, m[1] - nl[1] * d])) R++;
+    }
+    if (L === R) return 'centre';                                   // no wall beside it (or walls both sides): straddle it
+    return L > R ? 'right' : 'left';
+  }
+  /* A bead whose edge runs along a traced wall: how far it reaches back into the wall (Fill area grows), so the weld
+     bites the wall instead of only touching it. 0 when the side of the path away from the bead is not the piece. */
+  function wallBite(pts, w, closed, align) {
+    if (!sketch.trace || (align !== 'left' && align !== 'right') || pts.length < 2) return 0;
+    var s0 = align === 'left' ? -1 : 1, hit = 0, all = 0, n = closed ? pts.length : pts.length - 1, step = Math.max(1, Math.floor(n / 24));
+    for (var i = 0; i < n; i += step) {
+      var a = pts[i], b = pts[(i + 1) % pts.length], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+      if (len < 1e-6) continue;
+      all++;
+      if (insideTrace([(a[0] + b[0]) / 2 - dy / len * 0.1 * s0, (a[1] + b[1]) / 2 + dx / len * 0.1 * s0])) hit++;
+    }
+    if (!all || hit * 2 < all) return 0;
+    var v = parseFloat(($('dr-bite') || {}).value);
+    return v >= 0 ? v : 0.3;
+  }
+  function setLineSide(o, align) { o.align = align; o.bite = wallBite(o.pts, o.width, o.closed, align); }
+  function setBeadSide(v) {
+    beadSide = v;
+    try { if (window.localStorage) window.localStorage.setItem('nso.sketch.side', v); } catch (e) { /* fine */ }
+    var s0 = selected().filter(function (o) { return o.kind === 'line'; });
+    if (s0.length) {
+      remember();
+      s0.forEach(function (o) { setLineSide(o, resolveSide(o.pts, o.width, o.closed, v)); });
+      changed();
+    } else sync();
+    say(v === 'centre' ? 'Bead side Centre: the bead straddles the path you draw.' : v === 'auto'
+      ? 'Bead side Off wall: the path you draw is the bead\'s edge, and the bead goes on the side away from the traced piece.'
+      : 'Bead side ' + (v === 'left' ? 'Left' : 'Right') + ': the path you draw is the bead\'s edge; the bead is on its ' + v + ', as you draw it.');
+  }
+  function flipSide() {
+    var s0 = selected().filter(function (o) { return o.kind === 'line'; });
+    if (!s0.length) return;
+    remember();
+    s0.forEach(function (o) { setLineSide(o, o.align === 'left' ? 'right' : o.align === 'right' ? 'left' : 'left'); });
+    changed();
+  }
+  /* a line's bead, as it will be built: its outline (filled), or - while drawing - its centre line moved half a width over */
+  function beadPath(pts, w, closed, align) {
+    if (align === 'left' || align === 'right') return SK.offsetPath(pts, (align === 'left' ? 1 : -1) * w / 2, closed);
+    return pts;
+  }
+
   var assistMode = (function () { try { var v = window.localStorage && window.localStorage.getItem('nso.sketch.assist'); return v === 'straight' || v === 'auto' ? v : 'off'; } catch (e) { return 'off'; } })();
   function setAssist(m) {
     assistMode = m;
@@ -103,6 +177,35 @@
       });
     }
     return simpleCache.loops;
+  }
+  /* The corners of the walls: where two straight walls (2 mm or longer) meet through a fillet, the point their lines
+     cross - the sharp corner a fillet rounds off, where a path along one wall turns onto the other. Only where the
+     walls turn by more than 20 degrees and the crossing lies within 3 mm of the fillet. */
+  var wallCache = { t: null, pts: null };
+  function wallCorners() {
+    var T = sketch.trace;
+    if (!T) return [];
+    if (wallCache.t === T) return wallCache.pts;
+    var out = [];
+    traceSimple().forEach(function (L) {
+      var n = L.length, longs = [];
+      for (var i = 0; i < n; i++) { var a = L[i], b = L[(i + 1) % n]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) >= 2) longs.push(i); }
+      for (var k = 0; k < longs.length; k++) {
+        var i0 = longs[k], i1 = longs[(k + 1) % longs.length];
+        if (longs.length < 2) break;
+        var a0 = L[i0], b0 = L[(i0 + 1) % n], a1 = L[i1], b1 = L[(i1 + 1) % n];
+        var d0 = [b0[0] - a0[0], b0[1] - a0[1]], d1 = [b1[0] - a1[0], b1[1] - a1[1]];
+        var l0 = Math.hypot(d0[0], d0[1]), l1 = Math.hypot(d1[0], d1[1]);
+        var cr = (d0[0] * d1[1] - d0[1] * d1[0]) / (l0 * l1);
+        if (Math.abs(cr) < Math.sin(20 * Math.PI / 180)) continue;
+        if ((i0 + 1) % n === i1) continue;                             // already a sharp corner of the trace
+        var den = d0[0] * d1[1] - d0[1] * d1[0], t = ((a1[0] - a0[0]) * d1[1] - (a1[1] - a0[1]) * d1[0]) / den;
+        var X = [a0[0] + d0[0] * t, a0[1] + d0[1] * t];
+        if (Math.hypot(X[0] - b0[0], X[1] - b0[1]) <= 3 && Math.hypot(X[0] - a1[0], X[1] - a1[1]) <= 3) out.push(X);
+      }
+    });
+    wallCache.t = T; wallCache.pts = out;
+    return out;
   }
   function traceDirs() {
     var T = sketch.trace, out = [];
@@ -207,6 +310,7 @@
     return base + n;
   }
   function addObject(o) {
+    if (o.kind === 'line' && o.align === undefined) setLineSide(o, resolveSide(o.pts, o.width, o.closed));
     remember();
     o.id = sketch.nextId++;
     o.name = o.name || nextName(o.kind);
@@ -218,10 +322,17 @@
   }
 
   /* Each object's outline check, kept until the object changes: a red object and the reason. */
-  var checked = new WeakMap();
+  var checked = new WeakMap(), outlined = new WeakMap();
+  function outlineOf(o) {
+    var key = JSON.stringify([o.kind, o.closed, o.width, o.align, o.bite, o.pts]), c = outlined.get(o);
+    if (c && c.key === key) return c.regions;
+    var r = SK.outlines(o);
+    outlined.set(o, { key: key, regions: r.ok ? r.regions : null });
+    return r.ok ? r.regions : null;
+  }
   function problem(o) {
     if (o.kind === 'guide') return '';                                // drawn to snap and fill to; never built
-    var key = JSON.stringify([o.kind, o.closed, o.width, o.pts]), c = checked.get(o);
+    var key = JSON.stringify([o.kind, o.closed, o.width, o.align, o.bite, o.pts]), c = checked.get(o);
     if (c && c.key === key) return c.bad;
     var r = SK.outlines(o);
     checked.set(o, { key: key, bad: r.ok ? '' : r.reason });
@@ -329,11 +440,18 @@
         ctx.fill('evenodd');
         ctx.lineWidth = 1.5; ctx.strokeStyle = edge; ctx.stroke();
       } else {
-        pathOf(o.pts, o.closed);
-        ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-        ctx.lineWidth = Math.max(1, o.width * D.view.z); ctx.strokeStyle = bad ? 'rgba(248,113,113,0.55)' : (sel ? 'rgba(163,230,53,0.55)' : 'rgba(56,189,248,0.55)');
-        ctx.stroke();
-        ctx.lineWidth = 1; ctx.strokeStyle = edge; ctx.stroke();
+        var band = bad ? 'rgba(248,113,113,0.55)' : (sel ? 'rgba(163,230,53,0.55)' : 'rgba(56,189,248,0.55)'), ol = bad ? null : outlineOf(o);
+        if (ol) {                                                     // the bead as it will be built
+          ctx.beginPath();
+          ol.forEach(function (reg) { reg.forEach(function (L) { L.forEach(function (p, i) { var q = toScreen(p); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); }); });
+          ctx.fillStyle = band; ctx.fill('evenodd');
+        } else {
+          pathOf(o.pts, o.closed);
+          ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+          ctx.lineWidth = Math.max(1, o.width * D.view.z); ctx.strokeStyle = band; ctx.stroke();
+        }
+        pathOf(o.pts, o.closed);                                      // the path drawn: with a side, the bead's edge
+        ctx.lineWidth = o.align === 'left' || o.align === 'right' ? 1.5 : 1; ctx.strokeStyle = edge; ctx.stroke();
       }
     });
     /* what the Line tool's point is snapped to */
@@ -347,13 +465,21 @@
       ctx.fillText(D.hint.label, hs[0] + 10, hs[1] - 8);
       ctx.restore();
     }
-    /* the stroke being drawn */
+    /* the stroke being drawn: a line's bead where it will be (Bead side), and the path itself */
     if (D.draft && D.draft.pts.length) {
       ctx.save();
-      pathOf(D.draft.pts, D.draft.closedPreview);
+      var isLine = defaults.kind === 'line', dp = D.draft.pts;
+      if (isLine && dp.length >= 2) {
+        var al = resolveSide(dp, defaults.width, !!D.draft.closedPreview), cl = beadPath(SK.rdp(dp, 0.01), defaults.width, !!D.draft.closedPreview, al);
+        pathOf(cl, D.draft.closedPreview);
+        ctx.lineJoin = al === 'centre' ? 'round' : 'miter'; ctx.lineCap = al === 'centre' ? 'round' : 'butt';
+        ctx.strokeStyle = COL.draft; ctx.lineWidth = Math.max(1, defaults.width * D.view.z); ctx.globalAlpha = 0.45;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      pathOf(dp, D.draft.closedPreview);
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      ctx.strokeStyle = COL.draft; ctx.lineWidth = defaults.kind === 'line' ? Math.max(1, defaults.width * D.view.z) : 1.5;
-      ctx.globalAlpha = defaults.kind === 'line' ? 0.6 : 1;
+      ctx.strokeStyle = COL.draft; ctx.lineWidth = isLine ? 1.5 : 1.5;
       ctx.stroke(); ctx.restore();
       if (D.draft.kind === 'line' && D.draft.pts.length) {
         var f = toScreen(D.draft.pts[0]); ctx.fillStyle = COL.draft; ctx.fillRect(f[0] - 3, f[1] - 3, 6, 6);
@@ -489,6 +615,7 @@
   /* onto the traced outline: a corner within 10 px, else the nearest point of an edge within 8 px */
   /* ---------------------------------------------------------------- the Line tool's snaps
      What a click (or the point following the pointer) lands on, first that applies:
+       wall corner where two straight walls meet through a fillet, the point their lines cross, within 14 px;
        corner     a traced corner, or a point of something drawn, within 10 px;
        meets      on a line held to a wall's angle (below), where it crosses a traced edge or a drawn line, within
                   24 px of the pointer - the point that stops exactly on the wall;
@@ -507,7 +634,10 @@
     return { segs: segs, pts: pts };
   }
   function lineSnap(prev, p, shift) {
-    var T = snapTargets(), px = 1 / D.view.z, best = null, bd = 10 * px;
+    var T = snapTargets(), px = 1 / D.view.z, best = null, bd = 14 * px;
+    if (sketch.trace && D.snapEdge) wallCorners().forEach(function (q) { var d = Math.hypot(p[0] - q[0], p[1] - q[1]); if (d < bd) { bd = d; best = q; } });
+    if (best) return { p: best.slice(), label: 'corner of the walls' };
+    bd = 10 * px;
     T.pts.forEach(function (q) { var d = Math.hypot(p[0] - q[0], p[1] - q[1]); if (d < bd) { bd = d; best = q; } });
     if (best) return { p: best.slice(), label: 'corner' };
     if (prev) {
@@ -889,7 +1019,7 @@
     remember();
     D.sel = [];
     s.forEach(function (o) {
-      var c = { kind: o.kind, closed: o.closed, width: o.width, height: o.height, pts: o.pts.map(function (p) { return [p[0] + 5, p[1] - 5]; }) };
+      var c = { kind: o.kind, closed: o.closed, width: o.width, height: o.height, align: o.align, bite: o.bite, pts: o.pts.map(function (p) { return [p[0] + 5, p[1] - 5]; }) };
       c.id = sketch.nextId++; c.name = nextName(c.kind);
       sketch.objects.push(c); D.sel.push(c.id);
     });
@@ -944,6 +1074,10 @@
     $('dr-height').placeholder = f2(sketch.height);
     ['dr-w', 'dr-h', 'dr-x', 'dr-y', 'dr-rot'].forEach(function (id) { $(id).disabled = !b; });
     ['dr-mirror-x', 'dr-mirror-y', 'dr-del', 'dr-dup', 'dr-cleanup'].forEach(function (id) { $(id).disabled = !s.length; });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-dr-side]'), function (x) {
+      var on = x.getAttribute('data-dr-side') === beadSide; x.classList.toggle('is-on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    $('dr-side-flip').disabled = !s.some(function (o) { return o.kind === 'line'; });
     Array.prototype.forEach.call(root.querySelectorAll('[data-dr-assist]'), function (x) {
       var on = x.getAttribute('data-dr-assist') === assistMode; x.classList.toggle('is-on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
@@ -964,7 +1098,7 @@
       var bad = problem(o);
       var row = h('button', { type: 'button', cls: 'dr-obj' + (D.sel.indexOf(o.id) >= 0 ? ' is-on' : '') + (bad ? ' is-bad' : ''), 'data-dr-obj': String(o.id), title: bad || (o.name + ' - click to pick, Shift-click to add') }, [
         thumb(o),
-        h('span', { cls: 'dr-obj-text' }, [h('span', { cls: 'dr-obj-name', text: o.name }), h('span', { cls: 'dr-obj-kind', text: (o.kind === 'fill' ? 'Drawing Fill' : o.kind === 'guide' ? 'Guide · not built' : 'Drawing Line' + (o.closed ? ' · ring' : '')) + (o.height != null ? ' · ' + f2(o.height) + ' mm' : '') })])
+        h('span', { cls: 'dr-obj-text' }, [h('span', { cls: 'dr-obj-name', text: o.name }), h('span', { cls: 'dr-obj-kind', text: (o.kind === 'fill' ? 'Drawing Fill' : o.kind === 'guide' ? 'Guide · not built' : 'Drawing Line' + (o.closed ? ' · ring' : '') + (o.align === 'left' || o.align === 'right' ? ' · edge, bead ' + o.align : '')) + (o.height != null ? ' · ' + f2(o.height) + ' mm' : '') })])
       ]);
       row.addEventListener('click', function (e) {
         if (e.shiftKey) { var i = D.sel.indexOf(o.id); if (i >= 0) D.sel.splice(i, 1); else D.sel.push(o.id); }
@@ -1018,6 +1152,12 @@
       group('Process type', [kindSeg]),
       group('Line', [field('dr-width', 'W', 'Line width, mm - of what is picked, or the next line', 'mm', { min: String(SK.MIN_WIDTH) })]),
       group('Height', [field('dr-height', '', 'How far what is picked stands out of the face, mm. Blank: the drawing\'s height', 'mm', { min: String(SK.MIN_HEIGHT) })]),
+      group('Bead side', [h('div', { cls: 'dr-seg', role: 'group', 'aria-label': 'Bead side' }, [
+        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'centre', id: 'dr-side-centre', text: 'Centre', title: 'The bead straddles the path you draw' }),
+        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'left', id: 'dr-side-left', text: 'Left', title: 'The path you draw is the bead\'s edge; the bead lies to its left, as you draw it' }),
+        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'right', id: 'dr-side-right', text: 'Right', title: 'The path you draw is the bead\'s edge; the bead lies to its right, as you draw it' }),
+        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'auto', id: 'dr-side-auto', text: 'Off wall', title: 'The path you draw is the bead\'s edge, and the bead goes on the side away from the traced piece: follow a wall with the cross-hairs and the bead is laid against it' })
+      ]), btn('dr-side-flip', 'Flip', 'Put the picked lines\' beads on the other side of their paths')]),
       group('Mirror', [btn('dr-mirror-x', '⇋', 'Mirror left-right'), btn('dr-mirror-y', '⇵', 'Mirror up-down')]),
       group('Size (mm)', [field('dr-w', 'W', 'Width of what is picked', ''), h('button', { type: 'button', id: 'dr-lock', cls: 'btn btn-secondary dr-lock', text: '🔒', title: 'Keep the aspect when W, H or a corner handle changes the size', 'aria-pressed': 'true' }), field('dr-h', 'H', 'Height (on the sheet) of what is picked', '')]),
       group('Rotate', [field('dr-rot', '', 'Turn what is picked by this many degrees about its centre (Enter)', '°', { step: '1' })]),
@@ -1087,6 +1227,8 @@
     $('dr-del').addEventListener('click', del);
     $('dr-dup').addEventListener('click', duplicate);
     $('dr-cleanup').addEventListener('click', cleanUp);
+    $('dr-side-flip').addEventListener('click', flipSide);
+    Array.prototype.forEach.call(root.querySelectorAll('[data-dr-side]'), function (b) { b.addEventListener('click', function () { setBeadSide(b.getAttribute('data-dr-side')); cv.focus(); }); });
     Array.prototype.forEach.call(root.querySelectorAll('[data-dr-assist]'), function (b) { b.addEventListener('click', function () { setAssist(b.getAttribute('data-dr-assist')); cv.focus(); }); });
     $('dr-lock').addEventListener('click', function () { D.lock = !D.lock; sync(); });
     $('dr-snap').addEventListener('change', function () { D.snap = $('dr-snap').checked; });
@@ -1225,7 +1367,9 @@
     trace: function (id, at) { if (!D) return { ok: false, reason: 'the editor is shut' }; $('dr-trace-piece').value = String(id); $('dr-trace-at').value = at == null ? '' : String(at); return { ok: doTrace(), trace: sketch.trace }; },
     assist: function (m) { if (m) setAssist(m); return assistMode; },
     fillAt: function (p) { if (!D) return null; return fillArea(p); },
+    wallCorners: function () { return wallCorners(); },
     snapAt: function (prev, p, shift) { return D ? lineSnap(prev, p, !!shift) : null; },
+    side: function (v) { if (v) setBeadSide(v); return beadSide; },
     info: function () { return D ? { tool: D.tool, sel: D.sel.slice(), objects: sketch.objects.length, kind: defaults.kind, view: clone(D.view), history: D.history.length } : null; }
   };
 
