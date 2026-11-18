@@ -44,6 +44,7 @@ merging its list by hand. The list below is generated.
 - [CTH checks](handoff/cth-checks.md)
 - [Current factory (do not rewrite from this file)](handoff/current-factory.md)
 - [Curving paths - the first multi-segment path primitive](handoff/curving-paths-the-first-multi-segment-path-primitive.md)
+- [Cut card: Blade block at the top (Chop / Dice / Notch / Plane, Whole plate on its own row), the Plane blade, Rotate label gap, import-with-card-open fix (2026-11-18)](handoff/cut-card-blade-block-at-top-plane-blade-import-fix.md)
 - [Cut card: Mitre and Bevel numbers in the wheel centres, wheel names at the top-left corners, instructional text gone (2026-11-18)](handoff/cut-card-mitre-bevel-numbers-in-the-wheels-corner-labels.md)
 - [Cut card: the Rotate piece number is the centre of its wheel; the blade-placed hint line is gone (2026-11-18)](handoff/cut-card-rotate-number-in-the-wheel-hint-line-gone.md)
 - [Cut: Whole plate - one level blade across every piece, to shorten a plate of print tests (2026-11-05)](handoff/cut-plate.md)

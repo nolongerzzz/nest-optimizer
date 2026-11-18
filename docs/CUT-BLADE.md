@@ -1,13 +1,16 @@
 # Cut: the sized blade, strands, and notches
 
-The Cut card's blade has three modes (the Blade row), and two switches above it.
-(A fourth, **Whole plate** - one level blade across every piece on the plate -
-is its own write-up: [CUT-PLATE.md](CUT-PLATE.md).)
+The Cut card's **Blade** block is the first thing in the card, under the Cut | Crop switch: a row of four buttons - **Chop**, **Dice**,
+**Notch**, **Plane** - and, on a row of its own under them as one thin full-width button, **Whole plate** (one level blade across every
+piece on the plate: its own write-up, [CUT-PLATE.md](CUT-PLATE.md)). The fields each blade shows (Dice's Width / Depth / Kerf, Whole
+plate's Height, Notch's, Follow strand's) open directly under the buttons. (Chop and Dice were "Full blade" and "Sized blade";
+the ids `btn-cut-blade-full` / `-sized` and the modes `full` / `sized` are unchanged.)
 
-- **Full blade** (the default, unchanged): a plane across the whole piece. It
+- **Plane**: shave an end off flat - see [Plane](#plane) below.
+- **Chop** (the default, unchanged): a plane across the whole piece. It
   splits everything in its path, all the way through, with no kerf. One piece
   becomes two that add back to the original.
-- **Sized blade**: a *box* - `Width` across the cut, `Depth` into the piece,
+- **Dice**: a *box* - `Width` across the cut, `Depth` into the piece,
   `Kerf` thick - that takes out only its own volume. Use it to cut **between**
   things (a blade narrower than the section leaves whatever else is in the
   full blade's path alone) and to cut **into** a face without going through.
@@ -92,6 +95,23 @@ Files: `nso_notch.js` (the geometry, THREE-free, `npm run notch:test`),
 wiring), `app-core.js` (the click's point and face, the ring grab under Cut), `app-rotate-handles.js` (rings under Cut), the Cut card
 in `index.html`. Real-browser checks: `npm run notch:drive` (bars) and
 `npm run notch:strand-drive` (a spiral of cord).
+
+## Plane
+
+**Plane** is Chop with one side thrown away: the blade is the same (slider, the mm box, mitre, bevel), but Cut takes the **nearer end** of
+the piece off at the plane, all the way across, caps the cut face flat, and keeps **one piece** - the same name, in the place it stood, no
+gap and no second piece. The readout says what it will do: `PLANE @ 0.2 mm - takes 0.2 mm off the low end, keeps 228.4 mm (Y)`. One Undo
+puts the piece back (one step per Plane).
+
+Chop and Dice keep 1 mm on each side of the blade (`MIN_CUT_SIDE_MM`): they make two pieces and neither may be a sliver. Plane makes one,
+so its blade may stand **0.1 mm** (the slider's grid step) from either end. That is what it is for: taking off a thin standing artifact -
+the 0.16 mm needles a thicken repair left on a piece's end faces, a rim of squashed first layer, a burr - without losing a millimetre of
+real piece. A mitre or a bevel slants the cut face. Which end comes off is not chosen: it is the nearer one (the low end at dead
+middle). The engine is Chop's own (`cutSplitAt`, app-cut.js, then `rawCut`: weld, clip, flat cap), so what is left is closed;
+`app-cut-plane.js` keeps the one side and replaces the piece. Real-browser check: `npm run cut-plane:drive`.
+
+Plane lands the blade on the 0.1 mm grid, so 0.2 mm from an end face that carries a 0.16 mm needle takes the needle and also the
+0.04 mm of real face under it; a plane exactly on a face needs a finer position than the slider offers.
 
 ## Why a box, not a thinner plane
 

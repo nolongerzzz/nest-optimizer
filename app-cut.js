@@ -191,8 +191,10 @@ function cutMeshOf(m) {
 
 // The nearest and farthest allowed plane, in mm from the low end, on the grid.
 function cutEndLimits(span) {
-  let lo = Math.ceil(CUT_END_MM * 10 - 1e-9) / 10;
-  let hi = Math.floor((span - CUT_END_MM) * 10 + 1e-9) / 10;
+  // The Plane blade (app-cut-plane.js) shaves an end off flat and may stand one grid step from it; every other blade keeps CUT_END_MM.
+  const end = (typeof cutPlaneOn === 'function' && cutPlaneOn()) ? CUT_PLANE_END_MM : CUT_END_MM;
+  let lo = Math.ceil(end * 10 - 1e-9) / 10;
+  let hi = Math.floor((span - end) * 10 + 1e-9) / 10;
   if (!(hi >= lo)) lo = hi = Math.round(span * 5) / 10;   // too short to cut: park mid-piece
   return { lo: lo, hi: hi };
 }
@@ -459,12 +461,13 @@ function cutBladeState() {
   return state.cutBlade;
 }
 
-/** 'full' | 'sized' | 'notch' | 'plate'. Sized and notch both cut a box (b.sized). Plate is the whole-plate blade
-    (app-cut-plate.js): a level plane across every piece, not a blade on one. */
+/** 'full' (the card's Chop) | 'sized' (Dice) | 'notch' | 'plane' | 'plate'. Sized and notch both cut a box (b.sized). Plane is the
+    plain blade with one side thrown away (app-cut-plane.js). Plate is the whole-plate blade (app-cut-plate.js): a level plane across
+    every piece, not a blade on one. */
 function cutSetBladeMode(mode) {
   const b = cutBladeState();
   const was = b.mode;
-  b.mode = mode === 'sized' || mode === 'notch' || mode === 'plate' ? mode : 'full';
+  b.mode = mode === 'sized' || mode === 'notch' || mode === 'plate' || mode === 'plane' ? mode : 'full';
   b.sized = b.mode === 'sized' || b.mode === 'notch';
   // Follow is a box of its own on each blade: a place on the cord is the blade's, and goes when the blade does
   if (b.mode !== was && typeof cutFollowOn === 'function' && !cutFollowOn()) state.cutFollowAt = null;
@@ -798,6 +801,11 @@ function syncCutUI() {
         bl.sizes.depth + ' deep, ' + bl.from + ' (' + axis.toUpperCase() + ')' +
         (bl.isolate ? ', single strand' + (bl.strands > 1 ? ' (1 of ' + bl.strands + ')' : '') : '') + tail;
     }
+  } else if (readout && typeof cutPlaneOn === 'function' && cutPlaneOn()) {
+    const lowOff = cutPlaneTakesLow(mm, span), off = lowOff ? mm : span - mm;
+    readout.textContent = 'PLANE @ ' + mm.toFixed(1) + ' mm - takes ' + off.toFixed(1) + ' mm off the ' + (lowOff ? 'low' : 'high') + ' end, keeps ' +
+      (span - off).toFixed(1) + ' mm  (' + axis.toUpperCase() + ')' +
+      (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
   } else if (readout) {
     readout.textContent =
       'RED LINE @ ' + mm.toFixed(1) + ' mm (no kerf) -> ' +
@@ -3249,7 +3257,7 @@ function cutCapSideX(model) {
   return nearMax >= nearMin ? 'max' : 'min';
 }
 
-function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, stayA, stayB, along) {
+function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, stayA, stayB, along, noGap) {
   if (!state.modelGroup) return;
   clearDisplayMeshes();
   state.placed = [];
@@ -3291,7 +3299,7 @@ function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, 
   let aOff = stayWorld(stayA, srcOri);
   let bOff = stayWorld(stayB, srcOri);
   let ax = aOff.x, az = aOff.z, bx = bOff.x, bz = bOff.z;
-  const pad = SPLIT_VIEW_GAP_MM * 0.5;
+  const pad = noGap ? 0 : SPLIT_VIEW_GAP_MM * 0.5;           // noGap: one piece kept (Plane), nothing to part
   /* `along`: the cut's travel line on the plate, for a square cut across a
      turned piece's length (cutFrame's base turn): the halves part along it,
      away from the blade, as they part along the plate axis a square cut on a
@@ -3665,7 +3673,7 @@ function cutSplitAt(model, info) {
 
 // ===================== The sized blade: card and cut =====================
 const CUT_BLADE_MODES = { full: 'btn-cut-blade-full', sized: 'btn-cut-blade-sized', notch: 'btn-cut-blade-notch',
-                          plate: 'btn-cut-blade-plate' };
+                          plane: 'btn-cut-blade-plane', plate: 'btn-cut-blade-plate' };
 /* [number box, slider, state key]: the three sizes of the Sized blade and the two of Notch. */
 const CUT_BLADE_FIELDS = [['cut-blade-width', 'cut-blade-width-s', 'width'], ['cut-blade-depth', 'cut-blade-depth-s', 'depth'],
                           ['cut-blade-kerf', 'cut-blade-kerf-s', 'kerf'], ['cut-follow-slice', 'cut-follow-slice-s', 'slice'],
@@ -3719,7 +3727,9 @@ function syncCutBladeUI() {
   if (typeof cutFollowSyncUI === 'function') cutFollowSyncUI();
   const btn = document.getElementById('btn-cut');
   if (typeof cutPlateSync === 'function') cutPlateSync();
-  if (btn) btn.title = mode === 'plate'
+  if (btn) btn.title = mode === 'plane'
+    ? 'Shave the nearer end off at the blade: it comes off all the way across and the cut face is capped flat. The offcut is not kept. One Undo puts it back.'
+    : mode === 'plate'
     ? 'Cut every piece on the plate at the blade\'s height. Keep above: what is under the blade goes and the rest is set back on the plate, so each piece is shorter by that height. Keep below: what is above goes. One Undo puts the whole plate back.'
     : mode === 'notch'
     ? 'Cut the notch: a nick of your width and depth in from the edge of the strand under the click. Only that strand is touched, and it stops short of the far side. One Undo puts it back.'

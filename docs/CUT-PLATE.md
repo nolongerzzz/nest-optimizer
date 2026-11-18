@@ -1,6 +1,6 @@
 # Cut: the whole-plate blade
 
-The Cut card's Blade row has a fourth blade, **Whole plate**: one level blade
+The Cut card's Blade block has a fifth blade, **Whole plate** (one thin button on its own row under Chop, Dice, Notch and Plane): one level blade
 across the plate, on a height slider. **Cut** applies it to **every piece it
 crosses, at the same height, in one step.**
 
@@ -35,7 +35,7 @@ Press **Whole plate** in the Blade row.
 With Whole plate on, the per-piece controls (Rotate piece, the mitre and bevel
 dials, the position slider, the readout) stand down, and no piece needs to be
 picked: the **Cut** button is live. A click on a piece still picks it, but drops
-no blade. Pressing **Full blade**, **Sized blade** or **Notch** puts the
+no blade. Pressing **Chop**, **Dice**, **Notch** or **Plane** puts the
 per-piece cut back exactly as it was.
 
 ## What it cuts, and what it leaves

@@ -87,7 +87,8 @@ withApp(async (page, logs) => {
   console.log('1. the card');
   await page.evaluate(() => { document.getElementById('menu-cut').open = true; });
   await page.waitForTimeout(250);
-  check('the Blade row has four buttons, Whole plate the fourth', (await page.$$eval('.cut-blade-mode .btn', b => b.map(x => x.textContent.trim()))).join('|') === 'Full blade|Sized blade|Notch|Whole plate');
+  check('the Blade row has four buttons (Chop, Dice, Notch, Plane), Whole plate one thin button on a row of its own under them', (await page.$$eval('.cut-blade-mode .btn', b => b.map(x => x.textContent.trim()))).join('|') === 'Chop|Dice|Notch|Plane' &&
+    (await page.$$eval('.cut-blade-plate-row .btn', b => b.map(x => x.textContent.trim()))).join('|') === 'Whole plate');
   check('before it is pressed, its fields are hidden', await page.$eval('#cut-plate-fields', e => e.hidden));
   await page.click('#btn-cut-blade-plate');
   await page.waitForTimeout(300);

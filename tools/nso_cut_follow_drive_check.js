@@ -310,6 +310,10 @@ withApp(async (page, logs) => {
   check('the slider shows it, the thumb where the blade is', Math.abs(w0.slider[1] - w0.len) < 0.15 && Math.abs(w0.slider[2] + w0.sMin) < 0.15 && Math.abs(w0.box - w0.slider[2]) < 0.15, JSON.stringify(w0.slider));
   const n0 = (await blade()).normal, startC = w0.c;
 
+  // The Follow rows now sit above the slider (the Blade block is at the top of the card), so the card is taller than a 900 px page and the slider is
+  // inside its own scroll: bring it into view before it is measured and dragged.
+  await page.evaluate(() => document.getElementById('cut-slider').scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(400);
   const sl2 = await R('cut-slider'), thumbAt = (win, v) => sl2.x + 8 + ((v - win.slider[0]) / (win.slider[1] - win.slider[0])) * (sl2.w - 16);
   await page.mouse.move(thumbAt(w0, w0.slider[2]), sl2.cy);
   await page.mouse.down();

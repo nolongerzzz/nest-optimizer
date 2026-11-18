@@ -2672,6 +2672,8 @@ function cutActiveModel(opts) {
     setStatus('Cannot resolve cut plane - reopen Cut', true);
     return;
   }
+  // The Plane blade (app-cut-plane.js) shaves the nearer end off and keeps the rest: its own end limit, one piece out.
+  if (typeof cutPlaneOn === 'function' && cutPlaneOn()) { cutPlaneRun(m, info); return; }
   const axis = info.axis;
   const plateAxis = info.plateAxis || axis;
   const span = info.span;

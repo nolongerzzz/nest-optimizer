@@ -106,7 +106,7 @@ withApp(async (page, logs) => {
     JSON.stringify({ box: [bdeg.cx, bdeg.cy], wheel: [bd.x + bd.w / 2, bd.y + bd.h / 2], plumb: [plumbR.x, plumbR.y] }));
   {
     const labs = await page.evaluate(() => [...document.querySelectorAll('.cut-dial-label')].map(l => { const r = l.getBoundingClientRect(), w = l.parentElement.getBoundingClientRect(); return { t: l.textContent, dx: r.left - w.left, dy: r.top - w.top, w: r.width }; }));
-    check('the three wheel names sit at the wheels\' top-left corners, and Rotate is just "Rotate"', labs.map(l => l.t).join() === 'Mitre,Rotate,Bevel' && labs.every(l => l.dx >= 0 && l.dx < 6 && l.dy >= 0 && l.dy < 6 && l.w < 45), JSON.stringify(labs));
+    check('the three wheel names sit at the wheels\' top-left corners, and Rotate is just "Rotate"', labs.map(l => l.t).join() === 'Mitre,Rotate,Bevel' && labs.every(l => l.dx >= -6 && l.dx < 6 && l.dy >= 0 && l.dy < 6 && l.w < 45), JSON.stringify(labs));
     const stat = await page.evaluate(() => { const e = document.getElementById('cutter-status'); return { text: e.textContent, shown: e.offsetParent !== null }; });
     check('no instructions on the card: the status line is empty and takes no room', stat.text === '' && !stat.shown, JSON.stringify(stat));
     const hints = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools .hint')].filter(e => e.offsetParent !== null).map(e => e.textContent));

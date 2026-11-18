@@ -2207,7 +2207,14 @@ function placeNewModel(id, name, options) {
      Crop's card is armed with no blade and keeps the plate: a piece imported while
      it is open - the cutter for Piece or Outline - lands on the plate beside the rest. */
   if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection && !(typeof cutPlateOn === 'function' && cutPlateOn())) {
+    /* The piece just loaded is the one the cutter works on: showEditPreview shows getActiveModel(), which is state.editId, and
+       nothing else sets it on an upload - so with the Cut card open and nothing picked the preview was skipped, the plate stayed
+       empty, and the status line still said "cutter open, slide red plane". */
+    state.editId = id;
     showEditPreview();
+    renderModelList();                                       // the list marks the picked piece
+    updateEditSize();                                        // and the card's size line and blade follow it
+    if (typeof updateCutterUI === 'function') updateCutterUI();   // and Cut is live again (it was off with no piece to cut)
     setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - cutter open, slide red plane`);
   } else if (!options.keepSelection) {
     // Offset new uploads so they don't stack on existing plate pieces

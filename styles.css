@@ -1329,6 +1329,8 @@ select:focus, input:focus {
 .cut-dialwrap { position: relative; width: 104px; height: 104px; flex: 0 0 auto; }
 /* The wheel's name, at its top-left corner (the rail is a circle, so the corner is free); it never takes a press. */
 .cut-dial-label { position: absolute; left: 0; top: 0; font-size: 12px; line-height: 1; color: #94a3b8; pointer-events: none; }
+/* "Rotate" is the long word: one space further out, so it is as far from the rail as Mitre and Bevel are. */
+.cut-dial-label.cut-dial-label-long { left: -5px; }
 /* In the Bevel row the wheel (wrapped) is the first grid cell, as the bare wheel was. */
 .cut-miter > .cut-dialwrap { grid-column: 1; grid-row: 1; justify-self: start; }
 #edit-card .cut-dialwrap .cut-dial-input { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -1355,7 +1357,11 @@ select:focus, input:focus {
 /* Cut card: the sized blade's mode switch and its three sizes */
 .cut-blade { margin-top: 6px; }
 .cut-blade-mode .btn { flex: 1 1 0; }
-.cut-blade-mode .btn[aria-pressed="true"] { outline: 1px solid var(--accent, #38bdf8); }
+.cut-blade-mode .btn[aria-pressed="true"],
+.cut-blade-plate-row .btn[aria-pressed="true"] { outline: 1px solid var(--accent, #38bdf8); }
+/* Whole plate: one thin button the full width of the card, under the four blades. */
+.cut-blade-plate-row { margin-top: 4px; }
+#edit-card .cut-blade-plate-row .btn { flex: 1 1 100%; width: 100%; padding: 4px 8px; margin-top: 0; }
 /* Whole plate: the blade is level and across every piece, so the per-piece controls (the dials, the position
    slider, the readout) stand down and the plate's own fields (#cut-plate-fields) take their place. */
 .cutter-tools.is-plate .cut-per-piece { display: none; }

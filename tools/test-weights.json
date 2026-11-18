@@ -432,6 +432,7 @@
     "strand:test": {"weight":8000,"note":""},
     "follow:drive": {"weight":90000,"note":""},
     "rotate-dial:drive": {"weight":25000,"note":""},
+    "cut-plane:drive": {"weight":30000,"note":"measured 2026-11-18: about 25 s"},
     "wire:cut-grab": {"weight":60000,"note":""},
     "wire:cut-inside-out": {"weight":51950,"note":""},
     "wire:cut-mitre-drag": {"weight":130050,"note":""},
