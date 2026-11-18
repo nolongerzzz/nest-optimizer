@@ -96,8 +96,23 @@
     return c;
   }
   /* which side of a path a bead of width w goes when the side is Off wall: the one with less of the traced piece in it */
+  /* LEFT and RIGHT are the sides ON THE SCREEN, whichever way the path was drawn: for an upright line Right is the
+     screen's right, for a level one Right is below (for a closed one, Left is inside). The engine's align is the
+     side of the path as its points run, so a path drawn down (or right to left) has the word turned over. The
+     owner drew one line upward and the next downward, both Right, and got the beads on opposite sides. */
+  function runsBackward(pts, closed) {
+    if (pts.length < 2) return false;
+    if (closed) return SK.signedArea(pts) < 0;                        // counter-clockwise: the left is the inside
+    var a = pts[0], b = pts[pts.length - 1];
+    return (b[0] - a[0]) + (b[1] - a[1]) < 0;                          // drawn down or leftward
+  }
+  function screenSide(pts, closed, side) {
+    if (side !== 'left' && side !== 'right') return side;
+    return runsBackward(pts, closed) ? (side === 'left' ? 'right' : 'left') : side;
+  }
   function resolveSide(pts, w, closed, want) {
     var mode = want || beadSide;
+    if (mode === 'left' || mode === 'right') return screenSide(pts, closed, mode);
     if (mode !== 'auto') return mode;
     if (!sketch.trace || pts.length < 2) return 'centre';
     var L = 0, R = 0, n = closed ? pts.length : pts.length - 1, step = Math.max(1, Math.floor(n / 24)), d = w / 2 + 0.05;
@@ -138,7 +153,7 @@
     } else sync();
     say(v === 'centre' ? 'Bead side Centre: the bead straddles the path you draw.' : v === 'auto'
       ? 'Bead side Off wall: the path you draw is the bead\'s edge, and the bead goes on the side away from the traced piece.'
-      : 'Bead side ' + (v === 'left' ? 'Left' : 'Right') + ': the path you draw is the bead\'s edge; the bead is on its ' + v + ', as you draw it.');
+      : 'Bead side ' + (v === 'left' ? 'Left' : 'Right') + ': the path you draw is the bead\'s edge; the bead is on its ' + v + ' on the screen, whichever way you draw' + (v === 'left' ? ' (above a level line)' : ' (below a level line)') + '. X flips it while drawing.');
   }
   function flipSide() {
     var s0 = selected().filter(function (o) { return o.kind === 'line'; });
@@ -310,7 +325,12 @@
     return base + n;
   }
   function addObject(o) {
-    if (o.kind === 'line' && o.align === undefined) setLineSide(o, resolveSide(o.pts, o.width, o.closed));
+    if (o.kind === 'line' && o.align === undefined) {
+      var al0 = resolveSide(o.pts, o.width, o.closed);
+      if (D && D.draftFlip) al0 = al0 === 'left' ? 'right' : al0 === 'right' ? 'left' : 'left';   // X pressed while drawing
+      setLineSide(o, al0);
+    }
+    if (D) D.draftFlip = false;
     remember();
     o.id = sketch.nextId++;
     o.name = o.name || nextName(o.kind);
@@ -470,7 +490,9 @@
       ctx.save();
       var isLine = defaults.kind === 'line', dp = D.draft.pts;
       if (isLine && dp.length >= 2) {
-        var al = resolveSide(dp, defaults.width, !!D.draft.closedPreview), cl = beadPath(SK.rdp(dp, 0.01), defaults.width, !!D.draft.closedPreview, al);
+        var al = resolveSide(dp, defaults.width, !!D.draft.closedPreview);
+        if (D.draftFlip) al = al === 'left' ? 'right' : al === 'right' ? 'left' : 'left';
+        var cl = beadPath(SK.rdp(dp, 0.01), defaults.width, !!D.draft.closedPreview, al);
         pathOf(cl, D.draft.closedPreview);
         ctx.lineJoin = al === 'centre' ? 'round' : 'miter'; ctx.lineCap = al === 'centre' ? 'round' : 'butt';
         ctx.strokeStyle = COL.draft; ctx.lineWidth = Math.max(1, defaults.width * D.view.z); ctx.globalAlpha = 0.45;
@@ -795,12 +817,12 @@
     var p = evMm(e);
     cv.setPointerCapture(e.pointerId);
     if (D.tool === 'pencil') {
-      D.draft = { kind: 'pencil', pts: [p], raw: [p] };
+      D.draft = { kind: 'pencil', pts: [p], raw: [p] }; D.draftFlip = false;
       D.drag = { kind: 'pencil' };
     } else if (D.tool === 'area') {
       fillArea(p);
     } else if (D.tool === 'line') {
-      if (!D.draft || D.draft.kind !== 'line') { var q0 = lineSnap(null, p, e.shiftKey).p; D.draft = { kind: 'line', pts: [q0, q0.slice()] }; }
+      if (!D.draft || D.draft.kind !== 'line') { var q0 = lineSnap(null, p, e.shiftKey).p; D.draft = { kind: 'line', pts: [q0, q0.slice()] }; D.draftFlip = false; }
       else {
         var prev0 = D.draft.pts[D.draft.pts.length - 2], sn = lineSnap(prev0, p, e.shiftKey), q = sn.p;
         var first = D.draft.pts[0], close = D.draft.pts.length > 3 && Math.hypot(toScreen(first)[0] - toScreen(q)[0], toScreen(first)[1] - toScreen(q)[1]) < 9;
@@ -988,6 +1010,11 @@
       remember(); moveBy(dx, dy); return;
     }
     if (mod) return;
+    if (k === 'x' || k === 'X') {                                    // the bead to the other side: of the line being drawn, or the picked lines
+      if (D.draft && defaults.kind === 'line') { D.draftFlip = !D.draftFlip; draw(); say('Bead flipped to the other side of this line.'); }
+      else flipSide();
+      return;
+    }
     var map = { v: 'select', p: 'pencil', l: 'line', r: 'rect', e: 'ellipse', b: 'area' };
     if (map[k.toLowerCase()]) { setTool(map[k.toLowerCase()]); return; }
     if (k.toLowerCase() === 'f') fit();
@@ -1098,7 +1125,7 @@
       var bad = problem(o);
       var row = h('button', { type: 'button', cls: 'dr-obj' + (D.sel.indexOf(o.id) >= 0 ? ' is-on' : '') + (bad ? ' is-bad' : ''), 'data-dr-obj': String(o.id), title: bad || (o.name + ' - click to pick, Shift-click to add') }, [
         thumb(o),
-        h('span', { cls: 'dr-obj-text' }, [h('span', { cls: 'dr-obj-name', text: o.name }), h('span', { cls: 'dr-obj-kind', text: (o.kind === 'fill' ? 'Drawing Fill' : o.kind === 'guide' ? 'Guide · not built' : 'Drawing Line' + (o.closed ? ' · ring' : '') + (o.align === 'left' || o.align === 'right' ? ' · edge, bead ' + o.align : '')) + (o.height != null ? ' · ' + f2(o.height) + ' mm' : '') })])
+        h('span', { cls: 'dr-obj-text' }, [h('span', { cls: 'dr-obj-name', text: o.name }), h('span', { cls: 'dr-obj-kind', text: (o.kind === 'fill' ? 'Drawing Fill' : o.kind === 'guide' ? 'Guide · not built' : 'Drawing Line' + (o.closed ? ' · ring' : '') + (o.align === 'left' || o.align === 'right' ? ' · edge, bead ' + screenSide(o.pts, o.closed, o.align) : '')) + (o.height != null ? ' · ' + f2(o.height) + ' mm' : '') })])
       ]);
       row.addEventListener('click', function (e) {
         if (e.shiftKey) { var i = D.sel.indexOf(o.id); if (i >= 0) D.sel.splice(i, 1); else D.sel.push(o.id); }
@@ -1154,10 +1181,10 @@
       group('Height', [field('dr-height', '', 'How far what is picked stands out of the face, mm. Blank: the drawing\'s height', 'mm', { min: String(SK.MIN_HEIGHT) })]),
       group('Bead side', [h('div', { cls: 'dr-seg', role: 'group', 'aria-label': 'Bead side' }, [
         h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'centre', id: 'dr-side-centre', text: 'Centre', title: 'The bead straddles the path you draw' }),
-        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'left', id: 'dr-side-left', text: 'Left', title: 'The path you draw is the bead\'s edge; the bead lies to its left, as you draw it' }),
-        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'right', id: 'dr-side-right', text: 'Right', title: 'The path you draw is the bead\'s edge; the bead lies to its right, as you draw it' }),
+        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'left', id: 'dr-side-left', text: 'Left', title: 'The path you draw is the bead\'s edge; the bead lies to its left on the screen, whichever way you draw (for a level line: above it; a closed one: inside). X while drawing flips it' }),
+        h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'right', id: 'dr-side-right', text: 'Right', title: 'The path you draw is the bead\'s edge; the bead lies to its right on the screen, whichever way you draw (for a level line: below it; a closed one: outside). X while drawing flips it' }),
         h('button', { type: 'button', cls: 'dr-seg-opt', 'data-dr-side': 'auto', id: 'dr-side-auto', text: 'Off wall', title: 'The path you draw is the bead\'s edge, and the bead goes on the side away from the traced piece: follow a wall with the cross-hairs and the bead is laid against it' })
-      ]), btn('dr-side-flip', 'Flip', 'Put the picked lines\' beads on the other side of their paths')]),
+      ]), btn('dr-side-flip', 'Flip', 'Put the picked lines\' beads on the other side of their paths (X; X while drawing flips the line being drawn)')]),
       group('Mirror', [btn('dr-mirror-x', '⇋', 'Mirror left-right'), btn('dr-mirror-y', '⇵', 'Mirror up-down')]),
       group('Size (mm)', [field('dr-w', 'W', 'Width of what is picked', ''), h('button', { type: 'button', id: 'dr-lock', cls: 'btn btn-secondary dr-lock', text: '🔒', title: 'Keep the aspect when W, H or a corner handle changes the size', 'aria-pressed': 'true' }), field('dr-h', 'H', 'Height (on the sheet) of what is picked', '')]),
       group('Rotate', [field('dr-rot', '', 'Turn what is picked by this many degrees about its centre (Enter)', '°', { step: '1' })]),

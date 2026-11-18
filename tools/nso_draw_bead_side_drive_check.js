@@ -80,6 +80,28 @@ withApp(async (page) => {
   await page.focus('#dr-canvas'); await page.keyboard.press('Control+z'); await page.keyboard.press('Control+z');
   b = await outline(await last());
   check('Ctrl+Z twice: back outside the wall', near(b.x0, tb.x1 - 0.3, 1e-9) && near(b.x1, tb.x1 + W, 1e-9), JSON.stringify(b));
+  console.log('3b. Left and Right are the screen\'s, whichever way a line is drawn (the owner drew one up, one down)');
+  await page.click('#dr-side-right');
+  const ox = tb.x1 + 10;                                          // open sheet, clear of the wall
+  const up = await line([ox, tb.y0 + 2], [ox, tb.y0 + 12]), down = await line([ox + 6, tb.y0 + 12], [ox + 6, tb.y0 + 2]);
+  const bu = await outline(up), bd = await outline(down);
+  const ux = up.pts[0][0], dx0 = down.pts[0][0];                 // where the clicks landed (the helper clicks 2 px off)
+  check('Right, drawn up and drawn down: both beads on the screen\'s right of their lines', near(bu.x0, ux, 1e-9) && near(bu.x1, ux + W, 1e-9) && near(bd.x0, dx0, 1e-9) && near(bd.x1, dx0 + W, 1e-9),
+        JSON.stringify([bu.x0, bu.x1, bd.x0, bd.x1]));
+  const lr = await line([ox, tb.y0 + 16], [ox + 8, tb.y0 + 16]), rl = await line([ox + 8, tb.y0 + 20], [ox, tb.y0 + 20]);
+  const blr = await outline(lr), brl = await outline(rl);
+  check('...level lines drawn either way: Right is below them', near(blr.y1, lr.pts[0][1], 1e-9) && near(blr.y0, lr.pts[0][1] - W, 1e-9) && near(brl.y1, rl.pts[0][1], 1e-9) && near(brl.y0, rl.pts[0][1] - W, 1e-9),
+        JSON.stringify([blr.y0, blr.y1, brl.y0, brl.y1]));
+  check('...and the list says "bead right" for all four', (await page.evaluate(() => Array.from(document.querySelectorAll('#dr-objects .dr-obj-kind')).slice(0, 4).map(x => x.textContent))).every(t => /bead right/.test(t)));
+  await page.click('#dr-tool-line');
+  let sx = await sp([ox + 12, tb.y0 + 2]); await page.mouse.move(sx[0], sx[1]); await page.mouse.click(sx[0], sx[1]);
+  sx = await sp([ox + 12, tb.y0 + 10]); await page.mouse.move(sx[0], sx[1]); await page.mouse.click(sx[0], sx[1]);
+  await page.keyboard.press('x');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(100);
+  const bx2 = await outline(await last());
+  check('X while drawing: that line\'s bead on the other side (left)', near(bx2.x1, ox + 12, 1e-9) && near(bx2.x0, ox + 12 - W, 1e-9), JSON.stringify(bx2));
+  await page.evaluate(() => { const k = NSO_DrawEditor.sketch(); k.objects = k.objects.slice(0, 1); NSO_DrawEditor.setSketch(k); });
   await page.click('#dr-done');
 
   console.log('4. welded');

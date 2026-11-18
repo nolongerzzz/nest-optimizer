@@ -79,12 +79,18 @@ Where a Drawing Line's width goes from the path drawn (top bar, *Bead side*):
 | | |
 |---|---|
 | **Centre** | the bead straddles the path (round ends) |
-| **Left** / **Right** | the path drawn **is the bead's edge**, exactly — corners sharp — and the bead lies wholly to that side of the way it was drawn; its other edge is the path moved the whole width over (mitred corners), its ends square |
+| **Left** / **Right** | the path drawn **is the bead's edge**, exactly — corners sharp — and the bead lies wholly to that side **on the screen, whichever way the path was drawn**: Right of an upright line is the screen's right, of a level line below it; Left of a closed one is inside. Its other edge is the path moved the whole width over (mitred corners), its ends square |
 | **Off wall** (default) | as Left / Right, the side worked out per stroke: the one **away from the traced piece** (samples half a width either side of the path, inside the traced cut or not). Nothing traced beside it: Centre |
 
 Follow a wall or a grid line with the cross-hairs and the bead's edge follows them.
-**Flip** puts the picked lines' beads on the other side. A closed line with a side
-has the path as its outside or inside edge.
+**Flip** (X) puts the picked lines' beads on the other side; **X while drawing** flips
+the line being drawn. A closed line with a side has the path as its outside or inside
+edge.
+
+At first Left / Right were the sides of the way a path ran, as the engine stores them
+(`align`). The owner drew one line upward and the next downward, both Right, and got
+the beads on opposite sides; the editor now turns the word over for a path drawn down
+or leftward (`screenSide`), so the word means the screen's side.
 
 **It bites the wall.** A path run along a wall's face *is* the face: a bead that only
 touches the wall shares a face with it, and the weld refuses it ("would not be
