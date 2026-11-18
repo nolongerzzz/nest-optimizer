@@ -237,6 +237,13 @@ function bounds(s) {
      the strip between the points, less the piece - 0.05063 mm² - x 38.52 mm. */
   gateFloat('welded_step.stl: the seam between the two fronts (' + (Date.now() - t11) + ' ms)', ws, rws, 0.050634 * 38.52, 0.02);
 
+  for (const [name, a, an, b, bn] of [['the right block\'s even front face', [-8, -15.09, 5], [0, -1, 0], [-4, -15.09, -2], [0, -1, 0]],
+                                       ['the left block\'s even top face', [-14, -10, 19.24], [0, 0, 1], [-11, 5, 19.24], [0, 0, 1]]]) {
+    const r = await fl(ws, a, an, b, bn);
+    check('welded_step.stl: two points on ' + name + ' - nothing to float, nothing changed (its float noise is not a dip)',
+          !r.ok && r.kind === 'flat' && r.mesh === ws, r.reason);
+  }
+
   console.log('\npassed ' + pass + ' check(s), ' + fail + ' failure(s)');
   if (fail) { FAILED.forEach(n => console.log('  FAILED: ' + n)); process.exit(1); }
 })().catch(e => { console.error(e); process.exit(1); });

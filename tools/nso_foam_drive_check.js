@@ -649,12 +649,36 @@ withApp(async (page, logs) => {
   await page.keyboard.press('Escape');
   await page.waitForTimeout(100);
   check('...Escape drops the point, and Float stays armed', await page.evaluate(() => window.nsoFoamFloat.on() && !window.nsoFoamFloat.info().pointDown));
-  const rF = await page.evaluate(() => window.nsoFoamFloat.floatAt({ point: [-12, -15.036, 5], normal: [0, -1, 0] }, { point: [-8, -15.09, -3], normal: [0, -1, 0] })
-    .then(r => ({ ok: r.ok, changed: r.changed, reason: r.reason, added: r.addedVolume, glow: window.nsoFoamFloat.info().glow })));
+  /* Two points on an even face: nothing to float - no foam on screen, no undo entry. */
+  const rEven = await page.evaluate(() => window.nsoFoamFloat.floatAt({ point: [-8, -15.09, 5], normal: [0, -1, 0] }, { point: [-4, -15.09, -2], normal: [0, -1, 0] })
+    .then(r => ({ ok: r.ok, kind: r.kind, reason: r.reason, fill: !!window.nsoFoamFloat.objects().fill })));
+  check('two points on an even face: nothing to float, in words - no foam shown, no undo entry', !rEven.ok && rEven.kind === 'flat' && !rEven.fill &&
+        (await undoDepth(page)) === depthF && /nothing to float/.test(await page.evaluate(() => window.nsoFoamFloat.info().readout)), rEven.reason);
+  /* The seam: the foam fills along it on screen, inside the piece, then it is set. */
+  await page.evaluate(() => {
+    window.__fl = { seen: 0, inside: true };
+    const go = window.nsoFoamFloat.floatAt({ point: [-12, -15.036, 5], normal: [0, -1, 0] }, { point: [-8, -15.09, -3], normal: [0, -1, 0] });
+    (function watch() {
+      const o = window.nsoFoamFloat.objects();
+      if (o.fill && o.mesh) {
+        window.__fl.seen++;
+        const fb = new THREE.Box3().setFromObject(o.fill), mb = new THREE.Box3().setFromObject(o.mesh).expandByScalar(0.2);
+        if (!mb.containsBox(fb)) window.__fl.inside = false;
+      }
+      if (!window.__fl.done) requestAnimationFrame(watch);
+    })();
+    window.__flp = go.then(r => { window.__fl.done = true; window.__fl.r = { ok: r.ok, changed: r.changed, reason: r.reason }; });
+  });
+  await page.evaluate(() => window.__flp);
+  const fw = await page.evaluate(() => window.__fl);
+  const rF = fw.r;
+  check('the foam is shown filling along the seam, ghosted, before it is set - and it is on the piece, not somewhere else',
+        fw.seen >= 2 && fw.inside, JSON.stringify({ frames: fw.seen, inside: fw.inside }));
   const afterF = await raw(page), stF = await statusOf(page);
   check('the seam between the two welded fronts floats, in the engine\'s words', rF.ok && rF.changed && /^Floated - 1\.9 mm³ .* along the dip\./.test(stF), stF);
-  check('...one undo entry, the piece closed, the readout the volume, the foam glowing', (await undoDepth(page)) === depthF + 1 && (await census(page, afterF)).closed &&
-        (await page.evaluate(() => window.nsoFoamFloat.info().readout)) === '+1.9 mm³ floated' && rF.glow);
+  check('...one undo entry, the piece closed, the readout the volume, the ghost gone', (await undoDepth(page)) === depthF + 1 && (await census(page, afterF)).closed &&
+        (await page.evaluate(() => window.nsoFoamFloat.info().readout)) === '+1.9 mm³ floated' &&
+        (await page.evaluate(() => cutMeshOf(getActiveModel()).material.opacity === 1 && !window.nsoFoamFloat.objects().fill)));
   await page.click('#btn-undo');
   await page.waitForTimeout(400);
   check('...Undo puts the piece back bit for bit', (await raw(page)).every((x, i) => Object.is(x, rawF[i])));

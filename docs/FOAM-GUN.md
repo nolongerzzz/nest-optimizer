@@ -159,6 +159,8 @@ faces, a shallow notch, a pit in a face. It only fills; it never cuts.
   never its far side. A second point on the proud face of a step does not drag the edge into it:
   the edge rests on the step's corner, and the ramp ends there.
 - **Along the dip**: slab by slab from the points' own, out while the dip goes on.
+- **Not a dip**: a dip less than 0.002 mm deep on average along the edge is an even face's float
+  noise - "nothing to float", nothing drawn, nothing set.
 - **The foam** is the GUN's (`fillPockets`, shared): each slab's dip grown 0.03 mm into the piece,
   never past the edge, prisms, one union, the overshoot at the piece's ends trimmed back.
 
@@ -166,8 +168,8 @@ faces, a shallow notch, a pit in a face. It only fills; it never cuts.
 |---|---|
 | **Float** | armed, the crosshair; the GUN, the box and Hollows step aside |
 | **first click** on the piece | a point (a 10 px orange dot); a line follows the mouse from it |
-| **second click** | floated, one Undo; the readout "+1.9 mm³ floated", the foam glowing a moment |
-| **Escape** | drops the first point; with none down, puts Float away |
+| **second click** | the piece turns to a ghost and the foam fills along the dip, one end to the other, in 1.2 s (`FLOAT_SECONDS`), the readout counting "+0.9 mm³ - floating"; then it is set, one Undo, the piece flashes, "+1.9 mm³ floated". Two points on an even face: "nothing to float", nothing drawn |
+| **Escape** | during the fill: stops it, nothing set; else drops the first point; with none down, puts Float away |
 | **Cancel / Float / the card closing / leave-tool** | Float put away; what was floated stays |
 
 Refusals, in words, nothing changed: the two points too close together; nothing to float (the

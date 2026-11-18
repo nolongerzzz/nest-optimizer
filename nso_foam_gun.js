@@ -712,6 +712,7 @@
      only fills. The foam is the GUN's (fillPockets), clipped to the edge.
      =================================================================== */
   var FLOAT_MIN = 0.05;       // mm: two points closer than this are one
+  var FLOAT_MIN_DEPTH = 0.002; // mm: a dip shallower than this on average along the edge is float noise, not a dip
   var FLOAT_BAND = 0.01;      // mm: the strip's outer edge, for telling open air
   var FLOAT_SNAP = 0.906;     // cos 25 deg: s this near a raw axis is that axis
   var FLOAT_WALL = 0.7;       // a normal this far across the plate's vertical (|n.up| under it) is a wall
@@ -783,6 +784,9 @@
       return { dip: dip, held: H };
     }
     var f0 = dipAt(S0);
+    /* Float noise on an even face leaves a dip a few ten-thousandths deep:
+       less than FLOAT_MIN_DEPTH on average along the edge is no dip. */
+    if (f0 && f0.dip.area() / L < FLOAT_MIN_DEPTH) { f0.dip.delete(); f0.held.delete(); f0 = null; }
     if (!f0) { Wst.delete(); far.delete(); return { ok: false, kind: 'flat', reason: 'nothing to float there - the surface between the two points is already straight or proud' }; }
     lap('bridge');
     var first = f0.dip, pockets = new Array(P.nS), helds = new Array(P.nS);

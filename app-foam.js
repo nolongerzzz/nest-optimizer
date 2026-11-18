@@ -927,17 +927,25 @@
   }
   /* The level as a world plane: the plate's vertical is world +Y, and the
      level is a height along the piece's raw `up`. */
-  function gunLevelPlane(level, res, ms) {
-    var f = (typeof nsoRawFrameOf === 'function') ? nsoRawFrameOf(P.m) : null, u = res.up;
+  /* The level as a world plane: a height along the result's own sweep
+     (res.up, raw - the plate's vertical for the GUN, the float's sweep for
+     Float), keeping the side below it. */
+  function gunLevelPlane(level, res, ms, model) {
+    var mdl = model || P.m, f = (typeof nsoRawFrameOf === 'function') ? nsoRawFrameOf(mdl) : null, u = res.up;
     var raw = [u[0] * level, u[1] * level, u[2] * level];
     var loc = f ? nsoLocalPointFromRaw(f, raw) : raw;
+    var ld = (typeof nsoLocalDirFromRaw === 'function') ? nsoLocalDirFromRaw(u) : [u[0], u[2], -u[1]];
+    ms.updateMatrixWorld(true);
     var w = ms.localToWorld(new THREE.Vector3(loc[0], loc[1], loc[2]));
-    return new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), w);
+    var n = new THREE.Vector3(ld[0], ld[1], ld[2]).transformDirection(ms.matrixWorld).negate();
+    return new THREE.Plane().setFromNormalAndCoplanarPoint(n, w);
   }
-  function gunFoamMesh(res) {
+  /* The foam alone, in the piece's own frame - `model` is the piece it was
+     made for (the GUN's, or Float's). */
+  function gunFoamMesh(res, model) {
     var mat = foamMaterial();
     mat.side = THREE.DoubleSide;
-    var o = new THREE.Mesh(localGeo(res.foam, true, P.m), mat);
+    var o = new THREE.Mesh(localGeo(res.foam, true, model || P.m), mat);
     o.geometry.computeVertexNormals();
     o.renderOrder = 42;
     o.userData.skipXray = true;
@@ -966,11 +974,6 @@
 
   /* After a set: the foam that went in, drawn over the piece and fading, so
      what changed can be seen without going to look for it. */
-  /* The glow for any result with foam: up to its own top. */
-  function gunGlowFor(res, model) {
-    if (!res || !res.foam) return;
-    gunGlow(res, null, model);                         // all of it: no level to cut at
-  }
   function gunGlowOff() {
     if (!P.glow) return;
     disposeObj(P.glow.obj);
@@ -981,10 +984,10 @@
     gunGlowOff();
     var ms = meshOf(model);
     if (!res.foam || !res.foam.length || !ms) return;
-    var o = gunFoamMesh(res), g = new THREE.Group();
+    var o = gunFoamMesh(res, model), g = new THREE.Group();
     o.material.transparent = true;
     o.material.depthTest = false;
-    if (level != null) o.material.clippingPlanes = [gunLevelPlane(level + 1e-3, res, ms)];
+    if (level != null) o.material.clippingPlanes = [gunLevelPlane(level + 1e-3, res, ms, model)];
     g.userData.skipXray = true;
     g.userData.nsoFoamGroup = true;
     g.add(o);
@@ -1356,7 +1359,7 @@
      Float again, and the Fill & fix card closing.
      --------------------------------------------------------------- */
 
-  var Fl = { on: false, m: null, a: null, busy: false, group: null, dot: null, line: null, readout: '—', last: null, floats: 0, moveRaf: 0 };
+  var Fl = { on: false, m: null, a: null, busy: false, group: null, dot: null, line: null, readout: '—', last: null, floats: 0, moveRaf: 0, seq: 0, fill: null };
 
   function floatReadout(text) {
     Fl.readout = text;
@@ -1464,22 +1467,67 @@
       Fl.last = res;
       if (model.rawTris !== base) { say('Float: the piece changed meanwhile. Nothing was set.', true); return res; }
       if (!res.ok || !res.changed) { floatReadout(res.reason); say(res.reason, !res.ok); return res; }
-      if (typeof NSO_sculptCommitRaw !== 'function' || !NSO_sculptCommitRaw(model, res.mesh, 'foamReplace', res.reason)) {
-        floatReadout('Float: could not commit the result - nothing changed');
-        say('Float: could not commit the result - nothing changed', true);
-        return { ok: false, reason: 'commit failed' };
-      }
-      Fl.floats++;
-      floatReadout(gunWords(res.addedVolume) + ' floated');
-      say(res.reason);
-      if (typeof updateAdjustUI === 'function') updateAdjustUI();
-      gunGlowFor(res, model);
-      return res;
+      return floatFill(res, model, base);
     });
+  }
+
+  /* The fill: the piece a ghost, the foam rising along the float from one end
+     of the dip to the other in FLOAT_SECONDS, then set as one Undo. Escape,
+     Cancel or the card closing in the middle sets nothing. */
+  var FLOAT_SECONDS = 1.2;
+  function floatFill(res, model, base) {
+    var ms = meshOf(model);
+    if (!ms || !res.foam || !res.foam.length || !res.span) return floatCommit(res, model, base);
+    var seq = ++Fl.seq;
+    Fl.busy = true;
+    ghost(true, ms);
+    var o = gunFoamMesh(res, model), g = new THREE.Group();
+    g.userData.skipXray = true;
+    g.userData.nsoFoamGroup = true;
+    g.add(o);
+    nsoHelpers.attach(ms, g, 'foam', { interactive: false });
+    Fl.fill = { obj: o, group: g };
+    var t0 = performance.now(), lo = res.span[0], hi = res.span[1];
+    return new Promise(function (done) {
+      (function step() {
+        if (seq !== Fl.seq || !Fl.on) { floatFillOff(); ghost(false); Fl.busy = false; return done({ ok: false, changed: false, reason: 'Float stopped - nothing set.' }); }
+        var k = Math.min(1, (performance.now() - t0) / (FLOAT_SECONDS * 1000));
+        o.material.clippingPlanes = [gunLevelPlane(lo + k * (hi - lo) + 1e-3, res, ms, model)];
+        floatReadout(gunWords(res.addedVolume * k) + ' - floating');
+        if (k < 1) { requestAnimationFrame(step); return; }
+        floatFillOff();
+        ghost(false);
+        Fl.busy = false;
+        done(floatCommit(res, model, base));
+      })();
+    });
+  }
+  function floatFillOff() {
+    if (!Fl.fill) return;
+    disposeObj(Fl.fill.obj);
+    if (Fl.fill.group.parent) Fl.fill.group.parent.remove(Fl.fill.group);
+    Fl.fill = null;
+  }
+  function floatCommit(res, model, base) {
+    if (model.rawTris !== base) { say('Float: the piece changed meanwhile. Nothing was set.', true); return res; }
+    if (typeof NSO_sculptCommitRaw !== 'function' || !NSO_sculptCommitRaw(model, res.mesh, 'foamReplace', res.reason)) {
+      floatReadout('Float: could not commit the result - nothing changed');
+      say('Float: could not commit the result - nothing changed', true);
+      return { ok: false, reason: 'commit failed' };
+    }
+    Fl.floats++;
+    floatReadout(gunWords(res.addedVolume) + ' floated');
+    say(res.reason);
+    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+    flash(meshOf(model));
+    return res;
   }
   function floatCancel(quiet) {
     if (!Fl.on) return false;
     if (Fl.moveRaf) { cancelAnimationFrame(Fl.moveRaf); Fl.moveRaf = 0; }
+    Fl.seq++;
+    if (Fl.fill) { floatFillOff(); ghost(false); }
+    Fl.busy = false;
     floatMarkersOff();
     Fl.on = false; Fl.a = null; Fl.m = null;
     if (state.renderer) state.renderer.domElement.style.cursor = '';
@@ -1560,7 +1608,8 @@
       if (G.on) boxCancel();
       if (P.on) gunCancel();
       if (Fl.on) {
-        if (Fl.a && !Fl.busy) { Fl.a = null; floatMarkersOff(); floatReadout('First point dropped - click again to start over.'); }
+        if (Fl.fill) { Fl.seq++; floatReadout('Float stopped - nothing set.'); }
+        else if (Fl.a && !Fl.busy) { Fl.a = null; floatMarkersOff(); floatReadout('First point dropped - click again to start over.'); }
         else floatCancel();
       }
     });
@@ -1605,7 +1654,9 @@
     on: function () { return Fl.on; },
     /* Float between two raw points with their outward normals, as two clicks would. */
     floatAt: function (a, b) { return Fl.on ? floatAt(a, b) : Promise.resolve({ ok: false, reason: 'Float is not armed' }); },
-    info: function () { return Fl.on ? { pointDown: !!Fl.a, busy: Fl.busy, readout: Fl.readout, last: Fl.last, floats: Fl.floats, glow: !!P.glow, modelId: Fl.m.id } : null; }
+    info: function () { return Fl.on ? { pointDown: !!Fl.a, busy: Fl.busy, filling: !!Fl.fill, readout: Fl.readout, last: Fl.last, floats: Fl.floats, modelId: Fl.m.id } : null; },
+    objects: function () { return { fill: Fl.fill && Fl.fill.obj, mesh: Fl.m ? meshOf(Fl.m) : null }; },
+    FLOAT_SECONDS: FLOAT_SECONDS
   };
 
   /* The GUN, for the drive check and leaveTool. */
