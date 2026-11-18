@@ -208,6 +208,32 @@ console.log('fill area');
   check('a guide is never built: one part, and the drawing\'s box is the fill\'s', built.ok && built.parts.length === 1 && near(built.box.h, b.h, 1e-9));
 }
 
+console.log('bead side');
+{
+  const bx = o => { const r = SK.outlines(o); return r.ok ? SK.bounds([{ kind: 'fill', pts: [].concat(...r.regions.map(g => g[0])) }]) : null; };
+  const L = SK.outlines({ kind: 'line', pts: [[0, 0], [10, 0], [10, 8]], width: 1.2, align: 'left' });
+  const loop = L.ok && L.regions[0][0];
+  check('left: one outline, the path drawn is its edge (every point of the path on it)', L.ok && L.regions.length === 1 &&
+        [[0, 0], [10, 0], [10, 8]].every(p => loop.some(q => near(q[0], p[0], 1e-9) && near(q[1], p[1], 1e-9))), JSON.stringify(loop));
+  check('...the bead wholly on the left of the way it was drawn, its inside corner sharp at (8.8, 1.2)', loop && loop.every(p => p[1] >= -1e-9 && p[0] <= 10 + 1e-9) && loop.some(p => near(p[0], 8.8, 1e-9) && near(p[1], 1.2, 1e-9)));
+  const R = SK.outlines({ kind: 'line', pts: [[0, 0], [10, 0], [10, 8]], width: 1.2, align: 'right' }), rb = R.ok && SK.bounds([{ kind: 'fill', pts: R.regions[0][0] }]);
+  check('right: the bead below and beyond it, its outside corner mitred sharp at (11.2, -1.2)', R.ok && near(rb.y0, -1.2, 1e-9) && near(rb.x1, 11.2, 1e-9) && R.regions[0][0].some(p => near(p[0], 11.2, 1e-9) && near(p[1], -1.2, 1e-9)));
+  const v = SK.solids({ height: 2, objects: [{ kind: 'line', pts: [[0, 0], [10, 0]], width: 1.5, align: 'right' }] });
+  check('a straight line with a side: exactly length x width x height, square ends (no round caps)', v.ok && near(v.parts[0].volume, 10 * 1.5 * 2, 1e-6), v.ok && v.parts[0].volume);
+  const ring = SK.outlines({ kind: 'line', closed: true, pts: SK.rectPts(0, 0, 10, 6), width: 1, align: 'left' });
+  check('a ring drawn counter-clockwise, left: the path is its outside edge, the bead inside', ring.ok && ring.regions[0].length === 2 && near(SK.signedArea(ring.regions[0][0]), 60, 1e-9) && near(-SK.signedArea(ring.regions[0][1]), 32, 1e-9));
+  const ringR = SK.outlines({ kind: 'line', closed: true, pts: SK.rectPts(0, 0, 10, 6), width: 1, align: 'right' });
+  check('...right: the path is its inside edge, the bead outside it (corners mitred: 12 x 8)', ringR.ok && near(SK.signedArea(ringR.regions[0][0]), 96, 1e-9) && near(-SK.signedArea(ringR.regions[0][1]), 60, 1e-9));
+  const m = SK.solids({ height: 1, objects: [{ kind: 'line', pts: [[0, 0], [10, 0]], width: 1, align: 'left' }] }, { mirror: 'x' });
+  const mb = box(m.parts[0].soup);
+  check('mirrored, the bead stays on the same side of the path (above it here): built and closed', m.ok && near(mb.hi[1] - mb.lo[1], 1, 1e-9) && FX.topology(m.parts[0].soup).bad === 0);
+  const tight = SK.outlines({ kind: 'line', pts: [[0, 0], [10, 0], [10, 0.5], [0, 0.5]], width: 2, align: 'left' });
+  check('a turn tighter than the width on that side is refused, in words', !tight.ok && /tighter than its width on its left side/.test(tight.reason), tight.reason);
+  const bt = SK.outlines({ kind: 'line', pts: [[0, 0], [10, 0]], width: 1.2, align: 'left', bite: 0.3 }), bb = SK.bounds([{ kind: 'fill', pts: bt.regions[0][0] }]);
+  check('bite 0.3: the bead also reaches 0.3 back over the path (into the wall), its far edge still 1.2 from it', bt.ok && near(bb.y0, -0.3, 1e-9) && near(bb.y1, 1.2, 1e-9), JSON.stringify(bb));
+  check('normalize keeps the side; anything else is centre', SK.normalize({ objects: [{ kind: 'line', pts: [[0, 0], [1, 0]], align: 'right' }, { kind: 'line', pts: [[0, 0], [1, 0]], align: 'x' }] }).objects.map(o => o.align).join() === 'right,centre');
+}
+
 console.log('normalize / describe');
 {
   const n = SK.normalize({ height: 2, objects: [{ kind: 'fill', pts: [[0, 0], [1, 0], [0, 1]] }, { kind: 'line', pts: [[0, 0]] }, { kind: 'line', id: 7, pts: [[0, 0], [3, 0]] }] });

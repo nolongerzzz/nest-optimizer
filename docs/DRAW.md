@@ -16,7 +16,7 @@ DRAW
 | geometry | `nso_sketch.js` (`window.NSO_Sketch`, headless) — outlines, solids |
 | editor | `app-draw-editor.js` (`window.NSO_DrawEditor`) |
 | connect | `app-draw-connect.js` — a SOLO mode on the Assemble editor's stage (`NSO_AsmEditor.mode('drawconnect')`), as Step / Boss is |
-| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`), `npm run draw:assist` (`tools/nso_draw_assist_drive_check.js`), `npm run draw:fill-area` (`tools/nso_draw_fill_area_drive_check.js`), `npm run draw:trace` (`tools/nso_draw_trace_drive_check.js`: trace, snap, where drawn, stretch, weld; `TRACE_STL=` / `TRACE_BLOCK=` run it on a piece of your own); screenshots to `tools/draw-out/` |
+| checks | `npm run sketch:test` (`tools/nso_sketch_test.js`), `npm run draw:drive` (`tools/nso_draw_drive_check.js`), `npm run draw:assist` (`tools/nso_draw_assist_drive_check.js`), `npm run draw:fill-area` (`tools/nso_draw_fill_area_drive_check.js`), `npm run draw:bead-side` (`tools/nso_draw_bead_side_drive_check.js`), `npm run draw:trace` (`tools/nso_draw_trace_drive_check.js`: trace, snap, where drawn, stretch, weld; `TRACE_STL=` / `TRACE_BLOCK=` run it on a piece of your own); screenshots to `tools/draw-out/` |
 
 ## Why
 
@@ -71,6 +71,33 @@ changes until **Connect** or **Add to plate**. The drawing is kept in this
 browser (`localStorage` `nso.sketch.v1`, a convenience).
 
 **Add to plate** makes the drawing a piece of its own, flat on the plate.
+
+### Bead side
+
+Where a Drawing Line's width goes from the path drawn (top bar, *Bead side*):
+
+| | |
+|---|---|
+| **Centre** | the bead straddles the path (round ends) |
+| **Left** / **Right** | the path drawn **is the bead's edge**, exactly — corners sharp — and the bead lies wholly to that side of the way it was drawn; its other edge is the path moved the whole width over (mitred corners), its ends square |
+| **Off wall** (default) | as Left / Right, the side worked out per stroke: the one **away from the traced piece** (samples half a width either side of the path, inside the traced cut or not). Nothing traced beside it: Centre |
+
+Follow a wall or a grid line with the cross-hairs and the bead's edge follows them.
+**Flip** puts the picked lines' beads on the other side. A closed line with a side
+has the path as its outside or inside edge.
+
+**It bites the wall.** A path run along a wall's face *is* the face: a bead that only
+touches the wall shares a face with it, and the weld refuses it ("would not be
+joined"). So a bead whose edge side is the traced piece also reaches *Fill area
+grows* (0.3 mm) back over the path, into the wall, where no one sees it; its far
+edge is still exactly the width from the path (`bite` on the object,
+`NSO_Sketch.edgeOutline`). Measured: a 1.2 mm Off-wall bead down a wall's face makes
+the wall exactly 1.2 mm thicker.
+
+**Corners of the walls.** On a traced piece whose walls meet through a fillet, the
+Line tool also snaps (within 14 px, before anything else) to where the two walls'
+lines cross — the sharp corner the fillet rounds off — so a path along one wall
+turns onto the next exactly there.
 
 ### Furring a space solid: Guide + Fill area
 

@@ -187,7 +187,7 @@
   }
 
   /* One side of a stroke moved out by r: s = +1 the left, -1 the right. */
-  function side(P, r, s, closed) {
+  function side(P, r, s, closed, miter) {
     var n = P.length, m = closed ? n : n - 1, dirs = [], out = [];
     for (var k = 0; k < m; k++) {
       var a = P[k], b = P[(k + 1) % n], L = d2(a, b);
@@ -200,6 +200,13 @@
       var np = nrm(prev), nk = nrm(k), a0 = Math.atan2(np[1], np[0]), a1 = Math.atan2(nk[1], nk[0]);
       if (s > 0) { while (a1 > a0) a1 -= 2 * Math.PI; } else { while (a1 < a0) a1 += 2 * Math.PI; }
       out.push([p[0] + np[0], p[1] + np[1]]);
+      if (miter) {                                                    // a sharp corner, where the two sides' lines cross
+        var bx = np[0] + nk[0], by = np[1] + nk[1], dot = np[0] * bx + np[1] * by;
+        if (dot > 1e-12) {
+          var f = r * r / dot, mx = bx * f, my = by * f;
+          if (Math.hypot(mx, my) <= 4 * r) { out.push([p[0] + mx, p[1] + my]); return; }
+        }
+      }
       arc(p, r, a0, a1, out);
     }
     for (var k2 = 0; k2 < m; k2++) {
@@ -284,6 +291,30 @@
     return [outer, inner.slice().reverse()];
   }
 
+  /* A line with a SIDE (align 'left' / 'right' of the way it was drawn): the path drawn is the bead's own edge,
+     exactly - corners sharp - and the bead lies wholly to that side: its other edge is the path moved the whole
+     width over (mitred corners, the inside of a turn cut where it crosses), its ends square. Closed, the path is
+     the ring's inner or outer edge.
+     bite: a path run along a wall's face is the face - a bead that only touches the wall shares a face with it and
+     the weld refuses it - so the bead also reaches `bite` mm back over the path, into the wall, where no one sees it.
+     -> [loops] (outer counter-clockwise, then the hole) or null */
+  function edgeOutline(P, w, s, closed, bite) {
+    var far = side(P, w, s, closed, true);
+    if (bite > 0) { P = side(P, bite, -s, closed, true); if (P.length < 2) return null; }
+    if (closed) {
+      if (far.length < 3 || selfCross(far, true)) return null;
+      var A = P.slice(), B = far.slice();
+      if (signedArea(A) < 0) A.reverse();
+      if (signedArea(B) < 0) B.reverse();
+      var outer = Math.abs(signedArea(A)) >= Math.abs(signedArea(B)) ? A : B, hole = outer === A ? B : A;
+      if (selfCross(outer, true)) return null;
+      return [outer, hole.slice().reverse()];
+    }
+    var loop = dedupe(P.concat(far.slice().reverse()), 1e-7, true);
+    if (signedArea(loop) < 0) loop.reverse();
+    return selfCross(loop, true) ? null : [loop];
+  }
+
   /* ---------------------------------------------------------------- an object's outlines */
 
   function check(o) {
@@ -310,6 +341,11 @@
       return { ok: true, regions: [[L]] };
     }
     var r = c.width / 2;
+    if (o.align === 'left' || o.align === 'right') {
+      var eo = edgeOutline(c.pts, c.width, o.align === 'left' ? 1 : -1, c.closed, Math.max(0, num(o.bite, 0)));
+      if (!eo) return { ok: false, reason: name + ' turns tighter than its width on its ' + o.align + ' side - draw it wider apart, make it thinner, or put the bead on the other side' };
+      return { ok: true, regions: [eo] };
+    }
     if (c.closed) {
       var ring = ringOutline(c.pts, r);
       if (!ring) return { ok: false, reason: name + ' crosses itself as a ring - open it, or make it a fill' };
@@ -384,7 +420,7 @@
     var b = bounds(objs), embed = Math.max(0, num(opts.embed, 0)), lift = num(opts.lift, 0), parts = [], area = 0, lowered = 0;
     for (var k = 0; k < objs.length; k++) {
       var src = objs[k];
-      var o = { name: src.name, kind: src.kind, closed: src.closed, cap: src.cap, width: num(src.width, 1.2) * sc,
+      var o = { name: src.name, kind: src.kind, closed: src.closed, cap: src.cap, align: src.align, bite: (src.bite || 0) * sc, width: num(src.width, 1.2) * sc,
                 pts: (src.pts || []).map(function (p) { return [(p[0] - b.cx) * sc * sx * mx, (p[1] - b.cy) * sc * sy * my]; }) };
       if (mx * my < 0) o.pts.reverse();
       var h = num(opts.height, NaN);
@@ -453,6 +489,8 @@
       s.objects.push({
         id: o.id != null ? o.id : null, name: String(o.name || ''), kind: o.kind === 'fill' || o.kind === 'guide' ? o.kind : 'line',
         closed: !!o.closed, width: Math.max(MIN_WIDTH, num(o.width, 1.2)),
+        align: o.align === 'left' || o.align === 'right' ? o.align : 'centre',
+        bite: Math.max(0, Math.min(5, num(o.bite, 0))),
         height: o.height == null || o.height === '' ? null : Math.max(MIN_HEIGHT, num(o.height, 1)),
         pts: o.pts.map(function (p) { return [num(p[0], 0), num(p[1], 0)]; })
       });
@@ -872,6 +910,7 @@
   }
 
   var API = {
+    edgeOutline: edgeOutline, offsetPath: function (P, d, closed) { return side(P, Math.abs(d), d >= 0 ? 1 : -1, !!closed, true); },
     smooth: smooth, chaikin: chaikin, rdp: rdp, outlines: outlines, extrude: extrude, solids: solids, overlapGroups: overlapGroups,
     concat: concat, normalize: normalize, bounds: bounds, transform: transform, rectPts: rectPts, ellipsePts: ellipsePts,
     describe: describe, signedArea: signedArea, signedVolume: signedVolume, selfCross: selfCross, pathLength: pathLength,
