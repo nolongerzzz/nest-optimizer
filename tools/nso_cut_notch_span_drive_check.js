@@ -153,6 +153,17 @@ window.__bladeY = function () {
     check('it takes 10 x 2.5 x 16 out of the inside of the wall', near(v0.vol - v1.vol, 400, 0.5), (v0.vol - v1.vol).toFixed(3) + ' of 400; ' + st);
     check('one closed solid', v1.open === 0 && v1.nm === 0 && !/bod(y|ies)/.test(st), st);
 
+    const edge = await page.evaluate(() => { const p = state.placed[state.selectedIndex]; let n = 0, onPiece = false;
+      state.scene.traverse(o => { if (o.name === 'selOutline') { n++; if (o.parent === p.mesh) onPiece = true; } }); return { n, onPiece }; });
+    check('the piece keeps its white edge after the cut (it stayed on the mesh the cut replaced)', edge.n === 1 && edge.onPiece, JSON.stringify(edge));
+    // What a box holds can come apart into the material and a sliver of no volume where it grazes the surface - the
+    // sliver nearest the click. Taking the sliver took nothing: "the blade does not reach the piece".
+    const pick = await page.evaluate(() => {
+      const fake = (vol, pts) => ({ volume: () => vol, getMesh: () => ({ vertProperties: new Float32Array(pts), numProp: 3 }) });
+      return cutNearestPart([fake(0, [0, 0, 0, 0.1, 0, 0, 0, 0.1, 0]), fake(182, [5, 0, 0, 6, 0, 0, 5, 1, 0])], new THREE.Vector3(0, 0, 0));
+    });
+    check('a sliver of no volume nearest the click is passed over for the material', pick === 1, String(pick));
+
     console.log('the slider moves From / To');
     await page.evaluate(() => setCutMm(getCutPlaneLocal(getActiveModel()).mm + 2));
     const moved = await page.evaluate(() => [document.getElementById('cut-notch-from').value, document.getElementById('cut-notch-to').value].map(Number));

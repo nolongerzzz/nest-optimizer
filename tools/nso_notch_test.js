@@ -171,6 +171,24 @@ function soupOfManifold(m) {
   check('the outside of a wall: the whole side, the margin past both open ends', near(uOut.box.min[1], -N.NOTCH_MARGIN_MM, 1e-3) && near(uOut.box.max[1], 14 + N.NOTCH_MARGIN_MM, 1e-3) && near(uOut.box.min[2], 19),
     JSON.stringify(uOut.box));
 
+  // The inside face ending at an OUTSIDE corner that is chamfered (a slot's rounded mouth): the face stops where the
+  // chamfer starts, but the notch must go on through the chamfer into air - stopped there, a strip of the corner stood
+  // on the face as a step. Left wall's inner top corner chamfered 1 x 1: (y 13, z 4) -> (y 14, z 3).
+  const P = (x, y, z) => [x, y, z], pts = [];
+  for (const x of [0, 40]) pts.push(P(x, 4, 0), P(x, 14, 0), P(x, 14, 3), P(x, 13, 4), P(x, 4, 4));
+  const Uc = wasm.Manifold.union([
+    soupToManifold(wasm, N.boxSoup({ min: [0, 0, 0], max: [40, 4, 20] })),
+    wasm.Manifold.hull(pts),
+    soupToManifold(wasm, N.boxSoup({ min: [0, 4, 16], max: [40, 14, 20] }))]);
+  const ccl = N.sectionClusters(soupOfManifold(Uc), 0, 20);
+  const cn = N.notchBox({ axis: 0, dAxis: 2, wAxis: 1, sign: -1, plane: 20, depth: 2, kerf: 1, wCentre: 9, dStart: 4 }, ccl[0]);
+  check('through a chamfered outside corner: on past the chamfer (y 14) and the margin', near(cn.box.max[1], 14 + N.NOTCH_MARGIN_MM, 1e-3) && near(cn.box.min[1], 4, 1e-3),
+    JSON.stringify(cn.box));
+  const ccut = Uc.subtract(soupToManifold(wasm, N.boxSoup(cn.box)));
+  // 1 x 2 x 9 of the face, plus the chamfer's strip inside the band: the triangle z 3..4 over y 13..14 (0.5), and z 2..3 over y 13..14 (1)
+  check('it takes the face and the corner both - nothing left standing on the face', near(Uc.volume() - ccut.volume(), 1 * (2 * 9 + 0.5 + 1), 1e-3),
+    (Uc.volume() - ccut.volume()).toFixed(4) + ' of 19.5');
+
   // A flat blade and a click on the TOP of the left wall (a face in the plane: no way in to read from it),
   // near its inner edge: the blade goes in through the nearest edge of the section - the inside face, z = 4.
   const ed = N.edgeEntry(ucl, 0, [20, 9, 3.6]);

@@ -398,6 +398,8 @@ function cutPlateRun() {
       const before = typeof snapshotPlacedPose === 'function' ? snapshotPlacedPose(idx) : null;
       const oldOff = m.centerOffset ? { x: m.centerOffset.x, z: m.centerOffset.z } : null;
       NSO_sculptCommitRaw(m, d.kept, 'plateCutReplace', null);
+      // the commit made the piece a new mesh; its white edge (if it is selected) goes onto it, not left on the old one
+      if (typeof refreshOutline === 'function') refreshOutline(pl);
       const dx = oldOff && m.centerOffset ? m.centerOffset.x - oldOff.x : 0;
       const dz = oldOff && m.centerOffset ? m.centerOffset.z - oldOff.z : 0;
       // A piece the cut leaves the same footprint (the usual case) is not moved at all: its Undo is the plain geometry

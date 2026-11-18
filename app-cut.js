@@ -3785,10 +3785,15 @@ function cutEdgeFaults(soup) {
   return { open: open, nm: nm, total: open + nm };
 }
 
-/** The component of `parts` (kernel solids, world frame) whose surface passes nearest `qWorld`. */
+/** The component of `parts` (kernel solids, world frame) whose surface passes nearest `qWorld` - of those with a real
+    volume. What a box holds can come apart into the material plus a sliver of no volume where the box grazes the
+    surface (a fillet at the very spot clicked); the sliver lies nearest the click, and taking it took nothing: "the
+    blade does not reach the piece", with 182 mm³ of wall in the box. */
 function cutNearestPart(parts, qWorld) {
   let best = 0, bestD = Infinity;
+  const vols = parts.map(function (p) { return p.volume(); }), most = Math.max.apply(null, vols.concat([0]));
   parts.forEach(function (part, i) {
+    if (!(vols[i] > Math.max(1e-3, most * 1e-4))) return;
     const mesh = part.getMesh(), vp = mesh.vertProperties, np = mesh.numProp || 3;
     let d2 = Infinity;
     for (let v = 0; v + 2 < vp.length; v += np) {
@@ -3856,7 +3861,9 @@ async function cutNotchAt(m, info) {
       // What the box holds falls apart into one solid per strand it crosses; take the one under the click.
       const parts = inter.decompose();
       parts.forEach(keep);
-      strands = parts.length;
+      // a sliver of no volume where the box grazes the surface is not a strand (cutNearestPart passes it over too)
+      const most = Math.max.apply(null, parts.map(p => p.volume()).concat([0]));
+      strands = parts.filter(p => p.volume() > Math.max(1e-3, most * 1e-4)).length;
       if (parts.length > 1) {
         const part = parts[cutNearestPart(parts, qWorld)];
         takesVol = part.volume();
@@ -3928,6 +3935,10 @@ async function cutNotchAt(m, info) {
     const now = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
     removeCutHelper();
     state.previewMesh = now ? now.mesh : null;
+    /* The piece's white edge is a child of its mesh, and the commit made a new mesh: the edge stayed on the old one and
+       the piece showed none while the card was still open on it - the edge the cut is aimed by. Drawn again for the new
+       shape. (Here and not in the commit: a bake elsewhere leaves the build to the next select, which it costs.) */
+    if (now && typeof refreshOutline === 'function') refreshOutline(now);
     if (state.cutterOpen && state.previewMesh) buildCutHelper();
     updateEditSize();
     if (typeof updateAdjustUI === 'function') updateAdjustUI();

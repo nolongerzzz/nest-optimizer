@@ -222,8 +222,10 @@ bounding box is not the wall that was clicked. When the section is not convex
 the notch is fitted to the FACE under the click (nso_notch.js `faceRun`): it
 goes in from that face, as wide as the face runs; where the face ends in an
 inside corner the notch is carried through the fillet and stops flush with the
-wall it meets, and where it ends at an outside corner it runs the 0.5 mm margin
-past - only into air. Cords and bars (convex sections) are notched as before,
+wall it meets. Where it ends at an outside corner the notch goes THROUGH the
+corner - on while there is still material in its band (a rounded or chamfered
+mouth, up to 5 mm), out into air, then the 0.5 mm margin past - so no strip of
+the corner is left standing on the face as a step. Cords and bars (convex sections) are notched as before,
 across the whole strand.
 
 With the blade lying flat (mitre 90, bevel 90) a click on the TOP of a wall is
@@ -237,6 +239,12 @@ blade flat they are heights up from the bottom of the piece; otherwise they
 are on the slider's scale. The slider steps in 0.1 mm; the notch carries the
 remainder, so the ends are exactly what was typed until the slider moves.
 Checked by `npm run notch:span:drive`.
+
+What a box holds can come apart into the material and a sliver of no volume
+where the box grazes the surface; the strand "nearest the click" is chosen among
+the parts with a real volume (it used to pick the sliver and report that the
+blade did not reach the piece). After a Notch, Sized or whole-plate cut the
+piece's white edge is drawn again on its new mesh: it stayed on the old one.
 
 The blade's handle (ball and bar) is drawn over everything, so a press where
 it is seen takes hold of the blade on every blade, never the face behind it.

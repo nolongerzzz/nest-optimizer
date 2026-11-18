@@ -423,7 +423,24 @@
       var e = ends[k], wall = wallPast(e), w2 = e.w + e.dir * NOTCH_MARGIN_MM;
       if (wall !== null) { out.push(wall); closed.push(true); continue; }
       closed.push(false);
-      out.push(clearAt(w2) && clearAt(e.w + e.dir * NOTCH_MARGIN_MM / 2) ? w2 : e.w);
+      /* An outside corner: the notch goes THROUGH it. Past the face's end the corner is often rounded or the wall
+         runs on a little before it turns away (a slot's mouth): stopped at the face's end, that strip stood on the
+         face as a step. So the blade carries on while there is still material in its band, out into air, and then
+         the margin past - within FILLET_MAX_MM; further than that, what is in the way is another feature, and the
+         notch stops flush at the face's end. */
+      var through = null;
+      for (var j = 1; j * FACE_STEP_MM <= FILLET_MAX_MM + 1e-9; j++) {
+        var wj = e.w + e.dir * j * FACE_STEP_MM;
+        if (clearAt(wj)) {
+          var g2 = wj - e.dir * FACE_STEP_MM, b2 = wj;
+          for (var it2 = 0; it2 < 20; it2++) { var m2 = (g2 + b2) / 2; if (clearAt(m2)) b2 = m2; else g2 = m2; }
+          through = b2;
+          break;
+        }
+      }
+      if (through === null) { out.push(e.w); continue; }
+      var past = through + e.dir * NOTCH_MARGIN_MM;
+      out.push(clearAt(past) && clearAt(through + e.dir * NOTCH_MARGIN_MM / 2) ? past : through);
     }
     var wlo = Math.min(out[0], out[1]), whi = Math.max(out[0], out[1]);
     if (!(whi - wlo >= MIN_WIDTH_MM)) return null;
