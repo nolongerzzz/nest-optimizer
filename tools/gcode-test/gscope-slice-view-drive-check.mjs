@@ -9,14 +9,14 @@
  *   1  NORMAL, AS IT WAS. The switch is Normal | Slice; Close inspection is
  *      gone (no button, no API, no badge). On a mesh, Normal is the same
  *      re-frame of the whole part it always was, and changes nothing else.
- *      The Normal side shows its two rows (Region, Whole part); the Slice
- *      settings are a Slice-side row, folded by default, no <details>, their
- *      defaults the plate's printer profile (0.4 / 0.2 on the A1 mini).
- *   2  SLICE shows the plate's one slice - the Supports card's, every piece,
- *      even from an isolated piece. On the Slice side (its six rows) G-scope's
- *      settings unfold and change; they are for a file opened here, and the
- *      next plate slice (Normal, then Slice again) is still the plate's one
- *      slice, with the card's settings (layers, walls, infill)
+ *      The Normal side shows its two rows (Region, Whole part). G-scope SETS
+ *      NOTHING (docs/PRINT-CARD.md): its Slice row is a note of whose settings
+ *      made the slice shown, no field of its own; a file opened here slices at
+ *      the plate's printer profile (0.4 / 0.2 on the A1 mini).
+ *   2  SLICE shows the plate's one slice - the Print card's, every piece,
+ *      even from an isolated piece. Rows changed on the Print card (walls,
+ *      infill density, pattern) are in the next plate slice (Normal, then
+ *      Slice again): the preview is the card's slice, with the card's settings
  *      and ONE list, Features: one row per feature the slice printed, no tab
  *      strip anywhere in the page, and no Overhang / Conflict / Flange rows -
  *      the overhang call is the Supports tool's to mark and the Slice
@@ -29,11 +29,11 @@
  *      exactly the one before slicing - same document, nothing selected,
  *      nothing isolated, nothing hidden or cleared, the same camera, the same
  *      one Features list (a mesh has no line types: the one note), in Piece mode.
- *   4  THE ROUND TRIP AGAIN: the settings kept their values, and the second
- *      slice is the first one, G-code for G-code; Normal is clean again.
+ *   4  THE ROUND TRIP AGAIN: the card's settings kept their values, and the
+ *      second slice is the first one, G-code for G-code; Normal is clean again.
  *   5  AN IMPORTED SLICE is the Slice side with nothing to slice and no mesh:
  *      Slice is on and a click changes nothing; Normal is disabled. CLOSE keeps
- *      the plates and the Slice settings: the next open has them as left.
+ *      the plates, and the Print card its settings: the next open has them.
  *   6  NOTHING IS WRITTEN and nothing throws.
  *
  * Usage: node tools/gcode-test/gscope-slice-view-drive-check.mjs
@@ -116,9 +116,20 @@ async function snapshot(page) {
     };
   });
 }
+/* G-scope's own settings fields (the rows the Print card took over): none may be on the page */
+function ownFields(page) {
+  return page.evaluate(() => Array.from(document.querySelectorAll('#ms-main-card input, #ms-main-card select'))
+    .map((el) => el.id).filter((id) => /^ms-slice-/.test(id)));
+}
+/* the Print card's slice rows the preview is checked against: what they hold, and set as a hand would (the card listens for change) */
+const CARD = { walls: 'slice-set-walls', density: 'slice-set-density', pattern: 'slice-set-pattern' };
 function settings(page) {
-  return page.evaluate(() => ['nozzle', 'layer', 'walls', 'density', 'pattern', 'angle']
-    .map((k) => document.getElementById('ms-slice-' + k).value));
+  return page.evaluate((C) => Object.values(C).map((id) => document.getElementById(id).value), CARD);
+}
+function setCard(page, vals) {
+  return page.evaluate(([C, v]) => Object.keys(v).forEach((k) => {
+    const el = document.getElementById(C[k]); el.value = String(v[k]); el.dispatchEvent(new Event('change', { bubbles: true }));
+  }), [CARD, vals]);
 }
 
 async function main() {
@@ -170,20 +181,15 @@ async function main() {
     await page.getAttribute('#ms-mode-select', 'aria-pressed'), await page.isVisible('#ms-region-note'),
     await page.evaluate(() => ['ms-mode-orbit', 'ms-mode-piece', 'ms-mode-feature', 'ms-mode-line', 'ms-mode-layer', 'ms-mode-row']
       .filter((id) => document.getElementById(id)))], ['piece', false, 'false', false, []]);
-  check('the slice settings are plain fields in the card\'s Slice settings row: no <details>, no VIEW card',
-    await page.evaluate(() => [document.getElementById('ms-slice-settings').tagName,
-      document.querySelectorAll('#microscope details, #microscope summary').length,
-      !!document.getElementById('ms-slice-settings').closest('#ms-main-card #ms-slice-row'),
-      !!document.getElementById('ms-card-view')]), ['DIV', 0, true, false]);
-  check('... every control is in them; the row is the Slice side\'s (not shown here) and folded',
-    [await page.evaluate(() => ['nozzle', 'layer', 'walls', 'density', 'pattern', 'angle']
-      .every((k) => document.getElementById('ms-slice-settings').contains(document.getElementById('ms-slice-' + k)))),
-     await page.evaluate(() => document.getElementById('ms-slice-row').offsetParent !== null),
-     await page.evaluate(() => document.getElementById('ms-slice-settings').hidden),
-     await page.getAttribute('#ms-slice-settings-toggle', 'aria-expanded')], [true, false, true, 'false']);
+  check('G-scope sets nothing: its Slice row is a note in the one card, no settings field, no <details>, no VIEW card',
+    [await ownFields(page),
+     await page.evaluate(() => [!!document.getElementById('ms-slice-settings-note').closest('#ms-main-card #ms-slice-row'),
+       document.querySelectorAll('#microscope details, #microscope summary').length, !!document.getElementById('ms-card-view')])],
+    [[], [true, 0, false]]);
+  check('... the row is the Slice side\'s (not shown here)', await page.evaluate(() => document.getElementById('ms-slice-row').offsetParent !== null), false);
   const prof = await page.evaluate(() => window.NSO_GSCOPE_SLICE.profileDefaults());
-  check('defaults are the plate\'s printer profile: 0.4 nozzle, 0.2 layers, 2 walls, 15 % grid, 30 deg',
-    [await settings(page), prof], [['0.4', '0.2', '2', '15', 'grid', '30'], { printer: 'a1mini', nozzle: 0.4, layer: 0.2 }]);
+  check('the Print card\'s rows start at the plate\'s printer profile (2 walls, 15 % grid); a file opened here slices at its 0.4 / 0.2',
+    [await settings(page), prof], [['2', '15', 'grid'], { printer: 'a1mini', nozzle: 0.4, layer: 0.2 }]);
 
   // Normal on a mesh: the plain re-frame, nothing else. Move the camera off,
   // select and isolate a piece, then Normal: turned to the selection, still
@@ -207,7 +213,7 @@ async function main() {
     [true, true, 1, true, true, 'mesh']);
 
   // =======================================================================
-  console.log('\n--- 2. Slice: sliced now, with the settings as they stand; changed, on the next slice ---');
+  console.log('\n--- 2. Slice: the Print card\'s slice, with its settings as they stand; changed on the card, on the next slice ---');
   // =======================================================================
   // The first slice: from the isolated mesh, with the profile's settings as they stand.
   await page.click('#ms-cam-slice');                    // from the isolated mesh
@@ -224,22 +230,12 @@ async function main() {
     [s0.side, s0.rows, s0.toggle, s0.off, s0.isolated],
     ['slice', ['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row', 'ms-measure-row', 'ms-play-row'], [false, true], [false, false], false]);
 
-  // The settings, on the Slice side: unfold the row (a real click on its toggle), change them.
-  await page.click('#ms-slice-settings-toggle');
-  check('Slice settings unfolds from its row', [await page.isVisible('#ms-slice-layer'),
-    await page.getAttribute('#ms-slice-settings-toggle', 'aria-expanded')], [true, 'true']);
-  await page.selectOption('#ms-slice-nozzle', '0.6');
-  check('changing the nozzle still sets the layer to half of it', await page.inputValue('#ms-slice-layer'), '0.3');
-  await page.selectOption('#ms-slice-nozzle', '0.4');
-  await page.fill('#ms-slice-walls', '3');
-  await page.fill('#ms-slice-density', '20');
-  await page.selectOption('#ms-slice-pattern', 'zigzag');
-  await page.fill('#ms-slice-angle', '35');
-  await page.click('#ms-slice-settings-toggle');        // folded again
+  check('the Slice row says whose slice is shown: the Print card\'s, with its settings',
+    await page.textContent('#ms-slice-settings-note'), 'A view of the plate\'s slice: the Print card\'s, made with its settings.');
+  // The settings are the Print card's: change three of its rows (3 walls, 20 % rectilinear).
+  await setCard(page, { walls: 3, density: 20, pattern: 'zigzag' });
   const set = await settings(page);
-  // (read by the DOM: the cards helper would unfold the row before an isVisible)
-  check('the settings as set, the row folded again', [set, await page.evaluate(() => document.getElementById('ms-slice-settings').hidden),
-    await page.getAttribute('#ms-slice-settings-toggle', 'aria-expanded')], [['0.4', '0.2', '3', '20', 'zigzag', '35'], true, 'false']);
+  check('the Print card\'s rows as set', set, ['3', '20', 'zigzag']);
   check('... they take effect on the NEXT slice: the slice shown is untouched',
     await page.evaluate(() => { const o = window.NSO_MICROSCOPE.getDoc().nsoSlice.result.options;
       return [o.nozzleMm, o.layerMm, o.wallLoops, o.sparseDensity, o.sparsePattern, o.supportThresholdDeg]; }), out0.opts);
@@ -261,7 +257,7 @@ async function main() {
     [s1.kind, s1.sliced, out1.srcNames.length], ['toolpath', true, 2]);
   /* ONE SLICE (the owner: "It needs to be one slice"): on the plate the switch shows the plate's slice - the Supports card's, with its
      settings; G-scope's own rows are for an STL / 3MF opened here, and set nothing of the plate's */
-  check('... the plate\'s one slice, with the Supports card\'s settings (G-scope\'s rows are for a file opened here)', out1.opts, out0.opts);
+  check('... the plate\'s one slice, with the Print card\'s settings as changed: 3 walls, 20 % rectilinear', out1.opts, [0.4, 0.2, 3, 0.2, 'zigzag', 30]);
   check('... real layers, walls and infill',
     [out1.layers === out1.planes && out1.layers > 20, out1.moves > 1000,
      ['Outer wall', 'Inner wall', 'Sparse infill'].every((g) => out1.groups.includes(g))], [true, true, true]);
@@ -346,7 +342,7 @@ async function main() {
   check('... no residual isolation, no stuck selection, Region disarmed, no box',
     [n1.selection, n1.isolated, n1.detailShown, n1.backOffered, n1.badge, n1.regionArmed,
      await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length)], [0, false, false, false, 'Whole part', false, 0]);
-  check('the settings are kept, nothing open (the ▾ menu and Export shut)', [n1.openCards, await settings(page)], [[], set]);
+  check('the card\'s settings are kept, nothing open (the ▾ menu and Export shut)', [n1.openCards, await settings(page)], [[], set]);
 
   // =======================================================================
   console.log('\n--- 4. the round trip again ---');
@@ -375,7 +371,7 @@ async function main() {
   await meshBack(page);
   await frames(page);
   check('Normal again: the same whole-part mesh state', await snapshot(page), base);
-  check('the settings are kept through both round trips', await settings(page), set);
+  check('the card\'s settings are kept through both round trips', await settings(page), set);
   check('... and the piece selected before is simply unselected', await page.evaluate((n) =>
     window.NSO_MICROSCOPE.getDoc().objects.some((o) => o.name === n) && window.NSO_MICROSCOPE.selection().length, pieceName), 0);
 
@@ -399,15 +395,14 @@ async function main() {
     await page.evaluate(() => [window.NSO_MICROSCOPE.getDoc() === window.__imp, window.NSO_MICROSCOPE.getDoc().name,
       window.NSO_GSCOPE_SLICE.busy()]), [true, 'supportwithinsupport.gcode.3mf', false]);
 
-  // CLOSE keeps every plate (403130dd, docs/GSCOPE.md item 3), and the Slice settings with them: the next open has them as they were left.
-  await page.click('#ms-slice-settings-toggle');        // unfolded (the Slice side shows the row)
-  const before6 = [await settings(page), await page.getAttribute('#ms-slice-settings-toggle', 'aria-expanded')];
+  // CLOSE keeps every plate (403130dd, docs/GSCOPE.md item 3), and the Print card its settings: the next open has them as they were left.
+  const before6 = await settings(page);
   await page.click('#ms-close');
   await page.waitForFunction(() => !window.NSO_MICROSCOPE.isOpen());
   await page.click('#btn-microscope');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen() && !!window.NSO_MICROSCOPE.getDoc());
-  check('the next open keeps the plates and the Slice settings as they were left (set and unfolded before CLOSE)',
-    [before6, await settings(page)], [[set, 'true'], set]);
+  check('the next open keeps the plates, and the Print card the settings it was left with',
+    [before6, await settings(page)], [set, set]);
 
   // =======================================================================
   console.log('\n--- 6. nothing written, nothing thrown ---');
