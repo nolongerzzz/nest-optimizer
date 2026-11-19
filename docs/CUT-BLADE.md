@@ -56,6 +56,9 @@ the blade wherever the blade lay near-flat (a piece leaned past upright) and is 
 **The three wheels (Mitre, Rotate, Bevel) have their number IN the centre and their name at the wheel's top-left corner.** The centre
 reads out as the wheel turns (`30°`) and is also the number box: click it, type, Enter (Esc puts the reading back; Up / Down step
 1 degree, Shift 0.1). There is no box under any wheel and no hint text on the card.
+The **Bevel wheel is a half wheel**: the bevel only ever swings through -90 .. 90, so it is the top half of a dial, its flat edge the piece's own line
+(far end to the right). It sits in the same two columns as Mitre and Rotate - its wheel lines up with Mitre's, and its - / + and **Plumb** stand
+in Rotate's column, beside the wheel, lined up with Rotate's - / +.
 
 **Mitre buttons.** Under the Mitre wheel's - / +, side by side, **Square** sets the mitre to 0 and **90°** to 90 - the
 opposite blade direction, a quarter-turn about the vertical - without dragging the wheel or typing an angle. **Plumb** sits beside the

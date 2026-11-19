@@ -101,9 +101,12 @@ withApp(async (page, logs) => {
     JSON.stringify({ box: [mdeg.cx, mdeg.cy], wheel: [md.x + md.w / 2, md.y + md.h / 2] }));
   check('Square and 90 sit side by side under the Mitre - / +, inside the Mitre column', sq.y >= mm.b - 1 && Math.abs(sq.cy - r90a.cy) < 2 && r90a.x >= sq.r - 1 && r90a.r <= rd.x + 4 && sq.x >= md.x - 20,
     JSON.stringify({ steps: mm.b, square: [sq.x, sq.y, sq.r], ninety: [r90a.x, r90a.y, r90a.r] }));
-  const bd = await R('cut-bevel-dial'), bdeg = await R('cut-bevel-deg'), plumbR = await R('btn-cut-plumb'), bm = await R('btn-cut-bevel-minus');
-  check('the Bevel number is the CENTRE of its wheel, Plumb is beside the wheel and its - / + under it', Math.abs(bdeg.cx - (bd.x + bd.w / 2)) < 3 && Math.abs(bdeg.cy - (bd.y + bd.h / 2)) < 3 && plumbR.x >= bd.r - 1 && bm.y >= bd.b - 1 && bm.y - bd.b < 14,
-    JSON.stringify({ box: [bdeg.cx, bdeg.cy], wheel: [bd.x + bd.w / 2, bd.y + bd.h / 2], plumb: [plumbR.x, plumbR.y] }));
+  const bd = await R('cut-bevel-dial'), bdeg = await R('cut-bevel-deg'), plumbR = await R('btn-cut-plumb'), bm = await R('btn-cut-bevel-minus'), bp = await R('btn-cut-bevel-plus');
+  check('the Bevel wheel is a half wheel (about 60 px high) whose left edge lines up with the Mitre wheel above it', bd.h < 70 && bd.h > 50 && Math.abs(bd.x - md.x) < 1.5 && Math.abs(bd.w - md.w) < 1.5, JSON.stringify({ bevel: [bd.x, bd.w, bd.h], mitre: [md.x, md.w] }));
+  check('the Bevel number is in the half disc, centred across it, above its flat edge', Math.abs(bdeg.cx - (bd.x + bd.w / 2)) < 3 && bdeg.cy > bd.y + 18 && bdeg.b < bd.y + bd.h * 50 / 58, JSON.stringify({ box: [bdeg.cx, bdeg.cy, bdeg.b], wheel: [bd.x, bd.y, bd.w, bd.h] }));
+  check('the Bevel - / + stand in the Rotate column, lined up exactly with the Rotate - / + above, and beside the wheel (not under it)', Math.abs(bm.x - rm.x) < 1.5 && Math.abs(bp.r - rp.r) < 1.5 && bm.x > bd.r - 4 && bm.y < bd.b && bm.b > bd.y,
+    JSON.stringify({ bevelMinus: [bm.x, bm.y], rotateMinus: [rm.x, rm.y], bevelPlus: [bp.r], rotatePlus: [rp.r], wheel: [bd.r, bd.y, bd.b] }));
+  check('Plumb is under the Bevel - / + and as wide as the pair', plumbR.y >= bm.b - 1 && Math.abs(plumbR.x - bm.x) < 1.5 && Math.abs(plumbR.r - bp.r) < 1.5, JSON.stringify({ plumb: [plumbR.x, plumbR.r, plumbR.y], pair: [bm.x, bp.r, bm.b] }));
   {
     const labs = await page.evaluate(() => [...document.querySelectorAll('.cut-dial-label')].map(l => { const r = l.getBoundingClientRect(), w = l.parentElement.getBoundingClientRect(); return { t: l.textContent, dx: r.left - w.left, dy: r.top - w.top, w: r.width }; }));
     check('the three wheel names sit at the wheels\' top-left corners, and Rotate is just "Rotate"', labs.map(l => l.t).join() === 'Mitre,Rotate,Bevel' && labs.every(l => l.dx >= -6 && l.dx < 6 && l.dy >= 0 && l.dy < 6 && l.w < 45), JSON.stringify(labs));

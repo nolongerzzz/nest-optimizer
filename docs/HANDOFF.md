@@ -45,6 +45,7 @@ merging its list by hand. The list below is generated.
 - [Current factory (do not rewrite from this file)](handoff/current-factory.md)
 - [Curving paths - the first multi-segment path primitive](handoff/curving-paths-the-first-multi-segment-path-primitive.md)
 - [Cut card: the Rotate axes are one segmented row above the wheels; Hide blade sits under Plumb (2026-11-18)](handoff/cut-card-axes-row-above-the-wheels-hide-blade-by-plumb.md)
+- [Cut card: the Bevel wheel is a half wheel, in the Mitre / Rotate columns (2026-11-19)](handoff/cut-card-bevel-half-wheel.md)
 - [Cut card: Blade block at the top (Chop / Dice / Notch / Plane, Whole plate on its own row), the Plane blade, Rotate label gap, import-with-card-open fix (2026-11-18)](handoff/cut-card-blade-block-at-top-plane-blade-import-fix.md)
 - [Cut card: Mitre and Bevel numbers in the wheel centres, wheel names at the top-left corners, instructional text gone (2026-11-18)](handoff/cut-card-mitre-bevel-numbers-in-the-wheels-corner-labels.md)
 - [Cut card: the Rotate piece number is the centre of its wheel; the blade-placed hint line is gone (2026-11-18)](handoff/cut-card-rotate-number-in-the-wheel-hint-line-gone.md)

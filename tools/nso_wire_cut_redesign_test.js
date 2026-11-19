@@ -277,7 +277,7 @@ withApp(async (page, logs) => {
         'chk-cut-hide-blade chk-cut-rot-h chk-cut-rot-fb chk-cut-rot-ss ' +
         'cut-miter-dial cut-miter-deg btn-cut-miter-minus btn-cut-miter-plus btn-cut-square btn-cut-miter-90 ' +
         'cut-rotate-dial cut-rotate-deg btn-cut-rotate-minus btn-cut-rotate-plus ' +
-        'cut-bevel-dial cut-bevel-deg btn-cut-plumb btn-cut-bevel-minus btn-cut-bevel-plus ' +
+        'cut-bevel-dial cut-bevel-deg btn-cut-bevel-minus btn-cut-bevel-plus btn-cut-plumb ' +
         'cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p btn-cut',
       order.join(' '));
     const cards = await page.evaluate(() => ({

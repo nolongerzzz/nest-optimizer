@@ -278,7 +278,7 @@ withApp(async (page, logs) => {
   await page.evaluate(id => { __pick(id); state.cutT = 0.5; setCutMiter(0); setCutBevel(0); }, tubeId);
   await page.waitForTimeout(30);
   const dialBox = await page.evaluate(() => { const r = document.getElementById('cut-bevel-dial').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
-  const cx = dialBox.x + dialBox.w / 2, cy = dialBox.y + dialBox.h / 2, rr = dialBox.w * 0.4;
+  const cx = dialBox.x + dialBox.w / 2, cy = dialBox.y + dialBox.h * 50 / 58, rr = dialBox.w * 0.4;   // the pivot is at (50, 50) of the half wheel's 100 x 58 box
   const onRail = deg => ({ x: cx + rr * Math.sin(deg * Math.PI / 180), y: cy - rr * Math.cos(deg * Math.PI / 180) });
   const dragTo = async (from, to, steps) => {
     let p = onRail(from);

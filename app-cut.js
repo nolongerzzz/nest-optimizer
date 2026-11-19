@@ -1111,8 +1111,10 @@ function cutWireBevelDial() {
   dial.dataset.nsoWired = '1';
   let press = null;
   function angleAt(ev) {
-    const r = dial.getBoundingClientRect();
-    const dx = ev.clientX - (r.left + r.width / 2), dy = ev.clientY - (r.top + r.height / 2);
+    // The pivot is (50, 50) in the wheel's own units: the middle of a full wheel, the middle of the flat edge of the half wheel.
+    const r = dial.getBoundingClientRect(), ctm = dial.getScreenCTM && dial.getScreenCTM();
+    const px = ctm ? 50 * ctm.a + 50 * ctm.c + ctm.e : r.left + r.width / 2, py = ctm ? 50 * ctm.b + 50 * ctm.d + ctm.f : r.top + r.height / 2;
+    const dx = ev.clientX - px, dy = ev.clientY - py;
     return { a: (Math.atan2(dx, -dy) * 180) / Math.PI, centre: Math.hypot(dx, dy) < r.width * 0.18 };
   }
   dial.addEventListener('pointerdown', function (ev) {
