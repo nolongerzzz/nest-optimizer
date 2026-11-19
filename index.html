@@ -193,6 +193,11 @@
                 <select id="print-printer" class="vp-select" autocomplete="off"
                         title="The plate's printer and size: the same choice as the Plate panel's. The settings below start at this printer's profile."></select></label>
               <p id="slice-profile" class="bend-readout slice-profile" title="The printer profile the plate is sliced for.">&nbsp;</p>
+              <div id="slice-project" class="slice-project" hidden>
+                <p id="slice-project-note" class="slice-settings-note"></p>
+                <button id="slice-project-use" type="button" class="btn btn-secondary" hidden
+                        title="The rows to this Studio project's own settings - every process setting it changed, as Studio sliced it. Profile values goes back to the printer profile's.">Project settings</button>
+              </div>
               <div class="sup-go-row">
                 <button id="btn-sup-all" class="btn btn-primary sup-go" type="button" disabled
                         title="Slice the plate for its printer. With Supports ticked the supports are built first - again when a setting, a piece or its tips changed - and the plate is sliced with them; unticked, the plate's supports come off and the pieces are sliced alone. One Undo puts the plate back.">Slice</button>
@@ -3251,7 +3256,7 @@
   <script src="nso_photoset.js?v=0974faf1"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js?v=a333b53c"></script>
-  <script src="nso-3mf-read.js?v=2db28bb1"></script>
+  <script src="nso-3mf-read.js?v=83fb182e"></script>
   <script src="nso-3mf-scene.js?v=abb8f614"></script>
   <script src="nso-surface-grid.js?v=c0d97583"></script>
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
@@ -3272,7 +3277,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=68494405"></script>
+  <script src="app-core.js?v=323f1628"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=5b4ec154"></script>
 
@@ -3482,7 +3487,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=91f90059"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=e82d981d"></script>
+  <script src="app-print.js?v=b8edf542"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

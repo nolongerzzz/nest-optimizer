@@ -2111,6 +2111,13 @@ function import3MF(filename, arrayBuffer) {
         }
       }
 
+      /* A Studio project's own settings, kept under the file's name: the Print card slices with them when the plate's parts are this
+         file's (app-print.js plateProject) - the same settings the project was sliced with in Studio. */
+      if (result.projectSettings) {
+        window.nsoProjects = window.nsoProjects || {};
+        window.nsoProjects[filename] = { config: result.projectSettings, objects: result.objectSettings || [] };
+      }
+
       /* Two or more objects and no scene block: a project from Studio or
          MakerWorld, with every piece already laid out on its plate. Each piece
          keeps the XY the file gave it, unless one would fall off this plate -

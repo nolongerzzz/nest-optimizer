@@ -114,6 +114,7 @@ merging its list by hand. The list below is generated.
 - [Pottery Wheel - throw a vessel on an axis](handoff/pottery-wheel-throw-a-vessel-on-an-axis.md)
 - [Print card - Arachne wall generator: Classic / Arachne and its six levers under Quality (2026-11-16)](handoff/print-card-arachne-wall-generator.md)
 - [Print card - bridge speed and flow, flow ratio, retraction length and speed, z-hop (2026-11-14)](handoff/print-card-bridge-and-stringing-rows.md)
+- [Print card - a Studio project slices with its own settings (2026-11-19)](handoff/print-card-studio-project-settings.md)
 - [The Print card: the Supports card became the one card for printer, slice and supports (2026-11-14)](handoff/print-card.md)
 - [Print planner: NSO writes Bambu's dialect (print-planner-1, #277)](handoff/print-planner-1.md)
 - [Slice card: the plate sliced for its printer (print-slice-main-plate)](handoff/print-slice-main-plate.md)

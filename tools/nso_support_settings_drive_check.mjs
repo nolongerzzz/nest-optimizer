@@ -58,9 +58,13 @@ async function main() {
   check('Advanced at its defaults sends nothing; Defaults is off', [await page.evaluate(() => window.NSO_SUPPORTS_CARD.settings.advanced()), await page.evaluate(() => document.getElementById('sup-adv-defaults').disabled)], [null, true]);
 
   console.log('-- save, move, pick');
-  check('Bambu\'s rows open at the printer profile\'s values, in Bambu\'s order', await page.evaluate(() => [...document.querySelectorAll('#sup-bambu-sec input, #sup-bambu-sec select')].map((e) => e.id + '=' + (e.type === 'checkbox' ? e.checked : e.value))),
-    ['slice-set-sup-density=90', 'slice-set-sup-expand=-1', 'slice-set-sup-walls=-1', 'slice-set-sup-topz=0.2', 'slice-set-sup-bottomz=0.2', 'slice-set-sup-base=default', 'slice-set-sup-base-spacing=2.5', 'slice-set-sup-angle=0',
-      'sup-interface=3', 'slice-set-sup-iface-pattern=default', 'slice-set-sup-iface-spacing=0.5', 'slice-set-sup-expansion=0', 'slice-set-sup-xy=0.35', 'slice-set-sup-zover=false', 'slice-set-sup-first-gap=0.2',
+  /* Supporttest.3mf is a Studio project: the card slices it with the project's own settings (app-print.js plateProject), so the rows open
+     at the printer profile's values but for the three the project changed - support_top_z_distance 0.33, support_angle 20,
+     support_interface_spacing 0.1 */
+  await page.waitForFunction(() => /Rows from Supporttest\.3mf/.test(document.getElementById('slice-project-note').textContent), null, { timeout: 30000 });
+  check('Bambu\'s rows open at the printer profile\'s values - the project\'s where Supporttest.3mf changed them - in Bambu\'s order', await page.evaluate(() => [...document.querySelectorAll('#sup-bambu-sec input, #sup-bambu-sec select')].map((e) => e.id + '=' + (e.type === 'checkbox' ? e.checked : e.value))),
+    ['slice-set-sup-density=90', 'slice-set-sup-expand=-1', 'slice-set-sup-walls=-1', 'slice-set-sup-topz=0.33', 'slice-set-sup-bottomz=0.2', 'slice-set-sup-base=default', 'slice-set-sup-base-spacing=2.5', 'slice-set-sup-angle=20',
+      'sup-interface=3', 'slice-set-sup-iface-pattern=default', 'slice-set-sup-iface-spacing=0.1', 'slice-set-sup-expansion=0', 'slice-set-sup-xy=0.35', 'slice-set-sup-zover=false', 'slice-set-sup-first-gap=0.2',
       'slice-set-sup-bridge=0', 'slice-set-sup-indep=true']);
   await set('sup-angle', 46); await set('sup-rest', true); await set('sup-adv-tipdrop', 2.4); await set('sup-tree-distance', 4.5);
   await set('slice-set-sup-iface-pattern', 'concentric'); await set('slice-set-sup-base', 'rectilinear'); await set('slice-set-sup-topz', 0.25); await set('slice-set-sup-zover', true);
@@ -77,7 +81,10 @@ async function main() {
 
   console.log('-- reload');
   await open(); await load();
+  await page.waitForFunction(() => /Rows from Supporttest\.3mf/.test(document.getElementById('slice-project-note').textContent), null, { timeout: 30000 });
   check('the card opens with what was saved last', [await val('sup-preset'), await val('sup-angle'), await val('sup-rest'), await val('sup-adv-tipdrop'), await val('slice-set-sup-iface-pattern'), await val('slice-set-sup-zover')], ['PLA slim', '46', true, '2.4', 'concentric', true]);
+  check('...but for a row the project itself changed: its Top Z 0.33 over the saved 0.25 (what was set in Studio, for a slice to compare with Studio\'s)',
+    [await val('slice-set-sup-topz'), await val('slice-set-sup-base')], ['0.33', 'rectilinear']);
 
   console.log('-- Slice, Supports ticked: May rest on the part, at 46 deg');
   const t0 = Date.now();

@@ -220,7 +220,7 @@ async function main() {
         /* the wall generator: the template's classic, and Studio's Arachne defaults (docs/SLICER.md "Arachne") */
         wallGen: 'classic', wallAngle: 10, wallFilter: 25, wallTransLen: 100, wallDist: 1, minWall: 85, minFeature: 25,
         /* the shells: the template's 5 top (1 mm) and 3 bottom */
-        topLayers: 5, topThick: 1, botLayers: 3, botThick: 0 }), JSON.stringify(base));
+        topLayers: 5, topThick: 1, botLayers: 3, botThick: 0, project: null }), JSON.stringify(base));
     const rov = PRINT.configOverlay(tpl, Object.assign({}, base, { raft: 10 }));
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));
@@ -698,6 +698,77 @@ async function main() {
     const plain0 = await PRINT.build(tower, { config: tpl, printer: a1 }, {});
     check('no steps and the profile\'s filament: no M104 beyond the template\'s, the same file as no settings',
       plain3.ok && plain0.ok && L.text(await L.R.openZip(plain3.bytes).read('Metadata/plate_1.gcode')) === L.text(await L.R.openZip(plain0.bytes).read('Metadata/plate_1.gcode')) && plain3.stats.tempBands === null);
+  }
+
+  // ===========================================================================
+  section('3e. A Studio project\'s own settings: the plate slices with what Studio sliced it with (the owner\'s TPU feet, fixtures/slicer-feet-reference.json)');
+  // ===========================================================================
+  {
+    const R3 = require(path.join(ROOT, 'nso-3mf-read.js'));
+    const base = PRINT.settingsFromConfig(tpl);
+    /* the reader keeps a Studio project's settings and its objects' own overrides */
+    const sr = await R3.parse3MF(new Uint8Array(fs.readFileSync(path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf'))), { name: 'supp_ref.3mf' });
+    check('a Studio project read in keeps its project_settings.config: its process, and the keys it changed from the system preset',
+      !!sr.projectSettings && sr.projectSettings.print_settings_id === '0.20mm Standard @BBL A1M' && /sparse_infill_density/.test(sr.projectSettings.different_settings_to_system[0]) && Array.isArray(sr.objectSettings),
+      sr.projectSettings ? sr.projectSettings.print_settings_id + ' / ' + String(sr.projectSettings.different_settings_to_system[0]).slice(0, 80) : 'none');
+    const ov = R3.parseModelSettingsOverrides('<config><object id="2"><metadata key="name" value="foot"/><metadata key="extruder" value="1"/><metadata key="wall_loops" value="0"/>' +
+      '<part id="1"><metadata key="name" value="p"/><metadata key="matrix" value="1 0 0"/></part></object><object id="3"><metadata key="name" value="plain"/></object></config>');
+    check('...and an object\'s own overrides (its Objects tab), not its name, extruder or parts', JSON.stringify(ov) === JSON.stringify([{ id: '2', name: 'foot', keys: { wall_loops: '0' } }]), JSON.stringify(ov));
+
+    /* which project the plate is: every part one project's file */
+    const FEET = JSON.parse(fs.readFileSync(path.join(ROOT, 'fixtures', 'slicer-feet-reference.json'), 'utf8')).noWalls;
+    const projCfg = Object.assign({}, tpl, FEET.projectChanges, { print_settings_id: FEET.printSettingsId, filament_settings_id: ['Bambu TPU for AMS @BBL A1M'],
+      different_settings_to_system: [Object.keys(FEET.projectChanges).concat(['print_settings_id', 'printer_settings_id']).join(';'), '', ''] });
+    const G0 = globalThis, keep = { state: G0.state, nsoProjects: G0.nsoProjects };
+    G0.nsoProjects = { 'feet.3mf': { config: projCfg, objects: [] } };
+    G0.state = { models: [1, 2, 3, 4].map((i) => ({ id: i, sourceFile: 'feet.3mf' })).concat([{ id: 9, sourceFile: null, nsoSupport: {} }]), placed: [1, 2, 3, 4, 9].map((i) => ({ sourceId: i })) };
+    let pj, mixed;
+    try {
+      pj = PRINT.plateProject();
+      G0.state.models.push({ id: 5, sourceFile: 'other.stl' }); G0.state.placed.push({ sourceId: 5 });
+      mixed = PRINT.plateProject();
+    } finally { G0.state = keep.state; G0.nsoProjects = keep.nsoProjects; }
+    check('a plate of one Studio project\'s parts (a support beside them aside) is that project: the 8 process settings the owner changed, no preset or printer key',
+      !!pj && pj.file === 'feet.3mf' && JSON.stringify(pj.keys) === JSON.stringify(FEET.projectChanges) && pj.preset === FEET.printSettingsId && /TPU/.test(pj.filament),
+      pj ? JSON.stringify(pj.keys) : 'none');
+    check('...a part from another file on the plate: no project (the profile\'s)', mixed === null);
+
+    /* the card with the project: rows at its values, the slice's config its changes, a row moved off one wins */
+    const proj = { file: 'feet.3mf', keys: FEET.projectChanges };
+    const rows = PRINT.settingsFromConfig(PRINT.withOverlay(tpl, FEET.projectChanges));
+    check('the rows show the project\'s values: no walls, no top, no bottom, 3D honeycomb 10 %, Arachne',
+      rows.walls === 0 && rows.topLayers === 0 && rows.botLayers === 0 && rows.pattern === '3dhoneycomb' && rows.density === 10 && rows.wallGen === 'arachne',
+      JSON.stringify([rows.walls, rows.topLayers, rows.botLayers, rows.pattern, rows.density, rows.wallGen]));
+    const want = {}; Object.keys(FEET.projectChanges).forEach((k) => { if (String(Array.isArray(tpl[k]) ? tpl[k][0] : tpl[k]).trim() !== FEET.projectChanges[k]) want[k] = FEET.projectChanges[k]; });
+    const pov = PRINT.configOverlay(tpl, Object.assign({}, rows, { project: proj }));
+    check('...and the slice\'s config is the project\'s changes, every one (rows without a row of their own too: skeleton / skin infill density), nothing else',
+      JSON.stringify(Object.keys(pov).sort()) === JSON.stringify(Object.keys(want).sort()) && Object.keys(want).every((k) => pov[k] === want[k]) && Object.keys(want).length >= 7,
+      JSON.stringify(pov));
+    const off = PRINT.configOverlay(tpl, Object.assign({}, rows, { walls: 2, project: proj }));
+    check('...a row moved off the project writes its own: Wall loops 2 over the project\'s 0', off.wall_loops === '2' && off.sparse_infill_pattern === '3dhoneycomb', JSON.stringify(off));
+    check('...and without the project the same rows are the profile\'s plus what they change (no project key rides along)',
+      !('skeleton_infill_density' in PRINT.configOverlay(tpl, Object.assign({}, rows, { project: null }))));
+
+    /* one foot sliced through the card with the project: what Studio laid, line for line in kind and within 1.5 % in length */
+    const bx = FEET.box, cx = (bx[0] + bx[2]) / 2, cy = (bx[1] + bx[3]) / 2, hw = (bx[2] - bx[0]) / 2;
+    const footSoup = []; {
+      const lo = [-hw, -hw, 0], hi = [hw, hw, 24];
+      const v = [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]], [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]], [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]]];
+      [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]].forEach((t) => t.forEach((i) => footSoup.push(...v[i])));
+    }
+    /* the piece about the plate's centre, as the plate hands it over: shifted so it lands on the foot's own place on the bed */
+    const fp = PRINT.pieceObjects([{ name: 'foot', soup: Float32Array.from(footSoup.map((q, i) => i % 3 === 0 ? q + cx - a1.bed.x / 2 : i % 3 === 1 ? q + cy - a1.bed.y / 2 : q)), sourceId: 1 }], a1.bed);
+    const fr = await PRINT.build(fp, { config: tpl, printer: a1 }, { settings: Object.assign({}, rows, { project: proj, brim: 'none' }) });
+    let fl = null;
+    if (fr.ok) {
+      const gc = L.text(await L.R.openZip(fr.bytes).read('Metadata/plate_1.gcode'));
+      const mv = Lines.parseGcode(gc).moves.filter((m) => m.width > 0 && m.feature !== 'Custom');
+      fl = { feats: [...new Set(mv.map((m) => m.feature))], mm: mv.reduce((t, m) => t + m.length, 0), cfg: /^; wall_loops = 0$/m.test(gc) && /^; skeleton_infill_density = 10%$/m.test(gc) };
+    }
+    const studio = FEET.sparseMm.reduce((x, y) => x + y, 0);
+    check('a foot sliced with the project through the card: Sparse infill alone, the length of Studio\'s within 1.5 % (' + studio.toFixed(0) + ' mm), its config the project\'s',
+      !!fl && JSON.stringify(fl.feats) === '["Sparse infill"]' && Math.abs(fl.mm / studio - 1) < 0.015 && fl.cfg,
+      fl ? fl.feats.join(', ') + ' - ' + fl.mm.toFixed(0) + ' mm (' + ((fl.mm / studio - 1) * 100).toFixed(2) + ' %), config ' + fl.cfg : fr.reason);
   }
 
   // ===========================================================================

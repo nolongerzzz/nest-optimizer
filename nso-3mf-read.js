@@ -455,6 +455,29 @@
     return names;
   }
 
+  /**
+   * The settings an object overrides in Bambu's model_settings.config (its Objects tab): [{ id, name, keys: { key: value } }], one per object
+   * that has any. Its name and extruder, and its parts' own metadata, are not overrides.
+   */
+  function parseModelSettingsOverrides(xml) {
+    var out = [], cur = null, depth = 0, objDepth = -1;
+    walkXml(xml, {
+      open: function (name, attrs) {
+        depth++;
+        if (name === 'object' && attrs.id != null) { cur = { id: String(attrs.id), name: '', keys: {} }; objDepth = depth; }
+        else if (name === 'metadata' && cur && depth === objDepth + 1 && attrs.key) {
+          if (attrs.key === 'name') cur.name = attrs.value || '';
+          else if (attrs.key !== 'extruder') cur.keys[attrs.key] = attrs.value == null ? '' : String(attrs.value);
+        }
+      },
+      close: function (name) {
+        if (name === 'object' && depth === objDepth) { if (cur && Object.keys(cur.keys).length) out.push(cur); cur = null; objDepth = -1; }
+        depth--;
+      }
+    });
+    return out;
+  }
+
   /** Root relationship -> model part name, defaulting to 3D/3dmodel.model. */
   function parseRootModelPart(relsXml) {
     var target = null;
@@ -519,12 +542,23 @@
       ? zip.read('_rels/.rels').then(function (d) { return parseRootModelPart(decoder.decode(d)); })
       : Promise.resolve('3D/3dmodel.model');
 
+    var objectSettings = [];
     var bambuNames = zip.has('Metadata/model_settings.config')
       ? zip.read('Metadata/model_settings.config').then(function (d) {
-          try { return parseModelSettingsNames(decoder.decode(d)); }
+          try { var xml = decoder.decode(d); objectSettings = parseModelSettingsOverrides(xml); return parseModelSettingsNames(xml); }
           catch (e) { warnings.push('model_settings.config unreadable: ' + e.message); return {}; }
         })
       : Promise.resolve({});
+
+    /* A Bambu Studio project's own settings (Metadata/project_settings.config): what it was sliced with - its process, its filament, its
+       printer, and which of them were changed from the system presets (different_settings_to_system). Kept for the Print card, which can
+       slice with them (app-print.js plateProject). Optional: a plain 3MF has none, and an unreadable one is a warning. */
+    var projectSettings = zip.has('Metadata/project_settings.config')
+      ? zip.read('Metadata/project_settings.config').then(function (d) {
+          try { var o = JSON.parse(decoder.decode(d)); return o && typeof o === 'object' && !Array.isArray(o) ? o : null; }
+          catch (e) { warnings.push('project_settings.config unreadable: ' + e.message); return null; }
+        }).catch(function () { return null; })
+      : Promise.resolve(null);
 
     // Optional, and optional all the way down: a plain Bambu or MakerWorld
     // file has no such part, and an unreadable one is a warning rather than a
@@ -539,8 +573,8 @@
         })
       : Promise.resolve(null);
 
-    return Promise.all([rootRels, bambuNames, sceneJson]).then(function (r) {
-      var rootPart = r[0], names = r[1], scene = r[2];
+    return Promise.all([rootRels, bambuNames, sceneJson, projectSettings]).then(function (r) {
+      var rootPart = r[0], names = r[1], scene = r[2], project = r[3];
       return loadPart(rootPart).then(function (root) {
         var items = root.build.slice();
         if (!items.length) {
@@ -620,6 +654,8 @@
             unit: root.unit,
             application: root.metadata.Application || '',
             sceneJson: scene,
+            projectSettings: project,                  // Studio's project_settings.config, or null
+            objectSettings: objectSettings,            // [{ id, name, keys }]: an object's own setting overrides in model_settings.config
             warnings: warnings
           };
         });
@@ -670,6 +706,7 @@
     parse3MF: parse3MF,
     parse3MFTransfer: parse3MFTransfer,
     openZip: openZip,
+    parseModelSettingsOverrides: parseModelSettingsOverrides,
     walkXml: walkXml,
     parseModelXml: parseModelXml,
     parseModelSettingsNames: parseModelSettingsNames,

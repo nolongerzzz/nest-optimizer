@@ -111,3 +111,37 @@ Edge open the system's save dialog (`showSaveFilePicker`), so the folder is pick
 no such dialog for a page, so the name is asked for and the file goes to Downloads under it. Checked in
 `print:slice` (the names) and by hand in the page (the buttons).
 
+
+## A Studio project's own settings (2026-11-19)
+
+A Bambu Studio project opened into NSO (a `.3mf` with its meshes) keeps its `Metadata/project_settings.config`
+(`nso-3mf-read.js` `projectSettings`, kept per file in `window.nsoProjects` by `app-core.js` `import3MF`). When every
+part on the plate came from that one project (supports aside), the Print card slices it with the project's settings
+(`app-print.js` `plateProject`):
+
+- **What is taken:** every process setting the project changed from its system preset, its
+  `different_settings_to_system` first entry, as the project has it. That includes the settings no row shows
+  (`skeleton_infill_density`, `skin_infill_density`, `thick_bridges` and so on): they go into the slice's config, so
+  the engine, the planner and the file all read them. No preset name, printer or bed key is taken: the plate's
+  printer profile keeps its own start and end G-code.
+- **The rows** show the project's values. A row moved by hand writes its own value over the project's.
+- **The line under the printer** names the project and lists each change. It also says when:
+  - the project's process preset or printer is not the profile's;
+  - which filament the project used (the Filament row stays the card's);
+  - an object has settings of its own in the project (Studio's Objects tab). Those are not taken: a plate is sliced
+    with one set of settings.
+- **Profile values** lets the project go; **Project settings** brings it back.
+- **Who wins:** the project stands where the printer profile stood. A saved setting you picked lays its rows over
+  the project's, and then the rows the project changed are the project's again. What was set in Studio is what a
+  slice compared with Studio's must have.
+- **When:** as soon as the parts are on the plate (looked at twice a second, card open or shut), and before every
+  slice, which waits for the rows. So G-scope's Slice right after opening a project is already the project's.
+
+Held by `print:slice` 3e:
+- the reader on `supp_ref.3mf`;
+- the plate's project, and none with another file's part on it;
+- the rows, the config and a row moved off one;
+- one of the owner's feet sliced through the card with its project's 8 changes: Sparse infill alone, within 1.5 %
+  of Studio's length.
+
+And by `support:settings-drive`: `Supporttest.3mf`'s three support changes, and a saved setting over them.

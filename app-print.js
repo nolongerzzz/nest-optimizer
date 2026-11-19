@@ -133,7 +133,10 @@
                            wallGen: 'classic', wallAngle: 10, wallFilter: 25, wallTransLen: 100, wallDist: 1, minWall: 85, minFeature: 25,
                            /* TOP / BOTTOM SHELLS (Strength), Studio's four: the layers, and a thickness that adds layers to a count of one or more
                               (0 layers is none: the owner's TPU feet as pure 3D honeycomb - no walls, no shells) */
-                           topLayers: 5, topThick: 1, botLayers: 3, botThick: 0 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
+                           topLayers: 5, topThick: 1, botLayers: 3, botThick: 0,
+                           /* THE PROJECT (plateProject): a Studio project's own process changes, { file, keys }, when the plate's parts are its - every
+                              key goes into the slice as the project has it (the rows show the ones they have); null: the printer profile alone */
+                           project: null };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var SUP_BASE_TO_CONFIG = { 'default': 'default', rectilinear: 'rectilinear', 'rectilinear-grid': 'rectilinear-grid', hollow: 'hollow' };
   var SUP_IFACE_TO_CONFIG = { 'default': 'auto', rectilinear: 'rectilinear', concentric: 'concentric', rectilinear_interlaced: 'rectilinear_interlaced', grid: 'grid' };
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
@@ -310,8 +313,50 @@
       wallAngle: numOf(cfgRaw(config, 'wall_transition_angle'), D0.wallAngle), wallFilter: pctOf(cfgRaw(config, 'wall_transition_filter_deviation'), D0.wallFilter),
       wallTransLen: pctOf(cfgRaw(config, 'wall_transition_length'), D0.wallTransLen), wallDist: numOf(cfgRaw(config, 'wall_distribution_count'), D0.wallDist),
       minWall: pctOf(cfgRaw(config, 'min_bead_width'), D0.minWall), minFeature: pctOf(cfgRaw(config, 'min_feature_size'), D0.minFeature),
-      topLayers: o.topShellLayers, topThick: o.topShellThicknessMm, botLayers: o.bottomShellLayers, botThick: o.bottomShellThicknessMm
+      topLayers: o.topShellLayers, topThick: o.topShellThicknessMm, botLayers: o.bottomShellLayers, botThick: o.bottomShellThicknessMm,
+      project: null
     };
+  }
+
+  /** A project's changes as the settings carry them: { file, keys: { key: 'value' } } (each value a string, a list's first), or null. */
+  function projectOf(pj) {
+    if (!pj || !pj.keys || typeof pj.keys !== 'object') return null;
+    var keys = {};
+    Object.keys(pj.keys).forEach(function (k) { var v = pj.keys[k]; if (Array.isArray(v)) v = v[0]; if (v != null) keys[k] = String(v); });
+    return { file: String(pj.file || ''), keys: keys };
+  }
+
+  /* KEYS A PROJECT NEVER HANDS OVER: what names the presets, and what is the printer's or the plate's own - the card's printer profile keeps
+     those (its start and end G-code, its bed). Only the process's changes are taken (different_settings_to_system, first entry). */
+  var PROJECT_SKIP = /^(print_settings_id|inherits|compatible_printers|compatible_printers_condition|from|name|version|printer_|machine_|bed_|curr_bed_type|first_layer_print_sequence|other_layers_print_sequence)/;
+
+  /**
+   * The Studio project the plate's parts came from (the file their pieces were opened from, when the import kept its project settings -
+   * app-core.js import3MF), and what the Print card takes from it: { file, keys, preset, printer, filament, objects } or null when the
+   * parts are not all one project's.
+   *   keys      the process settings the project changed from its system preset (different_settings_to_system, first entry): each as
+   *             the project has it - what Studio sliced it with
+   *   preset    its process preset (print_settings_id); printer its printer_model; filament its filament_settings_id
+   *   objects   the objects with settings of their own (Studio's Objects tab), [{ name, keys }]: not taken - this slicer slices a plate
+   *             with one set of settings
+   */
+  function plateProject() {
+    var reg = root && root.nsoProjects;
+    if (!reg || typeof state === 'undefined' || !state || !state.placed) return null;
+    var files = [];
+    state.placed.forEach(function (p) {
+      var m = p && (state.models || []).find(function (x) { return x && x.id === p.sourceId; });
+      if (!m || m.nsoSupport) return;
+      var f = m.sourceFile || null;
+      if (files.indexOf(f) < 0) files.push(f);
+    });
+    if (files.length !== 1 || !files[0] || !reg[files[0]]) return null;
+    var cfg = reg[files[0]].config || {}, diffs = cfg.different_settings_to_system;
+    var list = Array.isArray(diffs) && diffs[0] ? String(diffs[0]).split(';').filter(Boolean) : [];
+    var keys = {};
+    list.forEach(function (k) { if (!PROJECT_SKIP.test(k) && cfg[k] != null) keys[k] = Array.isArray(cfg[k]) ? String(cfg[k][0]) : String(cfg[k]); });
+    return { file: files[0], keys: keys, preset: cfgRaw(cfg, 'print_settings_id'), printer: cfgRaw(cfg, 'printer_model'), filament: cfgRaw(cfg, 'filament_settings_id'),
+             objects: (reg[files[0]].objects || []).map(function (o) { return { name: o.name, keys: Object.keys(o.keys) }; }) };
   }
 
   /** The settings, each clamped to what its row takes. */
@@ -365,7 +410,8 @@
       minWall: Math.round(n(s.minWall, D.minWall, 5, 100)),
       minFeature: Math.round(n(s.minFeature, D.minFeature, 0, 100)),
       topLayers: Math.round(n(s.topLayers, D.topLayers, 0, 100)), topThick: r2(n(s.topThick, D.topThick, 0, 20)),
-      botLayers: Math.round(n(s.botLayers, D.botLayers, 0, 100)), botThick: r2(n(s.botThick, D.botThick, 0, 20))
+      botLayers: Math.round(n(s.botLayers, D.botLayers, 0, 100)), botThick: r2(n(s.botThick, D.botThick, 0, 20)),
+      project: projectOf(s.project)
     };
   }
 
@@ -374,7 +420,11 @@
    * an untouched card slices exactly as the template does). Throws on a nozzle the profile is not.
    */
   function configOverlay(config, settings) {
-    var s = cleanSettings(settings), base = settingsFromConfig(config), out = {};
+    /* A PROJECT'S CHANGES FIRST: every key it changed, as it has it - the rows then start at the project's values, and a row moved off
+       one writes its own over it */
+    var s = cleanSettings(settings), proj = s.project ? s.project.keys : null, out = {};
+    if (proj) Object.keys(proj).forEach(function (k) { if (cfgRaw(config, k) !== proj[k].trim()) out[k] = proj[k]; });
+    var base = settingsFromConfig(proj && Object.keys(out).length ? withOverlay(config, out) : config);
     if (Math.abs(s.nozzle - base.nozzle) > 1e-6) {
       throw new Error('This printer profile is for a ' + base.nozzle + ' mm nozzle; a ' + s.nozzle + ' mm nozzle needs its own profile.');
     }
@@ -803,7 +853,7 @@
     PROFILES: PROFILES, ENGINE: ENGINE, profileFor: profileFor, readTemplate: readTemplate, pieceObjects: pieceObjects,
     fileName: fileName, gcodeName: gcodeName, build: build, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
     SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
-    configOverlay: configOverlay, withOverlay: withOverlay,
+    configOverlay: configOverlay, withOverlay: withOverlay, plateProject: plateProject,
     FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf, hangSpeedOf: hangSpeedOf
   };
 
@@ -815,7 +865,8 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var S = { busy: false, job: null, result: null, sig: null, setSig: null, pieces: null, profile: null, assets: {}, timer: null, t0: 0, stage: '', hook: null, exporting: false,
-            seededFor: null, touched: false };
+            seededFor: null, touched: false,
+            project: null, projectSeen: undefined, projectOff: null };   /* the project the rows are from (plateProject), the one last seen, and one Profile values let go */
 
   function say(msg, isErr) {
     if (typeof setStatus === 'function') setStatus(msg, !!isErr);
@@ -951,7 +1002,8 @@
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
       bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band'),
       bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'),
-      flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), retractBefore: v('slice-set-retract-before'), zHop: v('slice-set-zhop')
+      flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), retractBefore: v('slice-set-retract-before'), zHop: v('slice-set-zhop'),
+      project: S.project
     }));
   }
 
@@ -988,10 +1040,91 @@
   function seedSettings(profile, reset) {
     S.seededFor = profile ? profile.id : null;
     S.touched = false;
+    /* Profile values lets the plate's project go (its Project settings button brings it back) */
+    if (reset && S.project) { S.projectOff = S.project.file; S.project = null; }
     var known = profile && S.assets[profile.id];
     S.seedForce = !!reset;
-    try { showSettings(known ? settingsFromConfig(known.config) : SETTINGS_DEFAULT); } finally { S.seedForce = false; }
+    try { showSettings(known ? settingsFromConfig(S.project ? withOverlay(known.config, projectOverlay(known.config)) : known.config) : SETTINGS_DEFAULT); } finally { S.seedForce = false; }
     seeded(!!reset);
+    if (known && S.project) relayProject(known.config);
+    projectLine();
+  }
+  /**
+   * WHO WINS. A project stands where the printer profile stood: the saved setting the card shows lays its rows over it as over the profile
+   * (seeded) - and then the rows the project itself changed are the project's again. What the owner set in Studio is what a slice to
+   * compare with Studio's must have; the saved setting keeps every other row.
+   */
+  function relayProject(config) {
+    if (!S.project) return;
+    var plain = settingsFromConfig(config), mine = settingsFromConfig(withOverlay(config, projectOverlay(config))), st = readSettings(), moved = 0;
+    Object.keys(mine).forEach(function (k) {
+      if (k === 'project' || JSON.stringify(mine[k]) === JSON.stringify(plain[k])) return;
+      if (JSON.stringify(st[k]) !== JSON.stringify(mine[k])) { st[k] = mine[k]; moved++; }
+    });
+    if (!moved) return;
+    S.seedForce = true;
+    try { showSettings(st); } finally { S.seedForce = false; }
+  }
+  /** The project's keys that differ from this template (what its rows start at). */
+  function projectOverlay(config) {
+    var out = {};
+    if (S.project) Object.keys(S.project.keys).forEach(function (k) { if (cfgRaw(config, k) !== S.project.keys[k].trim()) out[k] = S.project.keys[k]; });
+    return out;
+  }
+  /**
+   * THE PLATE'S PROJECT: parts opened from a Studio project slice with its settings, from the moment they are on the plate (Profile values
+   * lets it go, Project settings brings it back); parts that are not one project's are the profile's again. Looked at whenever the card
+   * refreshes, twice a second, and before every slice (which waits for the rows) - so G-scope's Slice, with the card shut, has them too.
+   * A promise of the rows being set while they are being set (the template is fetched first), else null.
+   */
+  function checkProject() {
+    if (S.busy) return null;
+    var pj = plateProject(), pk = pj ? pj.file + '|' + JSON.stringify(pj.keys) : null;
+    if (pk === S.projectSeen) return S.projectPending || null;
+    S.projectSeen = pk;
+    if (pj && S.projectOff !== pj.file) return useProject(pj);
+    if (!pj && S.project) { S.project = null; S.projectInfo = null; seedSettings(profileFor(plateId())); return null; }
+    projectLine();
+    return null;
+  }
+  /** The rows to the plate's project (plateProject): its changes over the printer profile's template, fetched first. A promise. */
+  function useProject(pj) {
+    var profile = profileFor(plateId());
+    S.project = pj ? projectOf(pj) : null;
+    S.projectInfo = pj || null;
+    if (pj) S.projectOff = null;
+    projectLine();
+    if (!profile) return null;
+    var done = S.projectPending = loadAssets(profile).then(function (a) {
+      if (S.projectPending === done) S.projectPending = null;
+      if (S.busy || profileFor(plateId()) !== profile) return;
+      S.seedForce = true;
+      try { showSettings(settingsFromConfig(S.project ? withOverlay(a.config, projectOverlay(a.config)) : a.config)); } finally { S.seedForce = false; }
+      seeded(false);                       /* the saved setting shown lays its rows over the project's... */
+      relayProject(a.config);              /* ...and what the project changed is the project's again */
+      S.touched = true;
+      projectLine(); filamentNote(); bridgeNote(); refresh();
+    }, function () { if (S.projectPending === done) S.projectPending = null; /* not served: Slice says which file is missing */ });
+    return done;
+  }
+  /** The line under the printer: the project the rows are from, what it changed, and what is not taken. */
+  function projectLine() {
+    var box = $('slice-project'), txt = $('slice-project-note'), use = $('slice-project-use');
+    if (!box) return;
+    var pj = S.projectInfo, on = !!(S.project && pj);
+    var seen = plateProject();
+    box.hidden = !seen;
+    if (!seen) return;
+    if (use) { use.hidden = on; use.textContent = 'Project settings'; }
+    if (!on) { txt.textContent = seen.file + ' is a Studio project: Project settings slices it with the settings it was sliced with in Studio (' + Object.keys(seen.keys).length + ' changed).'; return; }
+    var ks = Object.keys(pj.keys), prof = profileFor(plateId()), a = prof && S.assets[prof.id], tplPreset = a ? cfgRaw(a.config, 'print_settings_id') : '', tplPrinter = a ? cfgRaw(a.config, 'printer_model') : '';
+    var parts = ['Rows from ' + pj.file + '\'s project settings - the ' + ks.length + ' it changed' + (pj.preset ? ' from ' + pj.preset : '') + ': ' +
+      ks.map(function (k) { return k + ' ' + pj.keys[k]; }).join(', ') + '.'];
+    if (pj.preset && tplPreset && pj.preset !== tplPreset) parts.push('Its process is ' + pj.preset + ', the printer profile\'s ' + tplPreset + ': only what it changed is taken.');
+    if (pj.printer && tplPrinter && pj.printer !== tplPrinter) parts.push('It was sliced for the ' + pj.printer + ', the plate is the ' + tplPrinter + '.');
+    if (pj.filament) parts.push('Its filament: ' + pj.filament + ' (the Filament row is the card\'s).');
+    if (pj.objects && pj.objects.length) parts.push(pj.objects.map(function (o) { return (o.name || 'an object') + ' has its own ' + o.keys.join(', '); }).join('; ') + ' in the project: not taken (one set of settings a plate).');
+    txt.textContent = parts.join(' ');
   }
   /* the rows have been put to the profile's values: the Supports card's saved settings (app-supports-card.js) lay their own back over them - a
      saved setting holds through a reload and a change of printer - unless this was the Reset button, which is the owner asking for the profile's */
@@ -1015,7 +1148,7 @@
     S.seeding = profile.id;
     loadAssets(profile).then(function (a) {
       S.seeding = null;
-      if (S.seededFor === profile.id && !S.touched && !S.busy) { showSettings(settingsFromConfig(a.config)); seeded(false); refresh(); }
+      if (S.seededFor === profile.id && !S.touched && !S.busy) { showSettings(settingsFromConfig(S.project ? withOverlay(a.config, projectOverlay(a.config)) : a.config)); seeded(false); refresh(); }
     }, function () { S.seeding = null; /* not served: the rows keep the usual values, and Slice says which file is missing */ });
   }
 
@@ -1227,6 +1360,7 @@
     }
     // a printer picked since the rows were set starts them again at its profile's values
     if (!S.busy && (p ? p.id : null) !== S.seededFor) seedSettings(p);
+    checkProject();
     var menu = $('menu-supports'), iface = $('slice-set-iface');
     if (menu && menu.open) seedFromTemplate(p);
     if (iface && !S.busy) iface.value = interfaceRule() || '';           // G-scope may have changed the shared choice
@@ -1246,6 +1380,12 @@
    * the card shows it, and `hook.onDone(result)` hears how it ended - the card's readout is the Slice card's, unchanged.
    */
   function slice(hook) {
+    if (S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
+    /* the plate's project first: a plate just opened from a Studio project slices with its settings, the rows set before they are read */
+    var pend = checkProject();
+    return pend ? pend.then(function () { return sliceNow(hook); }, function () { return sliceNow(hook); }) : sliceNow(hook);
+  }
+  function sliceNow(hook) {
     if (S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
     var profile = profileFor(plateId());
     function stop(reason, quietly) {
@@ -1535,6 +1675,7 @@
     bind('btn-slice-preview', previewInGscope);
     bind('slice-settings-toggle', function () { var box = $('slice-settings'); setSettingsOpen(!!(box && box.hidden)); });
     bind('slice-settings-reset', function () { seedSettings(profileFor(plateId()), true); refresh(); });
+    bind('slice-project-use', function () { var pj = plateProject(); if (pj) useProject(pj); });
     SET_IDS.forEach(function (id) {
       var el = $(id);
       if (!el) return;
@@ -1558,6 +1699,7 @@
     /* ...and a printer changed by anything but a hand on that picker (a file opened that brings its plate, a plate switched, an Undo): the line
        said "A1 mini" under a Printer row that said P1S. The open card looks twice a second and follows. */
     setInterval(function () { if (menu && menu.open && !S.busy && plateId() !== S.shownPlate) refresh(); }, 500);
+    setInterval(checkProject, 500);       /* a Studio project put on the plate (or taken off it), card open or shut */
     refresh();
   }
 

@@ -41,6 +41,11 @@ function footOf(f) {
   return { box: box.map(v => Math.round(v * 1000) / 1000), moves: f.parsed.moves.filter(m => String(m.objectId) === id && m.width > 0) };
 }
 
+function changesOf(cfg) {
+  const d = cfg.different_settings_to_system, o = {};
+  (Array.isArray(d) && d[0] ? String(d[0]).split(';').filter(Boolean) : []).forEach(k => { const v = cfg[k]; o[k] = Array.isArray(v) ? String(v[0]) : String(v); });
+  return o;
+}
 function settingsOf(cfg, keys) { const o = {}; keys.forEach(k => { o[k] = Array.isArray(cfg[k]) ? cfg[k][0] : cfg[k]; }); return o; }
 const KEYS = ['wall_generator', 'wall_loops', 'top_shell_layers', 'top_shell_thickness', 'bottom_shell_layers', 'bottom_shell_thickness', 'sparse_infill_density',
   'sparse_infill_pattern', 'outer_wall_line_width', 'inner_wall_line_width', 'sparse_infill_line_width', 'layer_height', 'initial_layer_print_height', 'detect_thin_wall',
@@ -92,7 +97,9 @@ const KEYS = ['wall_generator', 'wall_loops', 'top_shell_layers', 'top_shell_thi
       'themselves (the designer\'s model, pictures and description) are not in the repo. docs/SLICER.md "Arachne" and "3D honeycomb".',
     noWalls: {
       file: 'bambu_arachne.gcode.3mf', studio: A.studio, settings: settingsOf(A.config, KEYS), box: fa1.box, layers: nLayers, features,
-      edgeMm: r4(edge), lineSpacingMm: r4(D), straightLayers: straight, sparseMm: sparse, moves: count, points
+      edgeMm: r4(edge), lineSpacingMm: r4(D), straightLayers: straight, sparseMm: sparse, moves: count, points,
+      /* what the owner changed in Studio (different_settings_to_system, the process's): the Print card takes exactly these from the project */
+      projectChanges: changesOf(A.config), printSettingsId: settingsOf(A.config, ['print_settings_id']).print_settings_id
     },
     arachne: {
       file: path.basename(fb).replace(/^[0-9a-f]{8}-/, '').replace(/[^\w .()-]/g, ''), studio: B.studio, settings: settingsOf(B.config, KEYS), box: fb1.box, layers: nB,
