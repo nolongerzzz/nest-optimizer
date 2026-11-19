@@ -730,11 +730,62 @@ async function main() {
     const p1sBt = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu', bridgeTemp: 212 }) });
     check('a bridge temperature on the P1S is refused: its park and wipe moves are not written yet', !p1sBt.ok && /written for the A1 mini only so far/.test(p1sBt.reason), p1sBt.reason);
-    check('...the card\'s CR-TPU on the P1S has that bed: 215 C (first layer 235), bed 35, 3.2 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 215, firstTemp: 235, bedTemp: 35, maxFlow: 3.2, rangeLow: 200, rangeHigh: 250,
+    check('...the card\'s CR-TPU on the P1S is the owner\'s own P1S preset (fixtures/print-planner/p1s-0.4/studio-owner-cr-tpu-squishy): 220 C, first layer too, bed 30, 3 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 220, firstTemp: 220, bedTemp: 30, maxFlow: 3, rangeLow: 200, rangeHigh: 250,
       flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0.4, bridgeSpeed: 50, bridgeFlow: 1, hangSpeed: null, bridgeTemp: null }));
     const p1sOwn = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu' }) });
     check('...and CR-TPU with every row empty slices for the P1S: the filament asks for no bridge temperature where the printer has no park (only a number typed in the row is refused)', p1sOwn.ok && p1sOwn.stats.bridgeTemp === null, p1sOwn.reason);
+  }
+
+  // ===========================================================================
+  section('5a. The owner\'s own Studio filaments: CR-TPU on the P1S, ELEGOO PETG on both (docs/FILAMENTS.md "The owner\'s presets")');
+  // ===========================================================================
+  {
+    /* Each slim fixture is the owner's own Studio 02.09.01.70 slice (2026-11-18), cut after its first layer: its start, its first layer,
+       its end and its settings. NSO's filament on that printer's template must write what Studio wrote. */
+    const CK = ['overhang_fan_threshold', 'overhang_fan_speed', 'fan_min_speed', 'fan_cooling_layer_time', 'fan_max_speed', 'slow_down_layer_time', 'slow_down_min_speed'];
+    const CP = require(path.join(ROOT, 'nso-cooling-profiles.js'));
+    for (const [label, rel, fid, cfgT, prn] of [
+      ['CR-TPU on the P1S', 'fixtures/print-planner/p1s-0.4/studio-owner-cr-tpu-squishy.slim.gcode.3mf', 'cr-tpu', p1sCfg, p1sPrinter],
+      ['ELEGOO PETG on the A1 mini', 'fixtures/print-planner/a1mini-0.4/studio-owner-elegoo-petg.slim.gcode.3mf', 'elegoo-petg', tpl, a1],
+      ['ELEGOO PETG on the P1S', 'fixtures/print-planner/p1s-0.4/studio-owner-elegoo-petg.slim.gcode.3mf', 'elegoo-petg', p1sCfg, p1sPrinter]]) {
+      const st = await L.bambuSlice(rel), sc = st.config, one = k => Array.isArray(sc[k]) ? sc[k][0] : sc[k];
+      const f = PRINT.FILAMENTS[fid], keys = PRINT.filamentKeys(cfgT, fid);
+      const badK = Object.keys(keys).filter(k => k !== 'filament_settings_id' && String(one(k)) !== String(keys[k]));
+      check(label + ': every Studio key NSO writes is the owner\'s preset\'s value (' + Object.keys(keys).length + ' keys), and the file names that preset (' + keys.filament_settings_id + ')',
+        badK.length === 0 && keys.filament_settings_id === one('filament_settings_id'), JSON.stringify(badK.map(k => [k, keys[k], one(k)])));
+      const cool = Object.assign({}, CP.resolveValues(CP.DEFAULT_PROFILE_ID), typeof f.cooling === 'function' ? f.cooling(cfgT) : f.cooling);
+      const badC = CK.filter(k => String(cool[k]) !== String(one(k)));
+      check('...its fans and layer-time slowdown are the preset\'s (' + CK.map(k => one(k)).join(', ') + ')', badC.length === 0, JSON.stringify(badC.map(k => [k, cool[k], one(k)])));
+      const sl = st.gcode.split('\n'), noM73 = a => a.filter(l => !/^@?M73 /.test(l));
+      const iE = sl.indexOf('; EXECUTABLE_BLOCK_START'), iM = sl.indexOf('; MACHINE_START_GCODE_END'), iL = sl.indexOf('; CHANGE_LAYER');
+      const cfg = k => ((new RegExp('^; ' + k + ' = (.*)$', 'm').exec(st.gcode) || [])[1] || '').split(',')[0];
+      const gm = /X([\d.]+) Y([\d.]+) I([\d.]+) J([\d.]+)/.exec(sl.find(l => /^\s*G29 A1? ?X/.test(l)));
+      const c = {};
+      ['filament_type', 'filament_max_volumetric_speed', 'nozzle_temperature_range_high', 'filament_flush_temp', 'filament_flush_volumetric_speed', 'outer_wall_speed', 'outer_wall_line_width',
+       'layer_height', 'nozzle_temperature', 'nozzle_temperature_initial_layer', 'textured_plate_temp', 'textured_plate_temp_initial_layer', 'curr_bed_type'].forEach(k => { c[k] = cfg(k); });
+      const S = PL.settingsFrom(c);
+      const v = { nozzle: S.temp.nozzleInitial, nozzleT: S.temp.nozzle, bed: S.temp.bedInitial, bedMax: Math.max(S.temp.bed, S.temp.bedInitial), box: { x: +gm[1], y: +gm[2], w: +gm[3], h: +gm[4] }, cy: 0, maxZ: 0,
+        filamentType: S.filament.type, flushV: S.filament.flushVolumetric, flushT: S.filament.flushTemp, ow: S.filament.outerWallVolumetric };
+      const want = noM73(sl.slice(iE + 2, iM + 1)), got = noM73(PL.thaw(prn.start, v, {}));
+      const off = want.findIndex((l, i) => l !== got[i]);
+      check('...NSO\'s start block with that slice\'s numbers is Studio\'s, all ' + want.length + ' lines (' + S.filament.type + ', ' + S.filament.maxVolumetric + ' mm^3/s, ' + S.temp.nozzle + ' C, bed ' + S.temp.bedInitial + '/' + S.temp.bed + ')',
+        want.length === got.length && off < 0, off >= 0 ? 'line ' + off + ': ' + JSON.stringify([want[off], got[off]]) : want.length + ' / ' + got.length);
+      const vt = prn.afterStart.findIndex(l => typeof l === 'string' && /^;VT\d/.test(l));
+      const wantAfter = noM73(sl.slice(iM + 1, iL)), gotAfter = noM73(PL.thaw(f.start(Math.max(S.temp.bed, S.temp.bedInitial), cfgT).concat(prn.afterStart.slice(vt)), v, {}));
+      check('...and so is the filament\'s own start G-code after it', JSON.stringify(wantAfter) === JSON.stringify(gotAfter), JSON.stringify([wantAfter, gotAfter]));
+      const fb = PRINT.filamentBase(cfgT, fid);
+      check('...the card\'s rows start at the preset: ' + fb.nozzleTemp + ' C (first layer ' + fb.firstTemp + '), bed ' + fb.bedTemp + ', ' + fb.maxFlow + ' mm^3/s, flow ratio ' + fb.flowRatio,
+        fb.nozzleTemp === +one('nozzle_temperature') && fb.firstTemp === +one('nozzle_temperature_initial_layer') && fb.bedTemp === +one('textured_plate_temp_initial_layer') &&
+          fb.maxFlow === +one('filament_max_volumetric_speed') && fb.flowRatio === +one('filament_flow_ratio'), JSON.stringify(fb));
+      const out = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), prn.bed), { config: cfgT, printer: prn },
+        { settings: Object.assign({}, PRINT.settingsFromConfig(cfgT), { filament: fid }) });
+      const g = out.ok ? L.text(await L.R.openZip(out.bytes).read('Metadata/plate_1.gcode')) : '';
+      const gc = k => ((new RegExp('^; ' + k + ' = (.*)$', 'm').exec(g) || [])[1] || '').split(/[,;]/)[0];
+      check('...and the plate slices with it: the file says ' + gc('filament_type') + ', ' + gc('filament_settings_id') + ', ' + gc('nozzle_temperature') + ' C',
+        out.ok && gc('filament_type') === one('filament_type') && gc('filament_settings_id').replace(/"/g, '') === one('filament_settings_id') && gc('nozzle_temperature') === one('nozzle_temperature') &&
+          gc('textured_plate_temp') === one('textured_plate_temp') && g.indexOf('; filament start gcode\n' + f.start(Math.max(S.temp.bed, S.temp.bedInitial), cfgT).slice(1).join('\n')) >= 0, out.reason);
+    }
   }
 
   // ===========================================================================

@@ -791,8 +791,9 @@
         .replace(/\{OW\/2\.4\}/g, function () { return gnum(v.ow / 2.4); })
         .replace(/\{N-20\}/g, tnum(v.nozzle - 20)).replace(/\{N-40\}/g, tnum(v.nozzle - 40))
         .replace(/\{N\}/g, tnum(v.nozzle)).replace(/\{T\}/g, tnum(v.nozzleT)).replace(/\{B\}/g, tnum(v.bed))
-        .replace(/\{BX\}/g, tnum(v.box.x)).replace(/\{BY\}/g, tnum(v.box.y))
-        .replace(/\{BW\}/g, tnum(v.box.w)).replace(/\{BH\}/g, tnum(v.box.h))
+        /* the bed-mesh box as Studio prints it, six significant digits (Y4.06651 on the owner's A1 mini PETG slice; four decimals wrote 4.0665) */
+        .replace(/\{BX\}/g, gnum(v.box.x)).replace(/\{BY\}/g, gnum(v.box.y))
+        .replace(/\{BW\}/g, gnum(v.box.w)).replace(/\{BH\}/g, gnum(v.box.h))
         .replace(/\{CY\}/g, tnum(v.cy))
         .replace(/\{Z\+0\.4\}/g, tnum(v.maxZ + 0.4)).replace(/\{Z\+0\.5\}/g, tnum(v.maxZ + 0.5))
         .replace(/\{Z\+100\}/g, tnum(v.maxZ + 100)).replace(/\{Z\+98\}/g, tnum(v.maxZ + 98));

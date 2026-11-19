@@ -24,7 +24,9 @@ card slices exactly as before: the same G-code, byte for byte (`print:slice` hol
 - **keys**: its Bambu Studio filament keys, written over the template's on every filament slot, so
   the planner, the G-code's CONFIG_BLOCK, `project_settings.config` and `slice_info.config` all
   hold them (the last is what tells the printer what is loaded: `type="TPU"`).
-- **cooling**: what it changes of NSO's cooling keys (fans, layer-time slowdown).
+- **cooling**: what it changes of NSO's cooling keys (fans, layer-time slowdown) - an object, or a
+  function of the template when the printers differ.
+- **printerKeys**: what that printer's own preset changes of the keys.
 - **start**: its own filament start G-code, in place of the PLA filament's.
 - **studioId**: the Studio preset the file names for that printer.
 
@@ -38,14 +40,46 @@ owner's A1 mini temperature tower (2026-11-13, dried spool, 240 down to 210 C):
 - **215 C** nozzle, **235 C** the first layer (since 2026-11-15; 235 throughout before). The tower
   said 240 - 235 for walls and 210 - 215 for bridges; the string test and the roof prints below settled
   it at 215 once the slicer printed islands one at a time and anchored its bridges.
-- The bed is Studio's own for the printer, which is what that tower printed on: **30 C** on the
-  A1 mini (`Generic TPU @BBL A1M`), **35 C** on the P1S (`Generic TPU`).
+- The bed on the A1 mini is Studio's own for it, which is what that tower printed on: **30 C**
+  (`Generic TPU @BBL A1M`).
+- **On the P1S it is the owner's own Studio preset** (Generic TPU with their edits; their slice of
+  2026-11-18, a squishy cube, kept slim as
+  `fixtures/print-planner/p1s-0.4/studio-owner-cr-tpu-squishy.slim.gcode.3mf`): **220 C**, the first
+  layer too; bed **30 C** on every plate; **3 mm^3/s**; the fan **40 - 65 %** (Studio's Generic TPU:
+  100); overhangs past 50 % at **70 %**. Its start G-code is Generic TPU @base's: no chamber-fan
+  line at a 30 C bed. The A1 mini's 215 is not carried over: the P1S prints as the owner set it up.
 
-Not yet measured for this spool: the real max flow (3.2 is Studio's conservative Generic value),
-retraction beyond 0.4 mm and the flow ratio. The P1S entry is the same keys with its own bed and
-has not been printed: its 215 is the A1 mini's.
+Not yet measured for this spool: the real max flow (3.2 / 3 are Studio's conservative values) and
+the flow ratio. The A1 mini prints used a 1.5 mm retraction typed into the row; the filament's own
+is still Studio's 0.4.
 
 When sending: untick the AMS, and turn off flow dynamics calibration (Bambu's advice for TPU).
+
+### ELEGOO PETG
+
+The owner's own Studio presets (their slices of 2026-11-18, kept slim as
+`fixtures/print-planner/<printer>/studio-owner-elegoo-petg.slim.gcode.3mf`), both from Studio's
+Generic PETG (`fdm_filament_pet`): printable 220 - 270 C, density 1.27.
+
+| | A1 mini (`ELEGOO-PETG-A1mini`, from `Generic PETG @BBL A1M`) | P1S (`ELEGOO-PETG`, from `Generic PETG`) |
+|---|---|---|
+| Nozzle | 245 C, first layer too (owner's) | 245 C, first layer too (owner's) |
+| Max flow | 10 mm^3/s (owner's) | 12 mm^3/s |
+| Flow ratio | 0.95 | 1 (owner's) |
+| Bed (textured) | 70 | 70 the first layer, then 75 (owner's) |
+
+Both: the fan off for the first 3 layers, then 40 - 90 % between a 30 s and a 12 s layer, slowing to
+20 mm/s at most; overhangs past 10 % at 90 %; no aux fan. The start G-code turns the chamber fan to
+180 over a 60 C bed (255 over 80), then two empty lines. Retraction is the printer's (0.8 mm): the
+presets leave it unset. It is not marked external: it can feed from the AMS.
+
+### The owner's presets are checked against their slices
+
+`tools/print-slice-check.js` section 5a holds each of those three slices against NSO: every Studio
+key the filament writes is the preset's value, the fans are the preset's, the start block and the
+filament's own start G-code are Studio's line for line, the card's rows start at the preset, and a
+plate slices with it. (The A1 mini PETG slice also caught the bed-mesh box: Studio writes six
+significant digits, `Y4.06651`, where NSO wrote four decimals.)
 
 ## The start block follows the filament
 
@@ -289,4 +323,6 @@ settings `bridgeFirst: true` turns it on. Not on the card or in any filament yet
 
 One entry in `FILAMENTS` (`app-print.js`) and one `<option>` in `#slice-set-filament`
 (`index.html`). Start from the Studio profile it inherits, then put measured values on top and say
-where they came from. `tools/print-slice-check.js` section 3c is the pattern for its checks.
+where they came from. `tools/print-slice-check.js` section 3c is the pattern for its checks; with a
+Studio slice of the owner's own preset, add it to section 5a (a slim copy: through the first layer,
+the end and the settings).

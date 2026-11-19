@@ -148,7 +148,8 @@
   // 'profile' is the printer template's own filament (PLA). Every other entry is a filament NSO prints with on these printers:
   //   keys     its Bambu Studio filament keys, written over the template's on every filament slot (so the planner, the CONFIG_BLOCK
   //            and project_settings.config all hold them). Only keys the template has are written.
-  //   cooling  what it changes of NSO's cooling keys (nso-cooling-profiles.js) - the planner's fans and layer-time slowdown
+  //   cooling  what it changes of NSO's cooling keys (nso-cooling-profiles.js) - the planner's fans and layer-time slowdown; an object, or
+  //            a function of the template's config when the printers differ
   //   start    its filament start G-code, expanded for a bed temperature (the template's is the PLA filament's)
   //   studioId the Studio filament preset the file names, for the printer
   //
@@ -159,10 +160,23 @@
   // The start G-code is Studio's expansion of the Generic TPU filament's, as its own slice of that tower has it
   // (fixtures/print-planner/<printer>/studio-generic-tpu-tower.gcode.3mf): the fan line only over 30 C, then one line of a space - and
   // on the P1S (Generic TPU @base's text, not the A1M preset's) an empty line after it.
+  // On the P1S it prints as the owner's own Studio preset does (Generic TPU with their edits, its slice of 2026-11-18 a squishy cube:
+  // fixtures/print-planner/p1s-0.4/studio-owner-cr-tpu-squishy.slim.gcode.3mf): 220 C, first layer too, bed 30 on every plate,
+  // 3 mm^3/s, the fan 40 - 65 %, overhangs past 50 % at 70 %. The A1 mini keeps what its prints found (215, first layer 235).
+  //
+  // ELEGOO PETG (the owner's own Studio presets, both slices of 2026-11-18: fixtures/print-planner/<printer>/studio-owner-elegoo-petg.slim.gcode.3mf).
+  // The keys are Bambu Studio's Generic PETG (fdm_filament_pet) with the owner's edits: 245 C, first layer too, on both printers. On the
+  // A1 mini (ELEGOO-PETG-A1mini, from Generic PETG @BBL A1M) 10 mm^3/s and flow ratio 0.95; on the P1S (ELEGOO-PETG, from Generic PETG)
+  // 12 mm^3/s, flow ratio 1, and the textured plate at 75 after a first layer at 70. The fan is off for 3 layers, then 40 - 90 %
+  // (overhangs past 10 % at 90), no aux fan; the chamber fan at 180 over a 60 C bed, 255 over 80.
   var isA1Mini = function (config) { return /A1 mini/i.test(cfgRaw(config, 'printer_model') + cfgRaw(config, 'printer_settings_id')); };
   var TPU_START = function (bed, config) {
     var fan = bed > 35 ? 'M106 P3 S255' : bed > 30 ? 'M106 P3 S180' : null;
     return ['; filament start gcode'].concat(fan ? [fan] : [], isA1Mini(config) ? [' '] : [' ', '']);
+  };
+  var PETG_START = function (bed) {
+    var fan = bed > 80 ? 'M106 P3 S255' : bed > 60 ? 'M106 P3 S180' : null;
+    return ['; filament start gcode'].concat(fan ? [fan] : [], ['', '']);
   };
   var FILAMENTS = {
     profile: { id: 'profile', label: 'Profile (PLA)' },
@@ -179,7 +193,10 @@
         filament_density: '1.24', temperature_vitrification: '30', filament_adhesiveness_category: '600', filament_cost: '20',
         close_fan_the_first_x_layers: '1', additional_cooling_fan_speed: '70', close_additional_fan_first_x_layers: '1'
       },
-      cooling: { fan_min_speed: '100', fan_max_speed: '100', fan_cooling_layer_time: '100', slow_down_layer_time: '8', slow_down_min_speed: '10' },
+      cooling: function (config) {
+        var c = { fan_min_speed: '100', fan_max_speed: '100', fan_cooling_layer_time: '100', slow_down_layer_time: '8', slow_down_min_speed: '10' };
+        return isA1Mini(config) ? c : Object.assign(c, { fan_min_speed: '40', fan_max_speed: '65', overhang_fan_speed: '70', overhang_fan_threshold: '50%' });   /* the owner's P1S preset */
+      },
       /* ITS OWN DIALS (docs/FILAMENTS.md "The filament holds its dials"): the rows that are not a Studio filament key but were found for this
          filament, so picking it is all a job needs. The nozzle prints at 215 (the first layer at 235, for the bed): the owner's A1 mini prints
          of 2026-11-14/15 - the string test clean at 210-220 once the cones were printed one at a time, where 235 strung top to bottom, and the
@@ -193,10 +210,32 @@
       slicer: { shortFillMm: 1 },
       /* what the printer's own Studio preset changes of those keys */
       printerKeys: function (config) {
-        return isA1Mini(config) ? { hot_plate_temp: '30', hot_plate_temp_initial_layer: '30', textured_plate_temp: '30', textured_plate_temp_initial_layer: '30' } : {};
+        var bed30 = { hot_plate_temp: '30', hot_plate_temp_initial_layer: '30', textured_plate_temp: '30', textured_plate_temp_initial_layer: '30' };
+        /* the P1S: the owner's own preset (above) */
+        return isA1Mini(config) ? bed30 : Object.assign(bed30, { nozzle_temperature: '220', nozzle_temperature_initial_layer: '220', filament_max_volumetric_speed: '3', filament_cost: '25' });
       },
       start: TPU_START,
       studioId: function (config) { return isA1Mini(config) ? 'Generic TPU @BBL A1M' : 'Generic TPU'; }
+    },
+    'elegoo-petg': {
+      id: 'elegoo-petg', label: 'ELEGOO PETG',
+      keys: {
+        filament_type: 'PETG', filament_ids: 'GFG99', filament_vendor: 'Generic',
+        nozzle_temperature: '245', nozzle_temperature_initial_layer: '245', nozzle_temperature_range_low: '220', nozzle_temperature_range_high: '270',
+        cool_plate_temp: '0', cool_plate_temp_initial_layer: '0', eng_plate_temp: '70', eng_plate_temp_initial_layer: '70',
+        hot_plate_temp: '70', hot_plate_temp_initial_layer: '70', textured_plate_temp: '70', textured_plate_temp_initial_layer: '70',
+        supertack_plate_temp: '70', supertack_plate_temp_initial_layer: '70',
+        filament_max_volumetric_speed: '12', filament_flow_ratio: '1',
+        filament_density: '1.27', temperature_vitrification: '60', filament_adhesiveness_category: '300', filament_cost: '30',
+        close_fan_the_first_x_layers: '3', additional_cooling_fan_speed: '0', close_additional_fan_first_x_layers: '3'
+      },
+      cooling: { overhang_fan_threshold: '10%', overhang_fan_speed: '90', fan_min_speed: '40', fan_cooling_layer_time: '30', fan_max_speed: '90',
+                 slow_down_layer_time: '12', slow_down_min_speed: '20' },
+      printerKeys: function (config) {
+        return isA1Mini(config) ? { filament_max_volumetric_speed: '10', filament_flow_ratio: '0.95' } : { textured_plate_temp: '75' };
+      },
+      start: PETG_START,
+      studioId: function (config) { return isA1Mini(config) ? 'ELEGOO-PETG-A1mini' : 'ELEGOO-PETG'; }
     }
   };
   /* the rows that are a filament's: each the config key the planner reads (the bed's is its plate's, bedKeyOf) */
@@ -425,7 +464,7 @@
     var f = filamentOf(settings.filament), PL = lazy('nso-print-planner.js', 'NSOPrintPlanner'), CP = lazy('nso-cooling-profiles.js', 'NSOCoolingProfiles');
     var S = PL.settingsFrom(config);
     return {
-      cooling: f.cooling && CP ? Object.assign({}, CP.resolveValues(CP.DEFAULT_PROFILE_ID), f.cooling) : undefined,
+      cooling: f.cooling && CP ? Object.assign({}, CP.resolveValues(CP.DEFAULT_PROFILE_ID), typeof f.cooling === 'function' ? f.cooling(config) : f.cooling) : undefined,
       filamentStart: f.start ? f.start(Math.max(S.temp.bed, S.temp.bedInitial), config) : undefined,
       tempSteps: settings.tempStep ? { stepC: settings.tempStep, bandMm: settings.tempBand } : undefined,
       bridgeTemp: bridgeTempOf(config, settings) || undefined,
