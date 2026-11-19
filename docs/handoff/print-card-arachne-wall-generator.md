@@ -42,3 +42,9 @@ lives in CuraEngine and Studio), stated in docs/SLICER.md "Arachne".
 `fixtures/slicer-feet-reference.json` holds the measures, not the files (the model is its designer's), and
 `tools/nso_slicer_feet_reference.js` remakes it from the two files. `slicer:test` 189, `print:slice` 174.
 `gcode:gscope-slice` fails before and after this change: it reads the `ms-slice-*` rows G-scope no longer has.
+
+**Shell rows (2026-11-19, after the owner's screenshots).** Studio sliced the feet as pure 3D honeycomb and the Print card
+sliced them solid: the card had no shell rows, so the profile's 5 top / 3 bottom always printed. Strength now has Studio's four:
+Top shell layers, Top shell thickness, Bottom shell layers, Bottom shell thickness (`top_shell_layers` ... keys; saved settings
+keep them). With Wall loops 0, both shell layers 0, 3D honeycomb 10 %, four 60 mm feet on the real page come out 120 layers of
+Sparse infill alone, 397 m against Studio's 393 m (+0.9 %), in G-scope's preview. `print:slice` 179 (+5).

@@ -130,7 +130,10 @@
                            supIfacePattern: 'default', supIfaceSpacing: 0.5, supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true,
                            /* THE WALL GENERATOR (docs/SLICER.md "Arachne"): Classic, or Arachne's variable-width walls with its six levers - Studio's own
                               names and defaults, the four percentages of the nozzle's diameter */
-                           wallGen: 'classic', wallAngle: 10, wallFilter: 25, wallTransLen: 100, wallDist: 1, minWall: 85, minFeature: 25 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
+                           wallGen: 'classic', wallAngle: 10, wallFilter: 25, wallTransLen: 100, wallDist: 1, minWall: 85, minFeature: 25,
+                           /* TOP / BOTTOM SHELLS (Strength), Studio's four: the layers, and a thickness that adds layers to a count of one or more
+                              (0 layers is none: the owner's TPU feet as pure 3D honeycomb - no walls, no shells) */
+                           topLayers: 5, topThick: 1, botLayers: 3, botThick: 0 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var SUP_BASE_TO_CONFIG = { 'default': 'default', rectilinear: 'rectilinear', 'rectilinear-grid': 'rectilinear-grid', hollow: 'hollow' };
   var SUP_IFACE_TO_CONFIG = { 'default': 'auto', rectilinear: 'rectilinear', concentric: 'concentric', rectilinear_interlaced: 'rectilinear_interlaced', grid: 'grid' };
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
@@ -306,7 +309,8 @@
       wallGen: cfgRaw(config, 'wall_generator') === 'arachne' ? 'arachne' : 'classic',
       wallAngle: numOf(cfgRaw(config, 'wall_transition_angle'), D0.wallAngle), wallFilter: pctOf(cfgRaw(config, 'wall_transition_filter_deviation'), D0.wallFilter),
       wallTransLen: pctOf(cfgRaw(config, 'wall_transition_length'), D0.wallTransLen), wallDist: numOf(cfgRaw(config, 'wall_distribution_count'), D0.wallDist),
-      minWall: pctOf(cfgRaw(config, 'min_bead_width'), D0.minWall), minFeature: pctOf(cfgRaw(config, 'min_feature_size'), D0.minFeature)
+      minWall: pctOf(cfgRaw(config, 'min_bead_width'), D0.minWall), minFeature: pctOf(cfgRaw(config, 'min_feature_size'), D0.minFeature),
+      topLayers: o.topShellLayers, topThick: o.topShellThicknessMm, botLayers: o.bottomShellLayers, botThick: o.bottomShellThicknessMm
     };
   }
 
@@ -359,7 +363,9 @@
       wallTransLen: Math.round(n(s.wallTransLen, D.wallTransLen, 1, 500)),
       wallDist: Math.round(n(s.wallDist, D.wallDist, 1, 10)),
       minWall: Math.round(n(s.minWall, D.minWall, 5, 100)),
-      minFeature: Math.round(n(s.minFeature, D.minFeature, 0, 100))
+      minFeature: Math.round(n(s.minFeature, D.minFeature, 0, 100)),
+      topLayers: Math.round(n(s.topLayers, D.topLayers, 0, 100)), topThick: r2(n(s.topThick, D.topThick, 0, 20)),
+      botLayers: Math.round(n(s.botLayers, D.botLayers, 0, 100)), botThick: r2(n(s.botThick, D.botThick, 0, 20))
     };
   }
 
@@ -408,6 +414,11 @@
     if (s.wallDist !== base.wallDist) out.wall_distribution_count = String(s.wallDist);
     if (s.minWall !== base.minWall) out.min_bead_width = s.minWall + '%';
     if (s.minFeature !== base.minFeature) out.min_feature_size = s.minFeature + '%';
+    /* the shells, by Studio's keys */
+    if (s.topLayers !== base.topLayers) out.top_shell_layers = String(s.topLayers);
+    if (Math.abs(s.topThick - base.topThick) > 1e-6) out.top_shell_thickness = String(s.topThick);
+    if (s.botLayers !== base.botLayers) out.bottom_shell_layers = String(s.botLayers);
+    if (Math.abs(s.botThick - base.botThick) > 1e-6) out.bottom_shell_thickness = String(s.botThick);
     /* the filament: its own keys, then the rows that differ from its own values */
     var fk = filamentKeys(config, s.filament);
     Object.keys(fk).forEach(function (k) { if (cfgRaw(config, k) !== fk[k]) out[k] = fk[k]; });
@@ -850,10 +861,14 @@
                  'slice-set-sup-base-spacing', 'slice-set-sup-angle', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion',
                  'slice-set-sup-xy', 'slice-set-sup-zover', 'slice-set-sup-first-gap', 'slice-set-sup-bridge', 'slice-set-sup-indep',
                  /* the wall generator and Arachne's levers (Quality) */
-                 'slice-set-wall-gen', 'slice-set-wall-angle', 'slice-set-wall-filter', 'slice-set-wall-translen', 'slice-set-wall-dist', 'slice-set-min-wall', 'slice-set-min-feature'];
+                 'slice-set-wall-gen', 'slice-set-wall-angle', 'slice-set-wall-filter', 'slice-set-wall-translen', 'slice-set-wall-dist', 'slice-set-min-wall', 'slice-set-min-feature',
+                 /* the top / bottom shells (Strength) */
+                 'slice-set-top-layers', 'slice-set-top-thick', 'slice-set-bot-layers', 'slice-set-bot-thick'];
   /* the wall generator's rows: the row, and its name in the settings */
   var WALL_ROWS = [['slice-set-wall-gen', 'wallGen'], ['slice-set-wall-angle', 'wallAngle'], ['slice-set-wall-filter', 'wallFilter'], ['slice-set-wall-translen', 'wallTransLen'],
-                   ['slice-set-wall-dist', 'wallDist'], ['slice-set-min-wall', 'minWall'], ['slice-set-min-feature', 'minFeature']];
+                   ['slice-set-wall-dist', 'wallDist'], ['slice-set-min-wall', 'minWall'], ['slice-set-min-feature', 'minFeature'],
+                   /* ...and the shells' four rows, read and shown the same way */
+                   ['slice-set-top-layers', 'topLayers'], ['slice-set-top-thick', 'topThick'], ['slice-set-bot-layers', 'botLayers'], ['slice-set-bot-thick', 'botThick']];
   /** Arachne's six levers show under the generator only when it is Arachne (Classic has none of them). */
   function wallRows() {
     var sel = $('slice-set-wall-gen'), box = $('slice-arachne-rows');

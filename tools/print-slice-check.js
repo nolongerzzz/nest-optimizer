@@ -218,7 +218,9 @@ async function main() {
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true,
         /* the wall generator: the template's classic, and Studio's Arachne defaults (docs/SLICER.md "Arachne") */
-        wallGen: 'classic', wallAngle: 10, wallFilter: 25, wallTransLen: 100, wallDist: 1, minWall: 85, minFeature: 25 }), JSON.stringify(base));
+        wallGen: 'classic', wallAngle: 10, wallFilter: 25, wallTransLen: 100, wallDist: 1, minWall: 85, minFeature: 25,
+        /* the shells: the template's 5 top (1 mm) and 3 bottom */
+        topLayers: 5, topThick: 1, botLayers: 3, botThick: 0 }), JSON.stringify(base));
     const rov = PRINT.configOverlay(tpl, Object.assign({}, base, { raft: 10 }));
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));
@@ -245,6 +247,22 @@ async function main() {
       const wc = PRINT.cleanSettings({ wallGen: 'spider', wallAngle: '90', wallFilter: '-5', wallTransLen: '0', wallDist: '0', minWall: '1', minFeature: '200' });
       check('...each lever clamped to what Studio takes, an unknown generator is Classic',
         wc.wallGen === 'classic' && wc.wallAngle === 59 && wc.wallFilter === 0 && wc.wallTransLen === 1 && wc.wallDist === 1 && wc.minWall === 5 && wc.minFeature === 100, JSON.stringify(wc));
+    }
+    {
+      /* THE SHELLS (Strength) and the feet as the owner prints them (bambu_arachne.gcode.3mf): no walls, no shells, 3D honeycomb 10 % */
+      const sov = PRINT.configOverlay(tpl, Object.assign({}, base, { walls: 0, topLayers: 0, botLayers: 0, density: 10, pattern: '3dhoneycomb' }));
+      check('no walls, no top, no bottom, 3D honeycomb 10 % on the card: the file\'s wall_loops 0, top / bottom_shell_layers 0, and nothing else',
+        JSON.stringify(sov) === JSON.stringify({ wall_loops: '0', sparse_infill_density: '10%', sparse_infill_pattern: '3dhoneycomb', top_shell_layers: '0', bottom_shell_layers: '0' }), JSON.stringify(sov));
+      const eo = PL.engineOptions(PRINT.withOverlay(tpl, sov)).over;
+      check('...the planner hands the engine each of them', eo.wallLoops === 0 && eo.topShellLayers === 0 && eo.bottomShellLayers === 0 && eo.sparsePattern === '3dhoneycomb' &&
+        Math.abs(eo.sparseDensity - 0.1) < 1e-9, JSON.stringify([eo.wallLoops, eo.topShellLayers, eo.bottomShellLayers, eo.sparsePattern, eo.sparseDensity]));
+      const tov = PRINT.configOverlay(tpl, Object.assign({}, base, { topThick: 1.6, botThick: 0.8 }));
+      check('...and the two thicknesses by Studio\'s keys', JSON.stringify(tov) === JSON.stringify({ top_shell_thickness: '1.6', bottom_shell_thickness: '0.8' }), JSON.stringify(tov));
+      const sc = PRINT.cleanSettings({ topLayers: '-2', topThick: '99', botLayers: '7.4', botThick: 'x' });
+      check('...each clamped to what it takes', sc.topLayers === 0 && sc.topThick === 20 && sc.botLayers === 7 && sc.botThick === 0, JSON.stringify([sc.topLayers, sc.topThick, sc.botLayers, sc.botThick]));
+      const foot = await PRINT.build(objs.slice(0, 1), { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { walls: 0, topLayers: 0, botLayers: 0, density: 10, pattern: '3dhoneycomb' }) });
+      check('...and a part sliced so is Sparse infill alone, as the owner\'s Studio slice of the feet: no wall, no top, no bottom, no solid (the coupon\'s auto brim aside)',
+        foot.ok && JSON.stringify(foot.features.filter((f) => !/^Support|^Custom$|^Brim$/.test(f))) === JSON.stringify(['Sparse infill']), foot.ok ? 'features: ' + JSON.stringify(foot.features) : 'refused: ' + foot.reason);
     }
     const SURF = ['internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern'];
     const ringOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: 'concentric' }));
@@ -830,6 +848,7 @@ async function main() {
          'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-settings-reset',
          'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band', 'slice-filament-note',
          'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-bridge-temp', 'slice-bridge-note', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-retract-before', 'slice-set-zhop',
+         'slice-set-top-layers', 'slice-set-top-thick', 'slice-set-bot-layers', 'slice-set-bot-thick',
          'slice-set-wall-gen', 'slice-arachne-rows', 'slice-set-wall-angle', 'slice-set-wall-filter', 'slice-set-wall-translen', 'slice-set-wall-dist', 'slice-set-min-wall', 'slice-set-min-feature'].every(has) &&
         /* the wall generator and its levers are Quality's, Arachne's six hidden until it is picked */
         ['slice-set-wall-gen', 'slice-set-wall-angle', 'slice-set-min-feature'].every(id => sec('print-sec-quality').includes('id="' + id + '"')) && /^id="slice-arachne-rows" hidden>/.test(from('slice-arachne-rows')) &&

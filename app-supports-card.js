@@ -1266,7 +1266,9 @@ var NSO_SUPPORTS_CARD = (function () {
     'slice-set-sup-angle', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion', 'slice-set-sup-xy', 'slice-set-sup-zover',
     'slice-set-sup-first-gap', 'slice-set-sup-bridge', 'slice-set-sup-indep',
     /* the wall generator and Arachne's levers (Quality) */
-    'slice-set-wall-gen', 'slice-set-wall-angle', 'slice-set-wall-filter', 'slice-set-wall-translen', 'slice-set-wall-dist', 'slice-set-min-wall', 'slice-set-min-feature']
+    'slice-set-wall-gen', 'slice-set-wall-angle', 'slice-set-wall-filter', 'slice-set-wall-translen', 'slice-set-wall-dist', 'slice-set-min-wall', 'slice-set-min-feature',
+    /* the top / bottom shells (Strength) */
+    'slice-set-top-layers', 'slice-set-top-thick', 'slice-set-bot-layers', 'slice-set-bot-thick']
     .concat(Object.keys(ADV_IDS).map(function (k) { return ADV_IDS[k][0]; }));
   function store() { try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch (err) { return null; } }
   /* BUILT IN: the numbers NSO sliced supports with before the rows started at the printer profile's (docs/PRINT-CARD.md "Starting values").

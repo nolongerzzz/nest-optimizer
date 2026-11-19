@@ -313,7 +313,7 @@
                 </div>
               </details>
               <details class="vp-sec print-sec" id="print-sec-strength">
-                <summary class="vp-sec-head" title="Walls, the sparse infill and the pattern of the surfaces.">Strength</summary>
+                <summary class="vp-sec-head" title="Walls, the sparse infill, the pattern of the surfaces, and the top and bottom shells.">Strength</summary>
                 <div class="vp-sec-body">
                   <label class="vp-bend-field" for="slice-set-walls">Wall loops
                     <input type="number" id="slice-set-walls" value="2" min="0" max="10" step="1" title="Wall loops. 0: no walls - the infill alone, out to the outline (a TPU part printed as pure 3D honeycomb)." autocomplete="off"></label>
@@ -341,6 +341,18 @@
                         <option value="hilbertcurve" title="Hilbert curve: one square space-filling line, a spacing apart, at 45 degrees">hilbert curve</option>
                         <option value="octagramspiral" title="Octagram spiral: eight-pointed stars, one inside the next, drawn as one line from the middle outward">octagram spiral</option>
                       </select></label>
+                  <label class="vp-bend-field" for="slice-set-top-layers">Top shell layers
+                    <input type="number" id="slice-set-top-layers" value="5" min="0" max="100" step="1" inputmode="numeric"
+                           title="Solid layers under every top surface. 0: no top at all (the Top shell thickness then adds none)." autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-top-thick">Top shell thickness
+                    <input type="number" id="slice-set-top-thick" value="1" min="0" max="20" step="0.1" inputmode="decimal"
+                           title="More top layers when the layers above are thinner than this, mm. Adds to a count of 1 or more only: with 0 top layers there is no top." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-bot-layers">Bottom shell layers
+                    <input type="number" id="slice-set-bot-layers" value="3" min="0" max="100" step="1" inputmode="numeric"
+                           title="Solid layers over every bottom surface. 0: no bottom - the first layer is infill too (a TPU foot printed as pure 3D honeycomb)." autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-bot-thick">Bottom shell thickness
+                    <input type="number" id="slice-set-bot-thick" value="0" min="0" max="20" step="0.1" inputmode="decimal"
+                           title="More bottom layers when the layers below are thinner than this, mm. Adds to a count of 1 or more only." autocomplete="off"><span>mm</span></label>
                 </div>
               </details>
               <details class="vp-sec print-sec" id="print-sec-supports" open>
@@ -3460,7 +3472,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=dee33112"></script>
+  <script src="app-supports-card.js?v=b01359dc"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3470,7 +3482,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=91f90059"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=68986952"></script>
+  <script src="app-print.js?v=e82d981d"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
