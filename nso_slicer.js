@@ -1377,16 +1377,25 @@
        - a, the flats' distance from the line, goes from + D/4 to - D/4 in 10 layers and back in the next 10, a twentieth of D a layer (0.179):
          the lines are straight every 10th layer; going down the lines run along the frame's first axis, coming back up along its second;
        - + D/4 falls on layer 5 (z 1.0), 25, 45...: a quarter of the 20 layers up from the plate.
-     Two numbers are fitted to this one slice and stated, not known: D = (1 + sqrt(3)/2) / sqrt(2) x the spacing over the density (3.5802
-     against the measured 3.5788), and the quarter, 5 layers, taken as the fewest layers that keep a flat's sideways step within a layer height
-     (D / 4 over the layer height, rounded up: 4.47 -> 5). */
+     D = (1 + sqrt(3)/2) / sqrt(2) x the spacing over the density is fitted to this slice and stated, not known (3.5802 against the measured
+     3.5788).
+     THE WAVE'S HEIGHT IS A LENGTH, NOT A COUNT OF LAYERS (2026-11-19). The lines are straight every H mm, H = 0.5585 x D (2.000 mm here): a
+     second real slice, the owner's anti-vibration feet (bambu_arachne.gcode.3mf: Studio 02.09, 3D honeycomb 10 %, 0.45 / 0.2, no walls, no
+     shells), has D 5.369 and its lines straight at z 3.0, 6.0, 9.0 ... - every 15 layers, H = 0.5588 x D again. The rule this replaced, a
+     quarter of whole layers rounded up (D / 4h: 4.47 -> 5 here), gave 7 there, straight every 14 layers, and drifted a layer every wave.
+     So the wave runs on the print height itself: a quarter is H / 2h layers, 5 here and 7.5 there. */
   var HONEYCOMB3D_SCALE = (1 + Math.sqrt(3) / 2) / Math.SQRT2;
+  /* H against the spacing over the density: 2.000 mm at 0.45 / 0.2, 15 % (the first slice) - and so exactly 3.000 at 10 % (the second) */
+  var HONEYCOMB3D_HALF = 2 * 0.15 / (0.45 - 0.2 * (1 - Math.PI / 4));
 
-  /** The 3D honeycomb's numbers for a layer: { D, a, family } - line spacing, the flats' signed distance from their line, 0 (lines along the frame's first axis) or 1. */
+  /** The 3D honeycomb's numbers for a layer: { D, a, family, quarter } - line spacing, the flats' signed distance from their line, 0 (lines along the
+   *  frame's first axis) or 1, and the quarter wave in layers. */
   function honeycomb3dAt(spacing, density, layerH, printZ) {
-    var D = HONEYCOMB3D_SCALE * spacing / density, Q = Math.max(1, Math.ceil(D / (4 * layerH) - 1e-9));
-    var n = (((Math.round(printZ / layerH) - Q) % (4 * Q)) + 4 * Q) % (4 * Q);
-    return n < 2 * Q ? { D: D, a: D / 4 * (1 - n / Q), family: 0, quarter: Q } : { D: D, a: D / 4 * (-1 + (n - 2 * Q) / Q), family: 1, quarter: Q };
+    var D = HONEYCOMB3D_SCALE * spacing / density, H = HONEYCOMB3D_HALF * spacing / density, Q = H / (2 * layerH);
+    /* v counts quarter waves from + D/4 (half a straight-to-straight up from the plate): 0 - 2 the frame's first family, 2 - 4 its second */
+    var v = (((2 * printZ / H - 1) % 4) + 4) % 4;
+    if (Math.abs(v - Math.round(v)) < 1e-6) v = Math.round(v) % 4;      /* a layer on a turning point is on it, not a hair either side */
+    return v < 2 ? { D: D, a: D / 4 * (1 - v), family: 0, quarter: Q } : { D: D, a: D / 4 * (-1 + (v - 2)), family: 1, quarter: Q };
   }
 
   /**
@@ -1692,6 +1701,9 @@
    * (Bambu's top_one_wall_type) - the measured fit is described inside.
    */
   function perimeters(g, region, h, o, above) {
+    /* NO WALLS (wall_loops = 0): the infill runs out to half its own line from the outline - measured 0.225 at the 0.45 sparse line on the owner's
+       anti-vibration feet (bambu_arachne.gcode.3mf: 3D honeycomb, no wall, no shell) */
+    if (!(o.wallLoops >= 1)) return { loops: [], wallCount: 0, infillRegion: g.offset(region, -o.infillWidthMm / 2) };
     var we = o.outerWallWidthMm, wi = o.innerWallWidthMm;
     var se = spacingOf(we, h), si = spacingOf(wi, h);
     var keepIn = 1 - o.infillWallOverlap;
@@ -2424,7 +2436,8 @@
    */
   function arachneWalls(g, region, h, o, above) {
     var we = o.outerWallWidthMm, wi = o.innerWallWidthMm, s = spacingOf(wi, h), fat = wi - s;
-    var N = Math.max(1, Math.round(o.wallLoops)), d = Math.max(1, Math.min(N, Math.round(o.wallDistributionCount || 1)));
+    if (!(o.wallLoops >= 1)) { var none = perimeters(g, region, h, o, above); none.extra = []; none.thinPieces = 0; none.variableBeads = 0; return none; }   /* no walls: nothing to fit */
+    var N = Math.round(o.wallLoops), d = Math.max(1, Math.min(N, Math.round(o.wallDistributionCount || 1)));
     var minFeat = ofNozzle(o, o.minFeatureSize, 0.25);
     var rho = N * s + s / 2;
     var thickCore = g.offset(region, -rho);
@@ -2507,8 +2520,10 @@
 
     var g = geometry(wasm);
     try {
-      var T = Math.max(o.topShellLayers, Math.ceil((o.topShellThicknessMm || 0) / o.layerMm - 1e-9));
-      var B = Math.max(o.bottomShellLayers, Math.ceil((o.bottomShellThicknessMm || 0) / o.layerMm - 1e-9));
+      /* a shell thickness adds layers to a count of one or more, never to none: Studio's 0 top layers with top_shell_thickness 1 prints no top
+         (the owner's anti-vibration feet, bambu_arachne.gcode.3mf: every line of every layer Sparse infill) */
+      var T = o.topShellLayers > 0 ? Math.max(o.topShellLayers, Math.ceil((o.topShellThicknessMm || 0) / o.layerMm - 1e-9)) : 0;
+      var B = o.bottomShellLayers > 0 ? Math.max(o.bottomShellLayers, Math.ceil((o.bottomShellThicknessMm || 0) / o.layerMm - 1e-9)) : 0;
       var closeR = o.sliceClosingRadiusMm > 0 ? o.sliceClosingRadiusMm : 0;
       var th = o.supportThresholdDeg * Math.PI / 180;
       var minOver = o.overhangMinAreaMm2 != null ? o.overhangMinAreaMm2 : o.outerWallWidthMm * o.outerWallWidthMm;

@@ -227,7 +227,7 @@ async function main() {
     try { PRINT.configOverlay(tpl, Object.assign({}, base, { nozzle: 0.6 })); } catch (e) { threw = e.message; }
     check('a nozzle the profile is not is refused, not sliced with the 0.4 blocks', /0\.6 mm nozzle needs its own profile/.test(threw), threw);
     const cl = PRINT.cleanSettings({ layer: '9', walls: '0', density: '150', pattern: 'no-such-pattern', angle: '0', brim: 'x', interfaceRule: 'column' });
-    check('each row is clamped to what it takes, and an unknown pattern / brim is the default', cl.layer === 0.3 && cl.walls === 1 && cl.density === 100 && cl.pattern === 'grid' && cl.angle === 1 && cl.brim === 'auto' && cl.interfaceRule === 'column', JSON.stringify(cl));
+    check('each row is clamped to what it takes, and an unknown pattern / brim is the default', cl.layer === 0.3 && cl.walls === 0 && cl.density === 100 && cl.pattern === 'grid' && cl.angle === 1 && cl.brim === 'auto' && cl.interfaceRule === 'column', JSON.stringify(cl));
     {
       /* THE WALL GENERATOR (Quality): Arachne and its six levers, by Studio's own keys - the percentages of the nozzle as Studio writes them */
       const wov = PRINT.configOverlay(tpl, Object.assign({}, base, { wallGen: 'arachne', wallAngle: 20, wallFilter: 30, wallTransLen: 150, wallDist: 2, minWall: 70, minFeature: 40 }));

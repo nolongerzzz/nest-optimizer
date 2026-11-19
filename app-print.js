@@ -320,7 +320,7 @@
     return {
       nozzle: n(s.nozzle, D.nozzle, 0.1, 2),
       layer: Math.round(n(s.layer, D.layer, 0.05, 0.3) * 1000) / 1000,
-      walls: Math.round(n(s.walls, D.walls, 1, 10)),
+      walls: Math.round(n(s.walls, D.walls, 0, 10)),   /* 0: no walls, the infill to the outline (Studio's wall_loops = 0) */
       density: Math.round(n(s.density, D.density, 0, 100)),
       pattern: s.pattern === 'rectilinear' ? 'zigzag' : PATTERN_TO_CONFIG[s.pattern] ? s.pattern : D.pattern,   /* rectilinear: Bambu's name for zigzag */
       surface: s.surface === 'rectilinear' ? 'zigzag' : SURFACE_TO_CONFIG[s.surface] ? s.surface : D.surface,

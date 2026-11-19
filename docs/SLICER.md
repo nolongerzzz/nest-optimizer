@@ -573,7 +573,7 @@ own box:
 | rule | measured | here |
 |---|---|---|
 | a layer | one family of lines D = 3.579 apart, the middle one through the centre; each a square wave with slanted flanks: flats D - 2 a long, a to one side of the line then a to the other, the flanks at 45 degrees to the line (along X or Y on the plate); the wave 2 D long; next-door lines mirror images | `honeycomb3dFill` |
-| with height | a goes + D/4 -> - D/4 over 10 layers, back over the next 10 (0.179 a layer); the lines are straight every 10th layer; they run along the frame's first axis going down, along its second coming back; + D/4 on layers 5, 25, 45... | `honeycomb3dAt` |
+| with height | a goes + D/4 -> - D/4 over 10 layers, back over the next 10 (0.179 a layer); the lines are straight every 10th layer (every H = 2.0 mm); they run along the frame's first axis going down, along its second coming back; + D/4 on layers 5, 25, 45... | `honeycomb3dAt` |
 | the ends | cut at the region, joined to the next line along the wall | `clipLine`, joins up to `sparseAnchorMaxMm` |
 
 Against the reference: 960 points pinned on Bambu's lines (three shapes,
@@ -581,11 +581,23 @@ layers 5 - 23, both directions and both sides of straight, clear of the walls)
 lie within 0.005 mm of these lines; the length laid is within 11 % (the joins
 along the walls are placed differently).
 
-**Two numbers are fitted to this one slice, and stated:** D = (1 + sqrt(3)/2)
-/ sqrt(2) x spacing / density (3.5802 against the measured 3.5788), and the
-quarter wave, 5 layers, taken as D / 4 over the layer height rounded up (4.47
--> 5: a flat never steps further sideways than a layer is tall). A slice at
-another density or layer height would confirm or correct both.
+**D is fitted to this slice and stated:** D = (1 + sqrt(3)/2) / sqrt(2) x
+spacing / density (3.5802 against the measured 3.5788).
+
+**The wave's height is a length (2026-11-19).** A second real slice, at another
+density, settled the other number: the owner's TPU anti-vibration feet
+(`bambu_arachne.gcode.3mf`: Studio 02.09, 3D honeycomb **10 %**, 0.45 / 0.2, no
+walls, no shells; `fixtures/slicer-feet-reference.json`). There D is 5.369
+(this formula: 5.371), and the lines are straight at z 3.0, 6.0, 9.0 ... -
+every **15** layers. So the straight-to-straight height H scales with D as
+spacing / density does: 2.000 mm at 15 %, 3.000 at 10 % (H = 0.5585 x D).
+The rule before, a quarter wave of whole layers rounded up (D / 4h: 4.47 -> 5
+here), gave 7 there - straight every 14 layers, a layer early each wave, and
+per-layer lengths up to 9 % off. The wave now runs on the print height itself:
+a quarter is H / 2h layers, 5 here and 7.5 there. On the feet every layer's
+length is within 2.5 % of Bambu's, and 7284 points pinned on its lattice (1.5 mm
+and more in from the edge) lie within 0.015 mm of these lines; what differs is
+the links along the outline (`slicer:test` "The anti-vibration feet").
 
 ### Octagram spiral (`'octagramspiral'`: the surfaces and the solid infill)
 
@@ -817,6 +829,20 @@ classic semantics, not Arachne: one fixed width, no variable bead.
 
 ---
 
+### No walls, no shells (`wallLoops: 0`, 2026-11-19)
+
+The owner's TPU anti-vibration feet (`bambu_arachne.gcode.3mf`) print as pure 3D honeycomb: `wall_loops = 0`,
+`top_shell_layers = 0`, `bottom_shell_layers = 0`. Studio lays every line of every layer as Sparse infill:
+- **No walls:** the infill runs out to half its own line from the outline (0.225 mm at the 0.45 line).
+  `perimeters()` returns no loop and that region; before, it always laid an outer wall.
+- **No shells:** a shell thickness adds layers only to a count of one or more. That file keeps
+  `top_shell_thickness = 1` with 0 top layers and has no top at all. This engine read the thickness as 5 top
+  layers.
+
+The Print card's **Wall loops** row now takes 0.
+
+---
+
 ### Arachne (`wallGenerator: 'arachne'`, 2026-11-16)
 
 Bambu Studio's second wall generator, picked on the Print card under **Quality → Wall generator**
@@ -867,8 +893,17 @@ config block.
 
 **Scope.** A support or a brim keeps the classic generator, with its Detect thin wall pass, because its
 export says `wall_generator = classic`. Detect thin wall has no work under Arachne: thin features are its
-job. Not measured against a real Arachne slice yet. The rules above are stated, and `slicer:test`
-"Arachne" (12 checks) holds them:
+job.
+
+**Measured on a real Arachne slice (2026-11-19), where it agrees with Classic.** The owner's TPU
+anti-vibration feet, sliced by Studio 02.08 with Arachne and its default levers, 2 walls (0.42 outer, 0.45
+inner), grid 15 %, 3 bottom / 5 top: four 60 mm blocks, nothing thin. Every wall is its nominal width, and
+each feature is where Classic's rules put it: the outer wall 0.210 from the edge, the inner 0.602, the
+sparse from 0.948, and on top one wall with the surface from 0.530. Sliced from the file's own settings,
+this engine lays every feature on every layer within 0.03 % of Bambu's length, at those insets to 2 µm
+(`fixtures/slicer-feet-reference.json`, `slicer:test` "The anti-vibration feet"). So on a thick part,
+Arachne is Classic, as rule 1 says. The thin-part rules below are still stated, not measured: neither
+slice has anything thin. `slicer:test` "Arachne" (12 checks) holds them:
 - a strip from 0.05 to 0.6 mm is one bead its own width, nothing under 0.1 mm;
 - a 1.0 mm strip is three beads of 0.362 that sum to the strip;
 - the distribution count;

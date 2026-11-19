@@ -316,7 +316,7 @@
                 <summary class="vp-sec-head" title="Walls, the sparse infill and the pattern of the surfaces.">Strength</summary>
                 <div class="vp-sec-body">
                   <label class="vp-bend-field" for="slice-set-walls">Wall loops
-                    <input type="number" id="slice-set-walls" value="2" min="1" max="10" step="1" autocomplete="off"></label>
+                    <input type="number" id="slice-set-walls" value="2" min="0" max="10" step="1" title="Wall loops. 0: no walls - the infill alone, out to the outline (a TPU part printed as pure 3D honeycomb)." autocomplete="off"></label>
                   <label class="vp-bend-field" for="slice-set-density">Sparse infill density
                     <input type="number" id="slice-set-density" value="15" min="0" max="100" step="5" autocomplete="off"><span>%</span></label>
                   <label class="vp-bend-field" for="slice-set-pattern">Sparse infill pattern
@@ -3245,7 +3245,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=6c851819"></script>
+  <script src="nso_slicer.js?v=e8ac907b"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3470,7 +3470,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=91f90059"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=b2973f36"></script>
+  <script src="app-print.js?v=68986952"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

@@ -28,6 +28,9 @@
  *                a strip shared out over its beads, the distribution count,
  *                the minimum feature / wall width, a wedge, the threshold
  *                angle; thick parts byte for byte as Classic; supports Classic.
+ *  11. feet      two real Bambu slices of a 60 mm block (the owner's TPU
+ *                anti-vibration feet): Arachne with two walls - every feature
+ *                and inset as Bambu's; no walls, no shells, 3D honeycomb 10 %.
  */
 'use strict';
 
@@ -532,6 +535,70 @@ function frustum(n, r0, r1, z0, z1) {
     const pg = G.parseGcode(sl(strip(1.0), ar).gcode);
     const ws = [...new Set(pg.moves.filter(m => /wall/.test(m.feature)).map(m => m.width.toFixed(3)))];
     check('...and the G-code reads back the variable width (parseGcode, nothing assumed)', ws.length === 1 && Math.abs(+ws[0] - w3) < 2e-3, ws.join(' '));
+  }
+
+  // =========================================================================
+  section('The anti-vibration feet - two real Bambu slices of one 60 mm block: Arachne with two walls, and no walls at all (fixtures/slicer-feet-reference.json)');
+  // =========================================================================
+  {
+    const fsx = require('fs');
+    const PLN = require('../nso-print-planner.js');
+    const REF = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-feet-reference.json'), 'utf8'));
+    /* the block as the foot's box (plate coordinates: the honeycomb's lattice is about the object's middle), 24 mm tall */
+    const foot = bx => { const [x0, y0, x1, y1] = bx, out = [];
+      out.push(x0, y0, 24, x1, y0, 24, x1, y1, 24, x0, y0, 24, x1, y1, 24, x0, y1, 24, x0, y0, 0, x1, y1, 0, x1, y0, 0, x0, y0, 0, x0, y1, 0, x1, y1, 0);
+      const fp = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+      for (let i = 0; i < 4; i++) { const p = fp[i], q = fp[(i + 1) % 4]; quad(out, [p[0], p[1], 0], [q[0], q[1], 0], [q[0], q[1], 24], [p[0], p[1], 24]); }
+      return out; };
+    /* the engine's options as the planner reads them off each file's own settings */
+    const run = R => { const eng = PLN.engineOptions(R.settings);
+      const res = SL.sliceObjects([{ name: 'foot', soup: foot(R.box) }], SL.defaultsFor(eng.nozzleMm, eng.over), wasm);
+      return { res, eng: eng.over, moves: G.parseGcode(res.gcode).moves.filter(m => m.width > 0) }; };
+    const inset = (bx, x, y) => Math.min(x - bx[0], bx[2] - x, y - bx[1], bx[3] - y);
+
+    /* --- Arachne, two walls: on a part with nothing thin, Classic's walls to the micron --- */
+    const A = REF.arachne, a = run(A);
+    check('the planner reads the file\'s Arachne and its six levers (' + A.file + ', Studio ' + A.studio + ')',
+          a.eng.wallGenerator === 'arachne' && a.eng.wallLoops === 2 && Math.abs(a.eng.minBeadWidth - 0.85) < 1e-9 && Math.abs(a.eng.minFeatureSize - 0.25) < 1e-9 && a.eng.wallTransitionAngleDeg === 10);
+    const lenBy = {};
+    a.moves.forEach(m => { const t = lenBy[m.feature] = lenBy[m.feature] || new Array(A.layers).fill(0); t[m.layer] += m.length; });
+    const rows = Object.keys(A.lengthMm).map(f => { const want = A.lengthMm[f], got = lenBy[f] || [];
+      const tw = want.reduce((x, y) => x + y, 0), tg = got.reduce((x, y) => x + y, 0);
+      const worst = Math.max(...want.map((v, L) => v || got[L] ? Math.abs((got[L] || 0) / (v || 1e-9) - 1) : 0));
+      return { f, tw, tg, worst }; });
+    check('every feature on every layer within 1 % of Bambu\'s length, each total within 0.1 % (walls, bottom, solid, grid, bridge, top)',
+          rows.every(r => r.worst < 0.01 && Math.abs(r.tg / r.tw - 1) < 0.001) && Object.keys(lenBy).every(f => A.lengthMm[f]),
+          rows.map(r => r.f + ' ' + r.tw.toFixed(0) + '/' + r.tg.toFixed(0) + ' (worst layer ' + (r.worst * 100).toFixed(2) + ' %)').join('; '));
+    const ins = L => { const o = {}; a.moves.filter(m => m.layer === L).forEach(m => { const d = Math.min(inset(A.box, m.x0, m.y0), inset(A.box, m.x1, m.y1)); o[m.feature] = Math.min(o[m.feature] == null ? Infinity : o[m.feature], d); }); return o; };
+    const mid = ins(Math.floor(A.layers / 2)), top = ins(A.layers - 1);
+    check('...and each where Bambu put it: outer wall 0.210, inner 0.602, sparse from 0.948 at mid height; on top one wall, the surface from 0.530 (to 2 um)',
+          Object.keys(A.insetMm.mid).every(k => Math.abs(mid[k] - A.insetMm.mid[k]) < 0.002) && Object.keys(A.insetMm.top).every(k => Math.abs(top[k] - A.insetMm.top[k]) < 0.002),
+          JSON.stringify(mid) + ' / ' + JSON.stringify(top));
+    check('...the walls at their own widths, as Bambu\'s (0.42 outer, 0.45 inner: nothing for Arachne to vary on a 60 mm block)',
+          a.moves.filter(m => m.feature === 'Outer wall').every(m => Math.abs(m.width - A.widthMm['Outer wall'][0]) < 2e-3) &&
+          a.moves.filter(m => m.feature === 'Inner wall').every(m => Math.abs(m.width - A.widthMm['Inner wall'][0]) < 2e-3));
+
+    /* --- no walls, no shells: the 3D honeycomb alone --- */
+    const N = REF.noWalls, n = run(N);
+    check('no walls and no shells, as Bambu: every line of every layer Sparse infill (wall_loops 0; top_shell_layers 0 with top_shell_thickness ' + N.settings.top_shell_thickness + ' is no top)',
+          n.eng.wallLoops === 0 && n.moves.every(m => m.feature === 'Sparse infill') && new Set(n.moves.map(m => m.layer)).size === N.layers,
+          [...new Set(n.moves.map(m => m.feature))].join(', '));
+    let edge = Infinity; n.moves.forEach(m => { edge = Math.min(edge, inset(N.box, m.x0, m.y0), inset(N.box, m.x1, m.y1)); });
+    check('...the lines run out to half their own width from the edge, as Bambu\'s (' + N.edgeMm + ' mm)', Math.abs(edge - N.edgeMm) < 0.002, edge.toFixed(4));
+    const per = new Array(N.layers).fill(0), cnt = new Array(N.layers).fill(0);
+    n.moves.forEach(m => { per[m.layer] += m.length; cnt[m.layer]++; });
+    const straight = cnt.map((c, L) => [c, L]).filter(x => x[0] < 60).map(x => x[1]);
+    check('...the honeycomb straight on Bambu\'s layers - every 3.0 mm at 10 % (' + N.straightLayers.join(' ') + '), not every 14 layers',
+          JSON.stringify(straight) === JSON.stringify(N.straightLayers), straight.join(' '));
+    const off = N.sparseMm.map((v, L) => Math.abs(per[L] / v - 1)), tot = per.reduce((x, y) => x + y, 0) / N.sparseMm.reduce((x, y) => x + y, 0) - 1;
+    check('...every layer\'s length within 3 % of Bambu\'s, the whole within 1.5 % (the lines are Bambu\'s; the joins along the outline differ)',
+          Math.max(...off) < 0.03 && Math.abs(tot) < 0.015, 'worst layer ' + (Math.max(...off) * 100).toFixed(2) + ' %, total ' + (tot * 100).toFixed(2) + ' %');
+    const segD = (q, m) => { const dx = m.x1 - m.x0, dy = m.y1 - m.y0, L2 = dx * dx + dy * dy, t = L2 ? Math.max(0, Math.min(1, ((q[0] - m.x0) * dx + (q[1] - m.y0) * dy) / L2)) : 0;
+      return Math.hypot(q[0] - m.x0 - t * dx, q[1] - m.y0 - t * dy); };
+    let worst = 0, cntP = 0;
+    Object.keys(N.points).forEach(L => { const segs = n.moves.filter(m => m.layer === +L);
+      N.points[L].forEach(q => { let b = Infinity; for (const s of segs) { const d = segD(q, s); if (d < b) b = d; if (b < 0.01) break; } if (b > worst) worst = b; cntP++; }); });
+    check('...and every point pinned on Bambu\'s lattice (' + cntP + ', 1.5 mm and more in from the edge, every 10th layer) lies on these lines within 0.04 mm', worst < 0.04, 'worst ' + worst.toFixed(4));
   }
 
   section('The raft: its own system under the plate, as Bambu lays it (fixtures/supports/raft_circle.gcode.3mf, docs/SLICER.md "The raft")');
