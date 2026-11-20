@@ -119,6 +119,10 @@ withApp(async (page, logs) => {
   console.log('    the clone had thrown away.');
   let idSrc = null, idClone = null;
   {
+    /* Three clones of an 80x40 piece are made below. Clones never hang off
+       the plate, and the A1 Mini holds only three of these, so this runs on
+       the 256 mm P1S plate, which has room for all of them. */
+    await page.evaluate(() => { state.plate = 'p1s'; });
     idSrc = await loadSTL(page, fx('box_hull_80x40x20-2.stl'));
     await selectPiece(page, idSrc);
     const src0 = await info(page, idSrc);

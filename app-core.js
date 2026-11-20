@@ -2455,41 +2455,68 @@ function cloneSelectedModel(opts) {
     ? state.placed[state.selectedIndex]
     : state.placed.find(p => p.sourceId === src.id);
   const rowZ = srcPlaced ? srcPlaced.z : 0;
-  /* CLONES FLANK THE ORIGINAL, ALTERNATING RIGHT THEN LEFT.
-     Stacking every clone on the right pushed a centred piece's copies off
-     the plate edge while the left half of the plate sat empty. Now the
-     first clone goes right, the second left, and so on, so the original
-     stays in the middle of its row. Only pieces that share the row's depth
-     band set the edges, so a piece in another row does not push the clones
-     away from the original. */
-  const halfD = src.size.z / 2;
-  const rowPieces = state.placed.filter(p =>
-    Math.abs(p.z - rowZ) < (p.depth || 0) / 2 + halfD + gap);
-  const edgeSet = rowPieces.length ? rowPieces : state.placed;
-  let rightEdge = srcPlaced ? srcPlaced.x + (srcPlaced.width || 0) / 2 : 0;
-  let leftEdge = srcPlaced ? srcPlaced.x - (srcPlaced.width || 0) / 2 : 0;
-  if (edgeSet.length) {
-    rightEdge = Math.max(rightEdge, ...edgeSet.map(p => p.x + (p.width || 0) / 2));
-    leftEdge = Math.min(leftEdge, ...edgeSet.map(p => p.x - (p.width || 0) / 2));
+  /* EACH CLONE TAKES THE FREE SPOT NEAREST THE PLATE'S CENTRE.
+     Clones used to stack on one side of the original, so pressing Clone
+     several times walked the copies off the plate while the other half of
+     the plate stayed empty. Now each clone looks at the original's row first:
+     it can go just right or just left of that row, and it takes whichever
+     spot is on the plate and nearer the centre. When the row is full, the
+     clone starts a new row in front of or behind it (in the same order:
+     nearest first). Only pieces in a row's depth band set its edges, so a
+     piece in another row does not push clones away. A clone NEVER hangs
+     off the plate: when no spot fits, that clone is not made and the status
+     line says how many did not fit. */
+  const plate = (typeof getCurrentPlate === 'function' && getCurrentPlate()) || { w: 180, d: 180 };
+  const halfW = src.size.x / 2, halfD = src.size.z / 2;
+  /* Anchor on the ORIGINAL piece, not the selection: after a clone the
+     selection moves to the clone, and anchoring on it made later rows
+     drift toward one edge. */
+  const origPlaced = state.placed.find(p => p.name === src.name.replace(/-copy\d+$/i, '')) || srcPlaced;
+  const homeX = origPlaced ? origPlaced.x : 0;
+  const homeZ = origPlaced ? origPlaced.z : rowZ;
+  const rowStep = src.size.z + gap;
+  const fitsPlate = (x, z) => Math.abs(x) + halfW <= plate.w / 2 + 0.01
+    && Math.abs(z) + halfD <= plate.d / 2 + 0.01;
+  function rowSpots(z) {
+    const band = state.placed.filter(p =>
+      Math.abs(p.z - z) < (p.depth || 0) / 2 + halfD + gap / 2);
+    // An empty row lines up with the original; the plate centre is the fallback.
+    if (!band.length) return { xs: [homeX, 0], ordered: true };
+    const right = Math.max(...band.map(p => p.x + (p.width || 0) / 2));
+    const left = Math.min(...band.map(p => p.x - (p.width || 0) / 2));
+    return { xs: [right + halfW + gap, left - halfW - gap], ordered: false };
   }
-  let spotCount = 0;
   function nextSpot() {
-    const goRight = (spotCount++ % 2) === 0;
-    if (goRight) {
-      const x = rightEdge + src.size.x / 2 + gap;
-      rightEdge = x + src.size.x / 2;
-      return { x, z: rowZ };
+    const maxRows = Math.max(1, Math.ceil(plate.d / rowStep)) + 1;
+    for (let k = 0; k <= maxRows; k++) {
+      for (const sign of (k === 0 ? [1] : [1, -1])) {
+        const z = homeZ + sign * k * rowStep;
+        const r = rowSpots(z);
+        const xs = r.ordered ? r.xs : r.xs.sort((a, b) => Math.abs(a) - Math.abs(b));
+        const hit = xs.find(x => fitsPlate(x, z));
+        if (hit !== undefined) return { x: hit, z };
+      }
     }
-    const x = leftEdge - src.size.x / 2 - gap;
-    leftEdge = x - src.size.x / 2;
-    return { x, z: rowZ };
+    return null;
   }
+  /* Copy names continue from the highest number already used, so cloning
+     one at a time gives -copy1, -copy2, ... instead of -copy1 every time. */
+  const baseName = src.name.replace(/-copy\d+$/i, '');
+  const copyRe = new RegExp('^' + baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-copy(\\d+)$', 'i');
+  let copyNum = 0;
+  state.models.forEach(m => {
+    const mm = copyRe.exec(m.name || '');
+    if (mm) copyNum = Math.max(copyNum, Number(mm[1]));
+  });
   const newIds = [];
   let firstPlaced = null;
+  let noRoom = 0;
   for (let i = 0; i < n; i++) {
+    const spot = nextSpot();
+    if (!spot) { noRoom = n - i; break; }
     const geo = src.geometry.clone();
     geo.computeBoundingBox();
-    const name = src.name.replace(/-copy\d+$/i, '') + '-copy' + (i + 1);
+    const name = baseName + '-copy' + (++copyNum);
     /* A CLONE OF A RAW PIECE IS A RAW PIECE.
        addModel() only records rawTris when it is handed them, and this call
        used to hand it the display geometry alone - so every clone arrived
@@ -2519,7 +2546,6 @@ function cloneSelectedModel(opts) {
     newIds.push(id);
     const model = state.models.find(x => x.id === id);
     if (!model) continue;
-    const spot = nextSpot();
     const entry = placeModelMovable(model, spot.x, spot.z);
     if (entry && firstPlaced === null) firstPlaced = state.placed.indexOf(entry);
   }
@@ -2546,7 +2572,12 @@ function cloneSelectedModel(opts) {
   updateOptimizeButton();
   updateEditSize();
   updateUndoBtn();
-  setStatus('Cloned ' + newIds.length + ' x ' + src.name + ' next to the piece');
+  if (noRoom) {
+    setStatus((newIds.length ? 'Cloned ' + newIds.length + ' x ' + baseName + '; ' : '')
+      + 'no room on the plate for ' + noRoom + (newIds.length ? ' more' : ' clone' + (noRoom > 1 ? 's' : '')), true);
+  } else {
+    setStatus('Cloned ' + newIds.length + ' x ' + baseName + ' next to the piece');
+  }
 }
 
 function previewModelOnPlate(geometry, size) {
