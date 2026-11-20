@@ -163,9 +163,12 @@ labelled a fit, and its evidence is stated:
     everything within `topWallKeepMm` of it (2w + 0.985 mm).
   - Result: the loop lands on Bambu's to **1 µm**. It is one data point, so
     it is a fit.
-- **Narrow sparse strips print solid.**
+- **Narrow sparse strips print solid, where they border solid infill (2026-11-20).**
   - Strips 0.875 mm wide (under the ribs) came out solid; strips 1.0 mm wide
     (over the tabletop's leg arms) stayed sparse.
+  - Both lie between solid regions. A strip between **walls** stays sparse in Studio down to 0.52 mm between
+    the infill lines' centres: three L legs of the walls tester, Arachne and Classic alike. So the rule
+    applies only to a narrow piece that borders solid infill.
   - The threshold is 1.7 × spacing = 0.944 mm, inside that bracket. The same
     width folds narrow solid strips between top surfaces into the top
     surface, as z 8.1 shows.
@@ -864,13 +867,24 @@ and the raster centreline `medialPaths`.
    survives is the thick part. It gets `perimeters()` exactly, with its walls, top-wall rule and infill
    region. What the opening took off is thin, and is all walls. A layer with nothing thin is sliced as
    Classic, byte for byte (`slicer:test`, the box and the cylinder).
-2. **A thin piece.** Its thickness `T` is twice its deepest inset. The beads across it are
-   `n = round((T − fat) / spacing)`, at least one (`fat = w − spacing`, the stadium overlap). The outer
-   ones keep the nominal width. The innermost **Wall distribution count** a side (and a middle bead when
-   `n` is odd) share what is left equally: each is `(T − fat − fixed spacings) / their count + fat` wide.
-   They are laid as insets of the piece, edge to edge. A loop is dropped where its two sides would lie on
-   each other (it is opened by a quarter of its spacing), so where the piece narrows, the count drops and
-   the middle bead takes the room.
+2. **A thin piece** (the rules measured on two real Studio slices, 2026-11-20; see below).
+   - **Its thickness `T`** is its typical one, not its deepest point (an L's corner is deeper than its legs).
+     A piece with no hole is a rectangle of the same area and outline, `T = (P − √(P² − 16A)) / 4` (exact for
+     a strip or an L). A piece with holes is a ring, `T = 2A / P` (exact for a tube). Never more than twice its
+     deepest inset.
+   - **The count.** Nominal walls are laid from the outside in (the outer wall's spacing, then the inner
+     wall's), as many pairs as leave a middle at least `ARACHNE_ADD` (0.75) × the inner wall's line. That
+     middle is one wall up to `ARACHNE_SPLIT` (1.65) × the line, and a pair beyond it. Never more than two
+     walls a wall loop.
+   - **The widths.** With Wall distribution count 1, only the middle varies: the middle wall of an odd count,
+     the innermost pair of an even one. Every wall outside them keeps its own width. A higher count spreads
+     the leftover over the innermost `d` walls a side. Each varying wall is
+     `(T − fat − 2 × fixed spacings) / their count + fat` wide (`fat = w − spacing`, the stadium overlap).
+   - They are laid as insets of the piece, edge to edge. A loop is dropped where its two sides would lie on
+     each other (it is opened by a quarter of its spacing), so where the piece narrows, the count drops and
+     the middle wall takes the room.
+   - **A dot.** A piece too small to have a centreline a bead long (a decimal point) is one short bead across
+     its long way, the outer wall's width.
 3. **The middle.** What the loops leave is drawn down its centreline, each 0.1 mm step as wide as the room
    there. The room is measured to the nearest edge and on to the edge across, since the raster centreline
    can sit half a pixel off the middle. A step bounded by the piece's own outline is that stretch's
@@ -882,11 +896,10 @@ and the raster centreline `medialPaths`.
 | Wall transitioning filter margin (`wall_transition_filter_deviation`) | 25 % | a bead's width changes only when the room moves by more than this |
 | Wall transition length (`wall_transition_length`) | 100 % | a bead's width follows the room averaged over this length |
 | Wall distribution count (`wall_distribution_count`) | 1 | the innermost walls a side that share a thin piece's leftover width |
-| Minimum wall width (`min_bead_width`) | 85 % | a narrower bead is printed this wide |
-| Minimum feature size (`min_feature_size`) | 25 % | a thinner feature is not printed |
+| Minimum wall width (`min_bead_width`) | 85 % | a narrower bead is printed this wide: 85 % of the **inner wall's line**, measured (Studio's 0.20 mm tube at 0.38 = 0.85 × 0.45; of the nozzle it would be 0.34) |
+| Minimum feature size (`min_feature_size`) | 25 % | a thinner feature is not printed (of the nozzle) |
 
-Each percentage is of the nozzle's diameter, as in Studio; the engine takes them as fractions
-(`minBeadWidth: 0.85`). The planner reads all seven keys (`engineOptions`). The card writes those that
+The engine takes the percentages as fractions (`minBeadWidth: 0.85`). The planner reads all seven keys (`engineOptions`). The card writes those that
 differ from the profile (`configOverlay`), so the G-code's config block and the project's settings say
 what was sliced. A slice with Arachne also writes `; wall_generator = arachne` in the engine's own
 config block.
@@ -902,22 +915,56 @@ each feature is where Classic's rules put it: the outer wall 0.210 from the edge
 sparse from 0.948, and on top one wall with the surface from 0.530. Sliced from the file's own settings,
 this engine lays every feature on every layer within 0.03 % of Bambu's length, at those insets to 2 µm
 (`fixtures/slicer-feet-reference.json`, `slicer:test` "The anti-vibration feet"). So on a thick part,
-Arachne is Classic, as rule 1 says. The thin-part rules below are still stated, not measured: neither
-slice has anything thin. `slicer:test` "Arachne" (12 checks) holds them:
-- a strip from 0.05 to 0.6 mm is one bead its own width, nothing under 0.1 mm;
-- a 1.0 mm strip is three beads of 0.362 that sum to the strip;
+Arachne is Classic, as rule 1 says.
+
+**Measured on thin parts (2026-11-20).** Two of the owner's Studio projects, each with its mesh and
+Studio's own Arachne slice (Studio 02.09, 2 walls, 0.42 / 0.45):
+- **Erik's wall-thickness benchmark:** tubes 0.2 to 1.6 mm thick, L legs 0.4 to 3.2 mm, raised digits.
+  PLA Matte, flow 0.98.
+- **A board of thin bars**, 0.15 to 2.0 mm. PETG, flow 0.94.
+
+Each mesh was sliced with its project's settings, placed where Studio placed it, and compared island by
+island. Studio's widths carry the flow ratio (the planner applies it to NSO's), so NSO's are scaled by it.
+What Studio does, and NSO now does:
+
+| thickness | Studio | rule |
+|---|---|---|
+| 0.15 – 0.3 mm | one wall, 0.36 – 0.38 | the minimum wall width, of the inner line |
+| 0.4, 0.6, 0.7 (a digit's stroke) | one wall, its own width | a middle up to 1.65 × the line |
+| 0.8, 1.0 | two walls, 0.42 / 0.52 | the middle splits; each `(T + fat) / 2` |
+| 1.2, 1.4 | three: 0.42 outer, middle 0.44 / 0.64 | a middle of at least 0.75 × the line is added |
+| 1.6, 2.0 | four: 0.42 outer, inner pair 0.44 / 0.64 | the middle splits again; two walls a loop at most |
+| 2.4 and up | Classic's walls and sparse infill | the thick part |
+| a 0.8 mm dot | one short 0.42 bead | a dot |
+
+`slicer:test` "Arachne, measured" slices every test piece of both, 74 sections from
+`fixtures/slicer-arachne-reference.json` (`tools/nso_slicer_arachne_reference.js` remakes it from the four
+files). Every piece's walls are within 2 % of Studio's plastic and its mean width within 0.015 mm: worst
+1.0 % / 0.008 mm on the tester, 0.7 % / 0.006 mm on the board. Whole prints: −1.7 % and −1.1 % of
+Studio's plastic, all of it in the infill and shells.
+
+The split and add thresholds are fitted, bracketed by the samples: a 0.70 middle stays one wall and 0.79
+splits; a 0.25 middle is none and 0.45 is one. The middle of each bracket is taken. `slicer:test`
+"Arachne" also holds the rules on made shapes:
+- strips from 0.05 to 0.6 mm;
+- 1.0 mm as two walls of 0.52;
+- 1.4 mm as 0.42 / 0.64 / 0.42;
 - the distribution count;
 - the two minimums;
 - a wedge to a point;
-- the threshold angle on a 28° wedge;
-- a support stays Classic;
-- the width reads back from the G-code.
+- the threshold angle;
+- supports stay Classic;
+- the G-code reads back each width.
 
 Known edges:
-- A thin piece's loops run along its cut edge where it meets a thick part, so the walls are two loops side
-  by side, not one continuous wall.
-- A piece's bead count is set by its deepest point; narrower stretches drop loops and are filled by the
-  middle bead.
+- **A thin piece meeting a thick part:** the thin piece's loops run along the cut edge where it meets the
+  thick part, so the walls there are two loops side by side, not one continuous wall.
+- **The digit 8:** Studio draws it with pairs of 0.36 mm walls while it draws a 0 of like strokes as one
+  0.70 wall. It decides by local shape at the 8's junctions. NSO draws both as one wall: 5 % of the 8's
+  plastic.
+- **Classic has no Gap infill.** Studio's Classic fills the strip left between walls with variable-width
+  Gap infill: 7,482 on the walls tester and 4,113 on the board, in plastic units of length × width. NSO's
+  Classic does not, so its Classic is up to 8 of 16 samples more than 5 % off there. Arachne needs none.
 
 ---
 

@@ -451,12 +451,15 @@ function frustum(n, r0, r1, z0, z1) {
     // the same day when an open-air bridge's lines were evened out to fill its gap wall to wall (bridgeFitSpacing), the slivers still on the grid;
     // and hinge_knuckle_box @0.4 once more when a free bridge's direction among the angles that hold went to the gap's short way across (freeBridgeAngle);
     // and the two clips when a wall loop that began on a run hanging over a gap was begun a 3 mm lead-in before it (seamOffOverhang).
+    // hinge_knuckle_box @0.4 and shape-torus @0.6 on 2026-11-20, when a narrow sparse strip went solid only where it borders solid infill: Studio keeps
+    // a strip between walls sparse down to 0.52 mm (the walls tester's L legs) - the hinge's solid 1183 -> 878 mm2 (its sparse 0 -> 51, and the solid
+    // over that sparse an internal Bridge, 27 -> 106), the torus's 201 -> 96.
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
       'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
-      'fixtures/hinge_knuckle_box.stl': ['20e5be5f129c19b2', '0156b77d8893373f'],
-      'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'e686396781f0952d'],
+      'fixtures/hinge_knuckle_box.stl': ['b72dd95c195c3f92', '0156b77d8893373f'],
+      'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'dd9573c9c4d8cc62'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
       'fixtures/supports/top_clip_x2.stl': ['f79c02b856b6974f', '895ad934f185710a'],
       'fixtures/supports/top_clip_x2_coupon.stl': ['42466b39965e65be', '0b074e76435c796e']
@@ -487,25 +490,33 @@ function frustum(n, r0, r1, z0, z1) {
     check('Classic unless asked, with Studio\'s six levers at its defaults (the four fractions of the nozzle)',
           (() => { const d = SL.defaultsFor(0.4); return d.wallGenerator === 'classic' && d.wallTransitionAngleDeg === 10 && d.wallTransitionFilterMargin === 0.25 &&
             d.wallTransitionLength === 1 && d.wallDistributionCount === 1 && d.minBeadWidth === 0.85 && d.minFeatureSize === 0.25; })());
-    /* thin strips: Classic prints nothing under the bead, Arachne one bead the strip's own width (never under 85 % of the nozzle, nothing under 25 %) */
-    const one = [[0.05, 0], [0.2, 0.34], [0.3, 0.34], [0.42, 0.42], [0.6, 0.6]].map(([wd, want]) => {
+    /* thin strips: Classic prints nothing under the bead, Arachne one bead the strip's own width (never under 85 % of the INNER WALL's line -
+       Studio's, measured: its 0.2 mm tube at 0.38 = 85 % of 0.45 - nothing under 25 % of the nozzle) */
+    const MINB = 0.85 * 0.42;
+    const one = [[0.05, 0], [0.2, MINB], [0.3, MINB], [0.42, 0.42], [0.6, 0.6]].map(([wd, want]) => {
       const c = walls(sl(strip(wd))), a = walls(sl(strip(wd), ar));
       return { wd, c: c.length, a: a.map(p => p.width.toFixed(3) + (p.closed ? 'C' : 'O') + p.feature[0]).join(' '),
                ok: want === 0 ? a.length === 0 : (a.length === 1 && !a[0].closed && a[0].feature === 'Outer wall' && Math.abs(a[0].width - want) < 1e-3 &&
                  a[0].pts.every(q => Math.abs(q[1] - wd / 2) < 0.02) && plen(a[0]) > 19 - wd) };
     });
-    check('a strip under 1.5 beads is ONE open Outer wall down its middle, as wide as the strip: 0.05 nothing (under the minimum feature size), 0.2 / 0.3 at the minimum wall width (0.34), 0.42 / 0.6 their own',
+    check('a strip under the split threshold is ONE open Outer wall down its middle, as wide as the strip: 0.05 nothing (under the minimum feature size), 0.2 / 0.3 at the minimum wall width (0.357: 85 % of the 0.42 inner wall), 0.42 / 0.6 their own',
           one.every(o => o.ok), one.map(o => o.wd + ': ' + (o.a || 'none') + ' (classic ' + o.c + ' path)').join(' | '));
     check('...where Classic draws nothing under the bead (0.05 - 0.42) and a sliver loop at 0.6', one.slice(0, 4).every(o => o.c === 0) && one[4].c === 1);
-    /* 1.0 mm, two walls: Classic's one loop leaves a 0.58 mm gap down the middle; Arachne three beads of 0.362 (a loop and a middle bead) */
+    /* 1.0 mm, two walls: Classic's one loop leaves a 0.58 mm gap down the middle; Arachne two walls sharing it (a middle wall would be 0.25 mm,
+       under Studio's add threshold: its 1.0 mm tube is two walls of 0.50 - 0.52) */
     const c10 = walls(sl(strip(1.0))), a10 = walls(sl(strip(1.0), ar));
-    const sp = SL.spacingOf(0.42, 0.2), fat = 0.42 - sp, w3 = (1.0 - fat) / 3 + fat;
-    check('a 1.0 mm strip, 2 walls: Classic one loop and a gap; Arachne a loop and a middle bead, all three ' + w3.toFixed(3) + ' wide (the strip shared out)',
-          c10.length === 1 && a10.length === 2 && a10.every(p => Math.abs(p.width - w3) < 2e-3) && a10.some(p => !p.closed && p.feature === 'Inner wall' && p.pts.every(q => Math.abs(q[1] - 0.5) < 0.02)),
+    const sp = SL.spacingOf(0.42, 0.2), fat = 0.42 - sp, w3 = (1.0 - fat) / 2 + fat;
+    check('a 1.0 mm strip, 2 walls: Classic one loop and a gap; Arachne one loop of two walls, each ' + w3.toFixed(3) + ' wide (the strip shared out, as Studio\'s 1.0 mm tube)',
+          c10.length === 1 && a10.length === 1 && a10[0].closed && Math.abs(a10[0].width - w3) < 2e-3,
           a10.map(p => p.feature + ' ' + p.width.toFixed(3) + (p.closed ? ' loop' : ' line')).join(', '));
     /* the beads across fill the strip: their spacings plus the overlap are its width */
     const cover = a10.reduce((t, p) => t + (p.closed ? 2 : 1) * (p.width - fat), 0) + fat;
-    check('...the three beads fill it wall to wall: their spacings plus one overlap = 1.000 mm', Math.abs(cover - 1.0) < 3e-3, cover.toFixed(4));
+    check('...the two walls fill it wall to wall: their spacings plus one overlap = 1.000 mm', Math.abs(cover - 1.0) < 3e-3, cover.toFixed(4));
+    /* three walls: 1.4 mm - the outer walls keep their 0.42, the middle takes the rest (Studio's 1.4 mm tube: 0.42, 0.64, 0.42) */
+    const a14 = walls(sl(strip(1.4), ar)), mid14 = a14.filter(p => !p.closed), lp14 = a14.filter(p => p.closed);
+    check('a 1.4 mm strip: a loop of 0.42 and one middle wall of 1.4 - 2 x 0.377 = ' + (1.4 - 2 * sp).toFixed(3) + ' (Studio\'s 1.4 mm tube: 0.42 / 0.64 / 0.42)',
+          lp14.length === 1 && Math.abs(lp14[0].width - 0.42) < 1e-6 && mid14.length >= 1 && mid14.every(p => Math.abs(p.width - (1.4 - 2 * sp)) < 0.02),
+          a14.map(p => p.feature + ' ' + p.width.toFixed(3) + (p.closed ? ' loop' : ' line')).join(', '));
     /* thick parts: the classic walls and infill, byte for byte */
     const same = ['fixtures/box-20mm.stl', 'fixtures/cylinder_r10h30_s64.stl'].map(f => { const soup = readSTL(path.join(ROOT, f));
       const a = sl(soup).gcode, b = sl(soup, ar).gcode; return a === b.replace('; wall_generator = arachne\n', ''); });
@@ -517,7 +528,7 @@ function frustum(n, r0, r1, z0, z1) {
           dc.map(l => l.join(' ')).join(' | '));
     /* the levers: minimum feature and wall width */
     const mf = walls(sl(strip(0.15), Object.assign({ minFeatureSize: 0.5 }, ar))), mw = walls(sl(strip(0.2), Object.assign({ minBeadWidth: 0.6 }, ar)));
-    check('Minimum feature size 50 %: a 0.15 strip is not printed; minimum wall width 60 %: a 0.2 strip prints at 0.24', mf.length === 0 && mw.length === 1 && Math.abs(mw[0].width - 0.24) < 1e-3,
+    check('Minimum feature size 50 %: a 0.15 strip is not printed; minimum wall width 60 %: a 0.2 strip prints at 0.252 (60 % of the 0.42 inner wall)', mf.length === 0 && mw.length === 1 && Math.abs(mw[0].width - 0.252) < 1e-3,
           mf.length + ' / ' + (mw[0] && mw[0].width));
     /* a wedge narrowing to a point: two walls, then one bead that follows the room down, then nothing under the minimum feature */
     const wedge = walls(sl(prism([[0, 0], [20, -1], [20, 1]], 0, 0.6), ar), 1), tip = wedge.filter(p => !p.closed && p.feature === 'Outer wall');
@@ -525,9 +536,9 @@ function frustum(n, r0, r1, z0, z1) {
     check('a 2 mm wedge to a point: the loops stop where the wedge narrows, one Outer wall bead runs on to the tip - from where it is 0.1 mm (min feature 25 %) wide, its width growing with the room',
           tip.length >= 2 && Math.abs(tipX - 1) < 0.15 && tip.slice().sort((p, q) => p.pts[0][0] - q.pts[0][0]).every((p, i, a) => i === 0 || p.width >= a[i - 1].width) && wedge.some(p => p.closed),
           tip.map(p => p.width.toFixed(3) + ' from x ' + Math.min(...p.pts.map(q => q[0])).toFixed(2)).join(', '));
-    /* the threshold angle: a 28 deg wedge's middle bead between its loops is left out at 10 deg, laid at 40 */
-    const steep = a => walls(sl(prism([[0, 0], [6, -1.5], [6, 1.5]], 0, 0.6), Object.assign({ wallTransitionAngleDeg: a }, ar)), 1).filter(p => !p.closed && p.feature === 'Inner wall').length;
-    check('Wall transitioning threshold angle: a wedge opening at 28 deg gets no middle bead at 10 deg, one at 40 deg', steep(10) === 0 && steep(40) >= 1, steep(10) + ' / ' + steep(40));
+    /* the threshold angle: a 28 deg wedge's middle between its loops is laid less at 10 deg than at 40 (where it opens faster than the angle, none) */
+    const steepLen = a => walls(sl(prism([[0, 0], [6, -1.5], [6, 1.5]], 0, 0.6), Object.assign({ wallTransitionAngleDeg: a }, ar)), 1).filter(p => !p.closed && p.feature === 'Inner wall').reduce((t, p) => t + plen(p), 0);
+    check('Wall transitioning threshold angle: a wedge opening at 28 deg gets less middle wall at 10 deg than at 40', steepLen(10) < steepLen(40), steepLen(10).toFixed(2) + ' / ' + steepLen(40).toFixed(2) + ' mm');
     /* supports stay classic (their export says wall_generator = classic) */
     const sup = SL.sliceObjects([{ name: 's', soup: strip(0.4), role: 'support' }], SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2 }, ar)), wasm);
     check('a support slices Classic (with its Detect thin wall pass) whatever the part\'s generator', sup.objects[0].layers[2].paths.every(p => p.thinWall && !p.variable));
@@ -535,6 +546,31 @@ function frustum(n, r0, r1, z0, z1) {
     const pg = G.parseGcode(sl(strip(1.0), ar).gcode);
     const ws = [...new Set(pg.moves.filter(m => /wall/.test(m.feature)).map(m => m.width.toFixed(3)))];
     check('...and the G-code reads back the variable width (parseGcode, nothing assumed)', ws.length === 1 && Math.abs(+ws[0] - w3) < 2e-3, ws.join(' '));
+  }
+
+  // =========================================================================
+  section('Arachne, measured - every test piece of two real Studio slices (fixtures/slicer-arachne-reference.json, docs/SLICER.md "Arachne")');
+  // =========================================================================
+  {
+    const REF = JSON.parse(require('fs').readFileSync(path.join(ROOT, 'fixtures', 'slicer-arachne-reference.json'), 'utf8'));
+    const plen = p => { const q = p.closed ? p.pts.concat([p.pts[0]]) : p.pts; let l = 0; for (let i = 0; i + 1 < q.length; i++) l += Math.hypot(q[i + 1][0] - q[i][0], q[i + 1][1] - q[i][1]); return l; };
+    for (const set of REF.sets) {
+      const o = SL.defaultsFor(0.4, Object.assign({}, set.settings, { wallGenerator: 'arachne', firstLayerMm: set.settings.layerMm, topShellLayers: 0, bottomShellLayers: 0,
+        topShellThicknessMm: 0, bottomShellThicknessMm: 0, onlyOneWallTop: false }));
+      const rows = set.samples.map((smp) => {
+        const cs = new wasm.CrossSection(smp.polys, 'Positive'), m3 = cs.extrude(3 * set.settings.layerMm), mesh = m3.getMesh(), np = mesh.numProp, V = mesh.vertProperties, T = mesh.triVerts, soup = [];
+        for (let i = 0; i < T.length; i++) soup.push(V[T[i] * np], V[T[i] * np + 1], V[T[i] * np + 2]);
+        cs.delete(); m3.delete();
+        const r = SL.sliceObjects([{ name: 'piece', soup }], o, wasm), L = r.objects[0].layers[1];
+        let plastic = 0, len = 0, wl = 0;
+        L.paths.filter((p) => /wall/.test(p.feature)).forEach((p) => { const l = plen(p), w = p.width * set.flow; plastic += l * w; len += l; wl += l * w; });
+        const sLen = Object.values(smp.walls).reduce((a, b) => a + b, 0), sW = Object.entries(smp.walls).reduce((a, [w, l]) => a + +w * l, 0) / sLen;
+        return { d: plastic / smp.plastic - 1, dw: wl / len - sW, w: wl / len, sW };
+      });
+      const worst = rows.reduce((a, r) => Math.max(a, Math.abs(r.d)), 0), worstW = rows.reduce((a, r) => Math.max(a, Math.abs(r.dw)), 0);
+      check(set.name + ' (' + set.file + ', Studio ' + set.studio + ', flow ' + set.flow + '): every one of its ' + rows.length + ' test pieces\' walls within 2 % of Studio\'s plastic, their mean width within 0.015 mm',
+            worst < 0.02 && worstW < 0.015, 'worst ' + (worst * 100).toFixed(1) + ' % / ' + worstW.toFixed(3) + ' mm; ' + rows.map((r) => (r.d * 100).toFixed(1)).join(' '));
+    }
   }
 
   // =========================================================================

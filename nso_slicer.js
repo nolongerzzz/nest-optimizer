@@ -2338,6 +2338,10 @@
   //   wall_generator = classic. Detect thin wall has no work under Arachne.
 
   var ARACHNE_STEP_MM = 0.1;          // a variable bead's width is read along its centreline at this step
+  /* Studio's thresholds for a middle wall, x the inner wall's line - FITTED to the walls tester (Erik's benchmark, Studio 02.09 at 0.42 / 0.45),
+     bracketed, not known: a middle of 0.70 mm stays one wall and 0.79 splits (0.70 / 0.45 = 1.56 .. 1.76); 0.25 is no middle and 0.45 is one
+     (0.55 .. 0.99). The middle of each bracket. */
+  var ARACHNE_SPLIT = 1.65, ARACHNE_ADD = 0.75;
 
   /**
    * The room across a piece at a point near its centreline: to the nearest edge, plus on through the point to the edge across. Not twice the
@@ -2366,7 +2370,9 @@
    */
   function variableRuns(pa, polys, piece, fat, o, centreFill) {
     var pts = pa.closed ? pa.pts.concat([pa.pts[0]]) : pa.pts;
-    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25), minBead = ofNozzle(o, o.minBeadWidth, 0.85);
+    /* Minimum wall width is a share of the inner wall's line, not the nozzle: Studio widens the walls tester's 0.20 mm tube to 0.38 = 85 % of
+       its 0.45 inner wall (of the 0.4 nozzle it would be 0.34). The minimum feature size stays the nozzle's, as Studio states it. */
+    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25), minBead = (o.minBeadWidth != null && isFinite(o.minBeadWidth) ? o.minBeadWidth : 0.85) * o.innerWallWidthMm;
     var margin = ofNozzle(o, o.wallTransitionFilterMargin, 0.25), tLen = ofNozzle(o, o.wallTransitionLength, 1);
     var wMax = 2 * o.innerWallWidthMm, angle = o.wallTransitionAngleDeg != null ? o.wallTransitionAngleDeg : 10;
     /* the path cut into short steps, the room at each step's middle */
@@ -2438,7 +2444,7 @@
     var we = o.outerWallWidthMm, wi = o.innerWallWidthMm, s = spacingOf(wi, h), fat = wi - s;
     if (!(o.wallLoops >= 1)) { var none = perimeters(g, region, h, o, above); none.extra = []; none.thinPieces = 0; none.variableBeads = 0; return none; }   /* no walls: nothing to fit */
     var N = Math.round(o.wallLoops), d = Math.max(1, Math.min(N, Math.round(o.wallDistributionCount || 1)));
-    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25);
+    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25), minBead = (o.minBeadWidth != null && isFinite(o.minBeadWidth) ? o.minBeadWidth : 0.85) * wi;   /* as variableRuns: of the inner wall's line */
     var rho = N * s + s / 2;
     var thickCore = g.offset(region, -rho);
     var thick = g.isEmpty(thickCore) ? g.empty() : g.inter(region, g.offset(thickCore, rho));
@@ -2451,14 +2457,39 @@
     var extra = [], pieces = 0, beads = 0;
     g.parts(thin).forEach(function (pc) {
       if (!(pc.area() >= minFeat * minFeat)) return;
-      var T = 2 * insetDepth(g, pc, rho + s);
-      if (T < minFeat) return;
+      var Tdeep = 2 * insetDepth(g, pc, rho + s);
+      if (Tdeep < minFeat) return;
       pieces++;
-      var n = Math.max(1, Math.round((T - fat) / s)), side = Math.floor(n / 2), fixed = Math.max(0, side - d);
-      var sp = (T - fat - 2 * fixed * s) / (n - 2 * fixed);
+      /* MEASURED ON A REAL ARACHNE SLICE (2026-11-20: Erik's wall-thickness benchmark, the owner's walls-tester_arachne.gcode.3mf, Studio
+         02.09, 2 walls 0.42 / 0.45; docs/SLICER.md "Arachne"):
+           - the piece's thickness is its typical one, twice its area over its outline (exact for a tube or a strip), not its deepest point:
+             an L's corner is deeper than its legs, and set a count its legs do not have (a 0.8 mm L came out as two 0.50 beads, Studio's 0.42);
+           - the beads across: its thickness less one overlap, over the inner wall's spacing, rounded - never more than two a wall loop
+             (a 2 mm L at 2 walls: four; 1.55 mm: four; 1.17: three; 0.79: two; 0.59: one - every count of the 13 thin samples Studio's);
+           - Wall distribution count 1: only the middle varies - the middle bead of an odd count, the innermost pair of an even one; every
+             bead outside them keeps its own width (a 1.39 mm tube: 0.42, 0.64, 0.42 - Studio's to the hundredth);
+           - the beads overlap as any wall's do: two across a 0.79 mm tube are (0.79 + overlap) / 2 = 0.42 each, Studio's */
+      /* the thickness: a piece with no hole has the area and outline of a rectangle of its thickness and length (exactly so for a strip or an
+         L), one with holes those of a ring (2 x area / outline: a tube's exactly) - never more than its deepest point */
+      var perim = 0, rings = g.polys(pc);
+      rings.forEach(function (q) { perim += pathLength(q, true); });
+      var Ar = pc.area(), Tm = rings.length === 1 ? (perim - Math.sqrt(Math.max(0, perim * perim - 16 * Ar))) / 4 : 2 * Ar / perim;
+      var T = perim > 0 && Tm > 0 ? Math.min(Tdeep, Tm) : Tdeep;
+      /* THE COUNT, as Studio's (the walls tester's 0.2 - 1.6 mm tubes and 0.4 - 2.0 mm L legs, its digits' 0.7 mm strokes): nominal walls a side
+         from the outside in, as many as leave a middle wall of at least ARACHNE_ADD x the inner wall's line (1.0 mm: two walls, no middle -
+         1.2 mm: three); that middle is one wall up to ARACHNE_SPLIT x the line, then a pair (a 0.7 mm stroke: one; a 0.8 mm tube: two; 1.4: three
+         with a 0.64 middle; 1.6: four). Never more than two a wall loop. */
+      var spAt = function (k) { return k === 0 ? we - fat : wi - fat; };
+      var pairs = 0, used = 0;
+      while (2 * (pairs + 1) + 1 <= 2 * N && T - 2 * (used + spAt(pairs)) >= ARACHNE_ADD * wi) { used += spAt(pairs); pairs++; }
+      var middle = T - 2 * used;
+      var n = Math.max(1, Math.min(2 * N, middle > ARACHNE_SPLIT * wi ? 2 * pairs + 2 : 2 * pairs + 1)), side = Math.floor(n / 2);
+      var V = Math.min(n, 2 * d - (n % 2)), fixed = (n - V) / 2, fixedSum = 0;
+      for (var kf = 0; kf < fixed; kf++) fixedSum += spAt(kf);
+      var sp = (T - fat - 2 * fixedSum) / V;
       var c = fat / 2, prev = 0, bands = [];
       for (var k = 0; k < side; k++) {
-        var spk = k < fixed ? s : sp;
+        var spk = k < fixed ? spAt(k) : sp;
         c += (prev + spk) / 2; prev = spk;
         /* a loop only where its two sides stand apart: where the piece narrows they would lie on each other (a sliver drawn out and back);
            there the middle bead takes the room instead - the count drops by one, the width follows */
@@ -2476,7 +2507,15 @@
       g.parts(rest).forEach(function (rp) {
         var polys = g.polys(rp);
         var med = medialPaths(polys, wi, []);
-        if (!med) return;
+        if (!med) {
+          /* NO CENTRELINE A BEAD LONG (a dot: the walls tester's 0.8 mm decimal points): one short bead across its long way, Studio's 0.42 */
+          if (bands.length || !(rp.area() >= minBead * minBead)) return;
+          var bx = rp.bounds(), lx = bx.max[0] - bx.min[0], ly = bx.max[1] - bx.min[1], cx = (bx.min[0] + bx.max[0]) / 2, cy = (bx.min[1] + bx.max[1]) / 2;
+          var half = Math.max(0.05, (Math.max(lx, ly) - we) / 2), dw = Math.max(minBead, Math.min(we, Math.min(lx, ly)));
+          extra.push({ feature: 'Outer wall', width: dw, closed: false, pts: lx >= ly ? [[cx - half, cy], [cx + half, cy]] : [[cx, cy - half], [cx, cy + half]], variable: true });
+          beads++;
+          return;
+        }
         med.forEach(function (pa) {
           variableRuns(pa, polys, piecePolys, fat, o, bands.length > 0).forEach(function (r) {
             extra.push({ feature: r.outer ? 'Outer wall' : 'Inner wall', width: r.width, closed: false, pts: r.pts, variable: true });
@@ -2715,7 +2754,15 @@
           if (narrowR > 0 && !g.isEmpty(sparse)) {
             var opened = g.offset(g.offset(sparse, -narrowR), narrowR);
             var narrow = g.diff(sparse, opened);
-            if (g.area(narrow) > 1e-6) { solid = g.union(solid, narrow); sparse = g.inter(sparse, opened); }
+            /* ...only where it borders solid infill (2026-11-20). The strips this rule was fitted on lie between solid regions (under the ribs,
+               between top surfaces); a strip between WALLS - the core of a thin-walled part - stays sparse in Studio down to 0.515 mm between
+               the infill lines' centres (Erik's wall-thickness benchmark, the owner's walls-tester slices: three L legs, 1.31 / 0.91 / 0.52
+               mm strips, all sparse, Arachne and Classic alike) */
+            if (g.area(narrow) > 1e-6 && !g.isEmpty(solid)) {
+              var touch = g.inter(narrow, g.offset(solid, spacingOf(o.infillWidthMm, h)));
+              narrow = g.unionAll(g.parts(narrow).filter(function (pc) { return !g.isEmpty(g.inter(pc, touch)); }));
+            } else narrow = g.empty();
+            if (g.area(narrow) > 1e-6) { solid = g.union(solid, narrow); sparse = g.diff(sparse, narrow); }
           }
           // a sparse island too small to hold infill is printed solid
           if (oS.minSparseAreaMm2 > 0) {
