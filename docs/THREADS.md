@@ -120,6 +120,67 @@ A bolt is a hex head (6 across-flats facets) or a socket cap (a cylinder with a 
 dimensions are ISO 4017 / 4032 / 4762 for M2 to M30 (a table in `nso_thread.js`); a typed Ø takes formulas (`1.5 D + 1` across flats). Bolts print
 **head down on the bed**; rods stand on end.
 
+## Thumb heads, a plain shank, a bevelled end
+
+Two more bolt heads, each measured off a real thumb screw (a pair supplied with the request):
+
+| head | what it is | measured on | defaults for a thread of Ø D |
+|---|---|---|---|
+| **Knurled** | a tall round head with `count` round-bottomed grooves (each a circular cutter of sagitta `depth` across 45 % of its period); its edges a 45° chamfer `edge` deep at the faces, blended into the side by a round of radius 2 × edge, the grooves fading out into it | Ø32 × 35, 25 grooves 1.03 deep, 3 mm chamfer into a 6 mm round | Ø 2D + 2, height 1.2D + 2, grooves π Ø / 4, depth 0.032 Ø, edge 0.094 Ø |
+| **Fluted** | `count` convex lobes over shallow valleys `depth` below them (a smooth max, so a crest is exactly the head's Ø); its edges a chamfer `edge` deep at the faces at 36° off the axis, the flutes running through it a quarter as deep | Ø26.2 × 21, 13 lobes 1.25 deep, a 2.43 mm chamfer at a 0.726 slope | Ø 1.3D + 1, height D + 1, flutes π Ø / 6.3, depth 0.048 Ø, edge 0.093 Ø |
+
+Both are one surface r(θ, z) sampled on a grid (`field` in nso_thread.js), so they are closed as made. The defaults land within a few
+percent of the screws they came from (`nso_thread_test.js` §11 measures grooves, lobes, crests, valleys and edges by rays).
+
+**Shank**: a plain, unthreaded part of the length next to the head (screw A had 24 mm of it). It stands 0.1 mm over the thread's crests:
+the step between the two outlines must be wider than either's chord sag, or the ring that closes it grazes the thread.
+
+**Bevel**: the free end held inside a cone - `bevel` mm along the axis, `bevelAngle` off it (default 45°; screw B's was 36°) - so the end
+face is a disc of radius R - bevel × tan(angle). Applied to every grid vertex's radius (the cone carries on past the end, so the end
+face's rim lies on it), with finer rows (no more than max(0.15, P/16) apart) and each quad split on its shorter diagonal. A rod is
+bevelled at both ends. Refused below a third of the thread's radius, or longer than the thread leaves room for.
+
+In the card: **Knurled** and **Fluted** head tiles; sliders **Head Ø**, **Head height**, **Grooves / Flutes**, **Groove / Flute depth**,
+**Edge** (following the thread's size until moved), **Shank**, **Bevel** and **Bevel angle**.
+
+## Extend a screw's thread
+
+`nso_thread_extend.js`; the card's **Extend thread** tile; `npm run thread:extend`. Select ANY screw on the plate - one from a model, not
+made here - choose **Turns** (whole turns to add, or below 0 to take away) and **Apply to piece**: the thread is longer by turns ×
+its own pitch, and its pitch, Ø, profile, head and tip are exactly the screw's own.
+
+**Why it works.** A helical thread moved one pitch along its axis lands on itself. So the slab of the screw between two planes a whole
+number of pitches apart, inside the thread, fits into a cut at either plane. The screw is cut across its full-depth thread, the tip
+side is moved n × P along the axis, and the gap is filled with copies of the slab. To shorten, a slab is taken out instead.
+
+**Reading the screw** (`read`): the axis is the solid's principal axis of inertia whose other two moments are equal, snapped to a world
+axis within 1.5°. The profile along it comes from rays, bucketed by height. The thread is the longest run of crests a steady distance
+apart. The pitch is the shift that makes the profile land on itself best (one, half and all of the run's turns at once), snapped to a
+whole 0.05 mm or a whole TPI when that fits as well. The hand is +P/4 a quarter turn on. The full-depth zone runs from the first full-depth
+root to the last, and the cuts stay inside it. The tip is the end the thread is nearer.
+
+**The seams are exact - no boolean.** Two cuts of the same section are the same closed curve drawn with different points. That curve is
+one radius per angle round the axis, so both loops are put in angle order and merged. Each point is paired one-to-one with the nearest
+point of the other cut within 0.02 mm, or 1 % of the pitch, and moved onto it. Each other point goes into the other side's edge it falls
+in, splitting the triangle there, so no T-junction is left. Consecutive seam points under 0.3 µm apart are collapsed, because the app
+welds at 1e-4. Every piece shares the seam's vertices: the result is one closed, 2-manifold, outward mesh.
+
+The cut planes are chosen clear of the vertices and away from any points the piece came with closer than the weld (a flaw it had). A
+lengthening slab is taken from a stretch of thread clear of those flaws, so the flaw is not copied. About 0.1 to 0.5 s for a screw of
+30 to 50 thousand triangles: the preview follows the slider.
+
+**Measured** (`nso_thread_extend_test.js`, 101 checks): four screws, including one lying along -X with its head at +X and a left-hand one
+tilted 20° off any world axis. The pitch read is within 0.002 mm and the hand, sizes and tip are right. At +1, +4, +11 and -2 turns each
+result is closed, Euler 2 and passes `mesh_validate --gate`. It is exactly n × P longer with the head end fixed, and the volume changes
+by n pitches' worth. Along an 11-turn extension, rising flanks are a pitch apart through every seam (worst 0.02 mm).
+
+On the two supplied screws: B (pitch 3.444, 4.2 full turns) extends +1, +3, +12, +25 and -2 cleanly, with no self-intersections. A (pitch
+2.000, 7 full turns) came with 2 pairs of points 0.08 µm apart, which `mesh_validate` reports as 4 non-manifold edges. Its results carry
+exactly those, no more, and -2 cuts them away. The readout says so.
+
+**Refused**, in words, nothing changed: a piece not turned about an axis; no thread found; under 3 full turns; more turns taken out than
+it has; a section that is not one outline going once round the axis (a hollow screw).
+
 ## Refusals and notes, in words
 
 `a 0.20 mm pitch is only 0.123 mm deep - under 0.5 of a 0.4 mm nozzle; it would not form. Use a pitch of at least 0.33 mm` ·
@@ -133,8 +194,8 @@ do want, and it prints as a rough groove, not a hole that is shut.
 
 ## Flags - not in the ticket
 
-- **Single-start only**, and every thread is **cut flat at its ends**: no chamfer or lead-in, no run-out, no unthreaded shank (a bolt is
-  threaded the whole shank), no chamfered nut or head corners. A lead-in chamfer is the obvious next step and would help mating.
+- **Single-start only.** A bolt's or rod's free end can be bevelled and a bolt can have a plain shank; there is still no run-out, no
+  chamfered nut bore or hex corners. Extend reads single-start threads on solid screws (not a hollow one).
 - **The flats are wider than the standards'** (the table above) so a nozzle can lay them; these are *printable* threads of the standard
   pitch and Ø, not gauged ones. **G is a parallel thread and seals with tape or a washer, not by the thread; NPT is tapered 1:16 but not
   gauged either** - tape it, and try it against a real fitting before trusting a seal.

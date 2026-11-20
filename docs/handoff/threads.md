@@ -67,3 +67,20 @@ Follow-up - **Fittings: tiles, sliders, live preview** (`app-fittings.js` rewrit
   `fittings:thread`'s "wide socket" case.
 - The Angle slider's range starts at 10 degrees, the engine's own minimum, so the 5-degree refusal is reached by typing in the box (the box takes
   any value, as Hollow's does).
+
+Follow-up (2026-11-20) - **Thumb heads, bevel, shank, Extend thread** (from a request with two thumb screws attached: a knurled Ø32 one
+with a plain shank, a fluted Ø26 one with a bevelled tip). New: `nso_thread_extend.js` + `tools/nso_thread_extend_test.js` (`thread:extend`).
+Changed: `nso_thread.js` (bevel cone on the thread grid, `field` surfaces, knurled / fluted heads, shank), `app-fasteners.js` (Extend
+tile, head tiles, nine new sliders), `app-piece-preview.js` (`showOn`: an edit's ghost laid over its piece), `app-core.js` (undo label
+`threadExtend`), the Fasteners card in `index.html`, the fasteners drive (sections 8, 9).
+- *Extend has no boolean.* The first version cut the screw and unioned overlapping slabs on Manifold: 20 s on screw A and non-manifold
+  slivers after the 1e-4 weld, because two copies of the same helical surface - even 1 µm apart - are the kernel's worst case. The seams
+  are stitched instead (`zip`): both cuts' loops in angle order, paired one-to-one, the rest inserted into the other side's edges.
+- *Three traps found on the real screws*: (1) the pitch fit compared r(z) with r(z + 8P) over a 1.6 mm window that began in the shank
+  junction - 2.015 instead of 2.000; it now sums shifts of 1, k/2 and k turns over a zone bounded by full-depth roots. (2) A sign error in
+  carrying points between the cuts (A + cP where A - cP was meant) folded the seam two pitches over. (3) Crossing points 30 µm apart on a
+  seam welded into one: planes are chosen to cut no edge short, and loop edges under 0.3 µm are collapsed.
+- *Screw A is not clean as supplied*: two pairs of points 0.08 µm apart (mesh_validate: 4 non-manifold edges). Extend keeps them as they
+  were, takes its slab from a stretch clear of them (so they are not copied), and says so.
+- *Bevel*: vertices clamped radially under the cone; the cone must carry on past the end (clamped flat there, the end face's rim rose
+  0.02 mm off it) and quads split on the shorter diagonal (on the long one the cone's next row came within a triangle's sag: piercing pairs).

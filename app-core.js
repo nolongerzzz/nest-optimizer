@@ -277,6 +277,7 @@ const UNDO_REPLACE_LABEL = {
   carveReplace: 'Undo: Carve reverted',
   notchReplace: 'Undo: Notch reverted',
   punchReplace: 'Undo: Punch reverted',
+  threadExtend: 'Undo: thread length put back',
   textReplace: 'Undo: Text reverted',
   weaveReplace: 'Undo: Weave reverted',
   wrapReplace: 'Undo: Wrap reverted',

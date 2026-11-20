@@ -71,7 +71,10 @@ Smart build-plate packing for 3D printing.
   **nut** and a bolt + nut set, M2 to M30 (coarse and fine) or G pipe sizes or
   a typed Ø and pitch. Pick one from picture tiles, move a slider for every
   number (Ø, pitch, length, fit, nut thickness) against a **live translucent
-  preview** on the plate, then **Add to plate**. The nut's bore is the bolt's
+  preview** on the plate, then **Add to plate**. **Knurled** and **fluted thumb
+  heads**, a plain **shank** and a **bevelled end**. **Extend thread**: select
+  any screw on the plate and make its thread longer (or shorter) by whole turns
+  - its own pitch, size and profile kept, read off the piece. The nut's bore is the bolt's
   thread plus a 0.2 mm fit, so the pair turns; every piece is a closed,
   wound-outward mesh built directly (no boolean), measured by rays in
   `npm run thread:test` ([docs/THREADS.md](docs/THREADS.md))

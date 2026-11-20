@@ -1028,12 +1028,15 @@
                 <button class="fs-tile" type="button" data-kind="bolt" aria-pressed="true" title="Bolt: a hex or socket head and a threaded shank, head down on the bed."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Bolt</span></button>
                 <button class="fs-tile" type="button" data-kind="nut" aria-pressed="false" title="Hex nut: the standard size for the thread (or your thickness), its bore the bolt's thread plus the Fit."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Nut</span></button>
                 <button class="fs-tile" type="button" data-kind="set" aria-pressed="false" title="A bolt and its nut, two pieces made together: the nut turns on the bolt."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Bolt + nut</span></button>
+                <button class="fs-tile" type="button" data-kind="extend" aria-pressed="false" title="Extend thread: make the SELECTED screw's thread longer (or shorter) by whole turns - its own pitch, size, profile, head and tip kept. A screw from any model: it is read off the piece. Applied to the piece itself, one Undo."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Extend thread</span></button>
               </div>
               <div class="fs-tiles fs-heads" id="fs-head-row" role="group" aria-label="Head type">
                 <button class="fs-tile" type="button" data-head="hex" aria-pressed="true" title="Hex head: a six-sided head you turn with a spanner. It stands on its flat top face."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Hex head</span></button>
                 <button class="fs-tile" type="button" data-head="socket" aria-pressed="false" title="Socket head: a round cap with a hex socket for an Allen key, open on the bed face."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Socket head</span></button>
+                <button class="fs-tile" type="button" data-head="knurled" aria-pressed="false" title="Knurled thumb head: a tall round head with fine round-bottomed grooves to grip, its edges a chamfer rounded into the side."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Knurled</span></button>
+                <button class="fs-tile" type="button" data-head="fluted" aria-pressed="false" title="Fluted thumb head: a knob of rounded lobes to grip, its edges chamfered with the flutes running through them."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Fluted</span></button>
               </div>
-              <div class="vp-row vp-row-opts">
+              <div class="vp-row vp-row-opts" id="fs-size-row">
               <label class="vp-clone" title="The thread. Metric coarse and fine, or G (BSP parallel) pipe sizes. Choosing one sets Ø, Pitch and the nut's thickness to its own; the sliders then adjust from there.">Size
                 <select id="sel-fs-size" class="vp-select" aria-label="Thread size">
                   <optgroup label="Metric (ISO coarse)">
@@ -1051,15 +1054,42 @@
               <label class="vp-clone" title="Right-hand is the usual thread; a left-hand bolt takes a left-hand nut.">Hand
                 <select id="sel-fs-hand" class="vp-select" aria-label="Thread hand"><option value="right" selected>Right</option><option value="left">Left</option></select></label>
               </div>
-              <div class="fs-slider" data-for="major" title="The thread's major Ø, mm. It starts at the size's own; moving it makes a thread of your own (the piece is then named by its numbers). The box takes any value past the slider's end.">
+              <div class="fs-slider" id="fs-major-row" data-for="major" title="The thread's major Ø, mm. It starts at the size's own; moving it makes a thread of your own (the piece is then named by its numbers). The box takes any value past the slider's end.">
                 <label for="inp-fs-major-slider">Ø</label><input type="number" id="inp-fs-major" min="1.5" max="100" step="0.1" value="8" aria-label="Major diameter, mm"><span id="fs-major-read" class="fs-read">8 mm</span>
                 <input type="range" id="inp-fs-major-slider" min="2" max="64" step="0.1" value="8"></div>
-              <div class="fs-slider" data-for="pitch" title="The pitch, mm: the distance the thread advances in one turn. It starts at the size's own. Under about 0.8 mm a 0.4 mm nozzle resolves the thread roughly - it says so; under half the nozzle's own depth it is refused.">
+              <div class="fs-slider" id="fs-pitch-row" data-for="pitch" title="The pitch, mm: the distance the thread advances in one turn. It starts at the size's own. Under about 0.8 mm a 0.4 mm nozzle resolves the thread roughly - it says so; under half the nozzle's own depth it is refused.">
                 <label for="inp-fs-pitch-slider">Pitch</label><input type="number" id="inp-fs-pitch" min="0.1" max="12" step="0.05" value="1.25" aria-label="Pitch, mm"><span id="fs-pitch-read" class="fs-read">1.25 mm</span>
                 <input type="range" id="inp-fs-pitch-slider" min="0.2" max="6" step="0.05" value="1.25"></div>
               <div class="fs-slider" id="fs-length-row" data-for="length" title="Rod: its length. Bolt: the shank under the head.">
                 <label for="inp-fs-length-slider">Length</label><input type="number" id="inp-fs-length" min="1" max="500" step="1" value="25" aria-label="Length, mm"><span id="fs-length-read" class="fs-read">25 mm</span>
                 <input type="range" id="inp-fs-length-slider" min="2" max="150" step="1" value="25"></div>
+              <div class="fs-slider" id="fs-shank-row" data-for="shank" title="Bolt: the plain, unthreaded part of the length, next to the head (0: threaded all the way). It stands a hair over the crests.">
+                <label for="inp-fs-shank-slider">Shank</label><input type="number" id="inp-fs-shank" min="0" max="200" step="0.5" value="0" aria-label="Shank"><span id="fs-shank-read" class="fs-read">0 mm</span>
+                <input type="range" id="inp-fs-shank-slider" min="0" max="200" step="0.5" value="0"></div>
+              <div class="fs-slider" id="fs-bevel-row" data-for="bevel" title="The free end bevelled: the length of the cone along the axis, mm (0: a flat end). A rod is bevelled at both ends.">
+                <label for="inp-fs-bevel-slider">Bevel</label><input type="number" id="inp-fs-bevel" min="0" max="10" step="0.1" value="0" aria-label="Bevel"><span id="fs-bevel-read" class="fs-read">0 mm</span>
+                <input type="range" id="inp-fs-bevel-slider" min="0" max="10" step="0.1" value="0"></div>
+              <div class="fs-slider" id="fs-bevelang-row" data-for="bevelang" title="The bevel's angle off the axis, degrees: 45 is the usual; the fluted screw it was measured on had 36.">
+                <label for="inp-fs-bevelang-slider">Bevel angle</label><input type="number" id="inp-fs-bevelang" min="15" max="75" step="1" value="45" aria-label="Bevel angle"><span id="fs-bevelang-read" class="fs-read">45°</span>
+                <input type="range" id="inp-fs-bevelang-slider" min="15" max="75" step="1" value="45"></div>
+              <div class="fs-slider" id="fs-headd-row" data-for="headd" title="A thumb head's Ø, mm. It follows the thread's size until moved.">
+                <label for="inp-fs-headd-slider">Head Ø</label><input type="number" id="inp-fs-headd" min="4" max="120" step="0.5" value="18" aria-label="Head Ø"><span id="fs-headd-read" class="fs-read">18 mm</span>
+                <input type="range" id="inp-fs-headd-slider" min="4" max="120" step="0.5" value="18"></div>
+              <div class="fs-slider" id="fs-headk-row" data-for="headk" title="A thumb head's height, mm. It follows the thread's size until moved.">
+                <label for="inp-fs-headk-slider">Head height</label><input type="number" id="inp-fs-headk" min="2" max="120" step="0.5" value="11.6" aria-label="Head height"><span id="fs-headk-read" class="fs-read">11.6 mm</span>
+                <input type="range" id="inp-fs-headk-slider" min="2" max="120" step="0.5" value="11.6"></div>
+              <div class="fs-slider" id="fs-count-row" data-for="count" title="A thumb head's grooves (knurled) or flutes (fluted). It follows the head's Ø until moved.">
+                <label for="inp-fs-count-slider">Grooves</label><input type="number" id="inp-fs-count" min="3" max="120" step="1" value="14" aria-label="Grooves"><span id="fs-count-read" class="fs-read">14</span>
+                <input type="range" id="inp-fs-count-slider" min="3" max="120" step="1" value="14"></div>
+              <div class="fs-slider" id="fs-depth-row" data-for="depth" title="How deep the grooves or flutes are, mm.">
+                <label for="inp-fs-depth-slider">Groove depth</label><input type="number" id="inp-fs-depth" min="0.2" max="6" step="0.05" value="0.6" aria-label="Groove depth"><span id="fs-depth-read" class="fs-read">0.6 mm</span>
+                <input type="range" id="inp-fs-depth-slider" min="0.2" max="6" step="0.05" value="0.6"></div>
+              <div class="fs-slider" id="fs-edge-row" data-for="edge" title="A thumb head's edge, mm in at the faces: a chamfer rounded into the side (knurled) or a chamfer the flutes run through (fluted).">
+                <label for="inp-fs-edge-slider">Edge</label><input type="number" id="inp-fs-edge" min="0" max="10" step="0.1" value="1.7" aria-label="Edge"><span id="fs-edge-read" class="fs-read">1.7 mm</span>
+                <input type="range" id="inp-fs-edge-slider" min="0" max="10" step="0.1" value="1.7"></div>
+              <div class="fs-slider" id="fs-turns-row" data-for="turns" title="Extend thread: whole turns to add (or, below 0, to take away). The screw's own pitch, so the new length is the turns times it.">
+                <label for="inp-fs-turns-slider">Turns</label><input type="number" id="inp-fs-turns" min="-20" max="40" step="1" value="3" aria-label="Turns"><span id="fs-turns-read" class="fs-read">3</span>
+                <input type="range" id="inp-fs-turns-slider" min="-20" max="40" step="1" value="3"></div>
               <div class="fs-slider" id="fs-fit-row" data-for="fit" title="Nut: the radial clearance added to the thread so it turns, mm. 0.2 is a printed fit. The Punch tool's tapped hole uses the same 0.2.">
                 <label for="inp-fs-fit-slider">Fit</label><input type="number" id="inp-fs-fit" min="0" max="1" step="0.05" value="0.2" aria-label="Nut fit, mm"><span id="fs-fit-read" class="fs-read">0.2 mm</span>
                 <input type="range" id="inp-fs-fit-slider" min="0" max="0.6" step="0.05" value="0.2"></div>
@@ -3277,7 +3307,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=85e73836"></script>
-  <script src="app-core.js?v=3fd4c0c7"></script>
+  <script src="app-core.js?v=907fc169"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=5b4ec154"></script>
 
@@ -3336,7 +3366,7 @@
   <!-- Square tubes: Reducer, Neck and Branch on a square tube (Tubes' Square tubes toggle). After
        nso_tube_edge.js, nso_bend.js and nso_rod_branch.js (its booleans). See docs/TUBE-EDGE.md, "Square tubes". -->
   <script src="nso_square_tube.js?v=dcd49d4b"></script>
-  <script src="nso_thread.js?v=3d986b5e"></script>
+  <script src="nso_thread.js?v=9cdaffce"></script>
   <script src="nso_fittings.js?v=b8b58426"></script>
   <script src="nso_custom_shape.js?v=6f02bd43"></script>
   <script src="app-tube-edge.js?v=e80faeca"></script>
@@ -3371,10 +3401,11 @@
   <script src="app-wheel-live.js?v=a6612e99"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=04f0e346"></script>
-  <script src="app-piece-preview.js?v=730a465a"></script>
+  <script src="app-piece-preview.js?v=399ded2f"></script>
+  <script src="nso_thread_extend.js?v=0420cd94"></script>
   <script src="app-fittings.js?v=d1920e12"></script>
   <script src="app-custom-shape.js?v=123e6575"></script>
-  <script src="app-fasteners.js?v=aafaf77d"></script>
+  <script src="app-fasteners.js?v=4a5a49b2"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=41a685c0"></script>
   <script src="app-join.js?v=4a62abd7"></script>

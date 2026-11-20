@@ -66,8 +66,8 @@ withApp(async (page, logs) => {
              sliders: nums.every(n => el('inp-fs-' + n) && el('inp-fs-' + n + '-slider') && el('fs-' + n + '-read') && el('inp-fs-' + n + '-slider').dataset.nsoLive === '1'),
              size: el('sel-fs-size').value, sizes: el('sel-fs-size').options.length, ghostsBefore: nsoFasteners.state().ghosts };
   });
-  check('Fasteners is in the Gen+ menu: 4 kind tiles, 2 head tiles, Add to plate, and a number box + slider + read-out for Ø, Pitch, Length, Fit, Nut thick - each bound live',
-    pre.menu && pre.inGen && pre.add && pre.kinds === 4 && pre.heads === 2 && pre.sliders, JSON.stringify(pre));
+  check('Fasteners is in the Gen+ menu: 5 kind tiles (Extend thread too), 4 head tiles (Knurled and Fluted too), Add to plate, and a number box + slider + read-out for Ø, Pitch, Length, Fit, Nut thick - each bound live',
+    pre.menu && pre.inGen && pre.add && pre.kinds === 5 && pre.heads === 4 && pre.sliders, JSON.stringify(pre));
   check('the menu is closed: there is no preview yet, and the table has 35 sizes', pre.ghostsBefore === 0 && pre.sizes === 35, JSON.stringify(pre));
   await page.evaluate(() => { state.editId = null; state.selectedIndex = -1; });
   const u0 = await undoDepth(page), n0 = (await pieces(page)).length;
@@ -83,8 +83,8 @@ withApp(async (page, logs) => {
     let lit = 0, h = 0; for (let i = 0; i < d.length; i += 4) { if (Math.abs(d[i] - 0x14) + Math.abs(d[i + 1] - 0x17) + Math.abs(d[i + 2] - 0x1c) > 24) lit++; h = (h * 31 + d[i] + 7 * d[i + 1] + 13 * d[i + 2]) | 0; }
     return { id: b.getAttribute('data-kind') || b.getAttribute('data-head'), drawn: c.getAttribute('data-drawn'), lit, h, label: b.querySelector('span').textContent };
   }));
-  check('all six tiles are drawn (a picture, not a blank: each has well over 150 lit pixels of 4096)', tiles.length === 6 && tiles.every(t => t.drawn === '1' && t.lit > 150), JSON.stringify(tiles.map(t => t.id + ':' + t.lit)));
-  check('no two tiles are alike (Rod, Bolt, Nut, Bolt + nut, Hex head, Socket head are six different pictures)', new Set(tiles.map(t => t.h)).size === 6, tiles.map(t => t.label).join(' / '));
+  check('all nine tiles are drawn (a picture, not a blank: each has well over 150 lit pixels of 4096)', tiles.length === 9 && tiles.every(t => t.drawn === '1' && t.lit > 150), JSON.stringify(tiles.map(t => t.id + ':' + t.lit)));
+  check('no two tiles are alike (Rod, Bolt, Nut, Bolt + nut, Extend thread, Hex, Socket, Knurled, Fluted: nine different pictures)', new Set(tiles.map(t => t.h)).size === 9, tiles.map(t => t.label).join(' / '));
   const tileShot = SHOTS ? await page.locator('#menu-fasteners .fs-tiles').first().boundingBox() : null;
 
   console.log('\n=== 2. the preview: in the scene, not on the plate ===');
@@ -137,7 +137,7 @@ withApp(async (page, logs) => {
   await until(page, s => s.head === 'socket' && s.ghosts === 1 && Math.abs(s.ghost[0].size.x - 16.0) < 0.2);
   st = await FS(page); rd = await readout(page);
   const pressed = await page.evaluate(() => Array.from(document.querySelectorAll('#fs-head-row [data-head]')).map(b => b.getAttribute('aria-pressed')).join());
-  check('Socket head tile: pressed (false,true), the ghost is a Ø16 cap (M10), the readout says socket-head with its 8.0 hex socket', pressed === 'false,true' && /Socket-head bolt M10 × 25\.0.*8\.0 hex socket/.test(rd.text), pressed + ' · ' + rd.text.slice(0, 100));
+  check('Socket head tile: pressed (false,true,false,false), the ghost is a Ø16 cap (M10), the readout says socket-head with its 8.0 hex socket', pressed === 'false,true,false,false' && /Socket-head bolt M10 × 25\.0.*8\.0 hex socket/.test(rd.text), pressed + ' · ' + rd.text.slice(0, 100));
   await frame(page, 0); await shot(page, 'fasteners-preview-socket.png');
   await click(page, '#fs-kind-row [data-kind="nut"]');
   await until(page, s => s.kind === 'nut' && s.ghosts === 1 && Math.abs(s.ghost[0].size.y - 8.4) < 0.05);
@@ -266,6 +266,93 @@ withApp(async (page, logs) => {
   const nB = (await pieces(page)).length;
   const viaApi = await page.evaluate(() => nsoFasteners.bolt());
   check('nsoFasteners.bolt() still bakes one bolt with the card\'s numbers: "bolt M8 1", 5.3 + 20 tall', viaApi.ok && viaApi.name === 'bolt M8 1' && (await pieces(page)).length === nB + 1 && Math.abs((await pieces(page)).find(p => p.name === 'bolt M8 1').size.y - 25.3) < 0.05, viaApi.reason);
+  console.log('\n=== 8. thumb heads, a plain shank, a bevelled end ===');
+  {
+    await page.evaluate(() => { document.getElementById('menu-gen').open = true; document.getElementById('menu-fasteners').open = true; });
+    await choose(page, 'sel-fs-size', 'M10');
+    await click(page, '#fs-kind-row [data-kind="bolt"]');
+    await click(page, '#fs-head-row [data-head="knurled"]');
+    await until(page, s => s.head === 'knurled' && s.ghosts === 1 && s.ok);
+    let rows = await page.evaluate(() => ['headd', 'headk', 'count', 'depth', 'edge', 'shank', 'bevel'].map(n => !document.getElementById('fs-' + n + '-row').hidden));
+    let f = await page.evaluate(() => ['headd', 'headk', 'count', 'depth', 'edge'].map(n => document.getElementById('inp-fs-' + n).value));
+    let rd = await readout(page);
+    check('Knurled head: its five sliders, Shank and Bevel are shown; they start at the knurled defaults for M10 (Ø22, 14 tall, 17 grooves)', rows.every(Boolean) && f[0] === '22' && f[1] === '14' && f[2] === '17' && /^Preview - Knurled thumb screw M10 × \d+\.0.*head Ø22\.0 × 14\.0, 17 grooves/.test(rd.text), JSON.stringify(f) + ' ' + rd.text.slice(0, 90));
+    await frame(page, 0); await shot(page, 'fasteners-knurled.png');
+    await slide(page, 'count', 24);
+    await page.waitForFunction(() => /24 grooves/.test(document.getElementById('fs-readout').textContent), null, { timeout: 8000 });
+    await slide(page, 'headd', 26);
+    await page.waitForFunction(() => /head Ø26\.0/.test(document.getElementById('fs-readout').textContent), null, { timeout: 8000 });
+    rd = await readout(page);
+    check('the Grooves slider (24) and Head Ø (26) drive the preview; a moved count stays where it was put', /head Ø26\.0 × 14\.0, 24 grooves/.test(rd.text), rd.text.slice(0, 110));
+    await click(page, '#fs-head-row [data-head="fluted"]');
+    await page.waitForFunction(() => /^Preview - Fluted thumb screw/.test(document.getElementById('fs-readout').textContent), null, { timeout: 8000 });
+    rd = await readout(page);
+    const lab = await page.evaluate(() => document.querySelector('#fs-count-row label').textContent);
+    check('Fluted head: the preview is a fluted thumb screw, and the count slider is called Flutes', /^Preview - Fluted thumb screw M10/.test(rd.text) && lab === 'Flutes', lab + ' · ' + rd.text.slice(0, 90));
+    await frame(page, 0); await shot(page, 'fasteners-fluted.png');
+    await slide(page, 'shank', 8); await slide(page, 'bevel', 1.2);
+    await page.waitForFunction(() => /8\.0 mm plain shank, bevelled end \(1\.2 mm at 45°/.test(document.getElementById('fs-readout').textContent), null, { timeout: 8000 });
+    const angShown = await page.evaluate(() => !document.getElementById('fs-bevelang-row').hidden);
+    check('Shank 8 and Bevel 1.2: the readout says the plain shank and the bevelled end, and the Bevel angle slider appears', angShown, (await readout(page)).text.slice(0, 160));
+    await slide(page, 'bevelang', 30);
+    await page.waitForFunction(() => /bevelled end \(1\.2 mm at 30°/.test(document.getElementById('fs-readout').textContent), null, { timeout: 8000 });
+    const nB = (await pieces(page)).length;
+    await click(page, '#btn-fs-add');
+    const st8 = await waitStatus(page, /Dropped bolt M10/);
+    const P8 = await pieces(page), thumb = P8[P8.length - 1], T8 = await topoOf(page, thumb.id);
+    check('Add: the fluted, shanked, bevelled screw is on the plate, closed (Euler 2)', P8.length === nB + 1 && T8.open === 0 && T8.nm === 0 && T8.flip === 0 && T8.euler === 2 && /Fluted thumb screw/.test(st8), JSON.stringify(T8));
+  }
+
+  console.log('\n=== 9. Extend thread: a screw on the plate, made longer by whole turns ===');
+  {
+    // a knurled thumb screw M12 with a plain shank, loaded as if from a file (read off the piece, not from the card)
+    const fsx = require('fs'), osx = require('os'), pathx = require('path');
+    const T = require('../nso_thread.js'), made = T.bolt({ size: 'M12', head: 'knurled', length: 30, shank: 10 });
+    const file = pathx.join(fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'nso-ext-')), 'thumbscrew.stl');
+    require('./nso_stl_io.js').writeSTL(file, made.soup);
+    const { loadSTL } = require('./nso_app_harness');
+    const id = await loadSTL(page, file);
+    await page.evaluate(id => { const i = state.placed.findIndex(p => p && p.sourceId === id); state.editId = id; if (i >= 0) selectPlaced(i); }, id);
+    const h0 = (await pieces(page)).find(p => p.id === id).size.y, u0 = await undoDepth(page);
+    await page.evaluate(() => { document.getElementById('menu-gen').open = true; document.getElementById('menu-fasteners').open = true; });
+    await click(page, '#fs-kind-row [data-kind="extend"]');
+    await until(page, s => s.kind === 'extend' && s.armed && s.ghosts === 1 && s.overlay);
+    let rd = await readout(page);
+    const rows = await page.evaluate(() => ({ size: !document.getElementById('fs-size-row').hidden, turns: !document.getElementById('fs-turns-row').hidden, add: document.getElementById('btn-fs-add').textContent }));
+    check('Extend thread: the thread is read off the selected piece (Ø12, pitch 1.750, right-hand) and the preview is laid OVER the piece (+3 turns)',
+      /^Preview - Thread lengthened by 3 turns \(5\.25 mm\): now .* pitch 1\.750 mm and Ø12\.00 as they were/.test(rd.text) && !rows.size && rows.turns && rows.add === 'Apply to piece', JSON.stringify(rows) + ' · ' + rd.text.slice(0, 120));
+    const ghost = (await FS(page)).ghost[0];
+    check('the overlay is the lengthened screw: ' + ghost.size.y.toFixed(2) + ' tall (the piece ' + h0.toFixed(2) + ' + 5.25)', Math.abs(ghost.size.y - (h0 + 5.25)) < 0.02, JSON.stringify(ghost.size));
+    await frame(page, 0); await shot(page, 'fasteners-extend-preview.png');
+    await slide(page, 'turns', 6);
+    await page.waitForFunction(() => /lengthened by 6 turns \(10\.50 mm\)/.test(document.getElementById('fs-readout').textContent), null, { timeout: 10000 });
+    check('the Turns slider to 6: 10.50 mm longer in the preview; nothing changed yet (no Undo step)', (await undoDepth(page)) === u0);
+    await click(page, '#btn-fs-add');
+    await waitStatus(page, /Thread extended/);
+    const p1 = (await pieces(page)).find(p => p.id === id), T9 = await topoOf(page, id);
+    check('Apply to piece: the piece itself is 10.50 mm taller, closed (Euler 2), one Undo step', Math.abs(p1.size.y - (h0 + 10.5)) < 0.02 && T9.open === 0 && T9.nm === 0 && T9.flip === 0 && T9.euler === 2 && (await undoDepth(page)) === u0 + 1, JSON.stringify(T9));
+    check('...and the card disarms: no ghost, the piece looks itself again', (await FS(page)).ghosts === 0 && await page.evaluate(id => { const p = state.placed.find(q => q && q.sourceId === id); return p.mesh.material.opacity === 1 || !p.mesh.material.transparent; }, id));
+    await page.click('#btn-undo'); await waitStatus(page, /Undo/);
+    const p2 = (await pieces(page)).find(p => p.id === id);
+    check('one Undo puts the screw back as it was', Math.abs(p2.size.y - h0) < 1e-3, p2.size.y.toFixed(3));
+    // shorter
+    await page.evaluate(id => { const i = state.placed.findIndex(p => p && p.sourceId === id); state.editId = id; if (i >= 0) selectPlaced(i); }, id);
+    await click(page, '#fs-kind-row [data-kind="extend"]');
+    await slide(page, 'turns', -4);
+    await page.waitForFunction(() => /shortened by 4 turns \(7\.00 mm\)/.test(document.getElementById('fs-readout').textContent), null, { timeout: 10000 });
+    check('Turns -4: the preview is 7 mm shorter', true);
+    await typeBox(page, 'turns', -19);                    // past the slider's end: the box takes it, and the extender says why not
+    await page.waitForFunction(() => document.getElementById('fs-readout').classList.contains('is-bad'), null, { timeout: 10000 });
+    rd = await readout(page);
+    check('more turns taken out than the thread has: refused in words, Apply is off', /^Extend thread: the thread has .* full turns - at most \d+ can be taken out/.test(rd.text) && await page.evaluate(() => document.getElementById('btn-fs-add').disabled), rd.text);
+    // a piece with no thread
+    await slide(page, 'turns', 3);
+    const boxId = await loadSTL(page, (function () { const v = [[0, 0, 0], [30, 0, 0], [30, 12, 0], [0, 12, 0], [0, 0, 6], [30, 0, 6], [30, 12, 6], [0, 12, 6]], fc = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]], o = []; fc.forEach(t => t.forEach(i => o.push(...v[i]))); const f2 = file.replace('thumbscrew', 'box'); require('./nso_stl_io.js').writeSTL(f2, new Float32Array(o)); return f2; })());
+    await page.evaluate(id => { const i = state.placed.findIndex(p => p && p.sourceId === id); state.editId = id; if (i >= 0) selectPlaced(i); window.dispatchEvent(new Event('pointerup')); }, boxId);
+    await page.waitForFunction(() => /^Extend thread: the piece is not turned about an axis/.test(document.getElementById('fs-readout').textContent), null, { timeout: 10000 });
+    check('a box selected: "the piece is not turned about an axis", no preview', (await FS(page)).ghosts === 0);
+  }
+
   const errs = logs.filter(l => /\[pageerror\]/.test(l));
   check('no uncaught page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
   if (SHOTS && tileShot) { /* the tiles row, for the record */ }
