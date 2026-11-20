@@ -517,8 +517,10 @@ async function main() {
   check('PINNED, engine not planner: the coupon\'s body is solid infill in NSO where Studio keeps 15 % sparse (NSO solid-only ' + ra.rows['Internal solid infill'].n +
     ' layers; same feature set on ' + ra.equal + ' of ' + ra.aligned + ' - the engine\'s narrow-sparse rule was fitted on 0.6 mm slices)',
     ra.rows['Internal solid infill'].n >= 40 && ra.equal >= 10 && ra.equal <= 40, JSON.stringify(ra.rows['Internal solid infill']));
-  check('PINNED, engine not planner: the arc has no supports in this plan, so its slope is Overhang wall in NSO (' + rb.rows['Overhang wall'].n + ' layers) where Studio holds it up with trees; the engine makes no Gap infill (Studio: ' + rb.rows['Gap infill'].b + ' layers) and no Floating vertical shell (' + rb.rows['Floating vertical shell'].b + ')',
-    rb.rows['Gap infill'].n === 0 && rb.rows['Gap infill'].b > 100 && rb.rows['Floating vertical shell'].n === 0 && rb.rows['Overhang wall'].n >= 15);   // 50 and over while a wall was overhang once its centre hung; 23 now it is overhang where its whole width does (Bambu's)
+  /* Gap infill: none in NSO until 2026-11-20 (Studio's on 133 layers); Classic's gap infill (docs/SLICER.md "Gap infill") lays it on 95 of them */
+  check('PINNED, engine not planner: the arc has no supports in this plan, so its slope is Overhang wall in NSO (' + rb.rows['Overhang wall'].n + ' layers) where Studio holds it up with trees; Gap infill on ' +
+    rb.rows['Gap infill'].both + ' of Studio\'s ' + (rb.rows['Gap infill'].both + rb.rows['Gap infill'].b) + ' layers (' + rb.rows['Gap infill'].n + ' of NSO\'s own); no Floating vertical shell (' + rb.rows['Floating vertical shell'].b + ')',
+    rb.rows['Gap infill'].both >= 80 && rb.rows['Gap infill'].n <= 40 && rb.rows['Floating vertical shell'].n === 0 && rb.rows['Overhang wall'].n >= 15, 'gap ' + JSON.stringify(rb.rows['Gap infill']));   // 50 and over while a wall was overhang once its centre hung; 23 now it is overhang where its whole width does (Bambu's)
   check('the same arc, A1 and P1S: the engine gives one toolpath (the two plans have the same features on every layer), the printers differ in the blocks and speeds only',
     JSON.stringify(results[refs[1].name].rows) === JSON.stringify(results[refs[2].name].rows));
 
