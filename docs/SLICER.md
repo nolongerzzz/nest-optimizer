@@ -962,9 +962,58 @@ Known edges:
 - **The digit 8:** Studio draws it with pairs of 0.36 mm walls while it draws a 0 of like strokes as one
   0.70 wall. It decides by local shape at the 8's junctions. NSO draws both as one wall: 5 % of the 8's
   plastic.
-- **Classic has no Gap infill.** Studio's Classic fills the strip left between walls with variable-width
-  Gap infill: 7,482 on the walls tester and 4,113 on the board, in plastic units of length × width. NSO's
-  Classic does not, so its Classic is up to 8 of 16 samples more than 5 % off there. Arachne needs none.
+- Classic's Gap infill is its own section below ("Gap infill"). Arachne needs none.
+
+---
+
+### Gap infill (`gapFill`, Classic, 2026-11-20)
+
+Studio's Classic fills a strip that no wall loop and no infill covers with **Gap infill**: one line down the
+strip's middle, as wide as the room there. Measured on the owner's two Studio Classic slices of the walls tester
+and the thin board, the projects with their meshes (`fixtures/slicer-arachne-reference.json`, the two Classic
+sets). On by default; `gapFill: false` is the slice as it was. Supports and brims keep it off: their slices were
+fitted on Bambu's support slices.
+
+`perimeters()` and `gapPaths()`:
+1. **An inner loop that would lie on itself is dropped.** Its centres' region is opened by `GAP_LOOP_MIN`
+   (0.72) × a spacing, so a loop is laid only where its two sides stand apart. On the walls tester, a 1.4 mm
+   tube's inner loop, 0.196 between its sides, is dropped for a 0.62 gap line; a 1.6 mm tube's, at 0.396, is
+   kept. That bracket is 0.48–0.97 of the 0.407 spacing, and 0.72 is its middle.
+2. **Infill only where one infill line fits.** The infill region (bead centres) is opened by half the infill
+   line: the 2.4 mm L's 0.50 core stays sparse, as Studio's, and the 1.4 mm tube's 0.34 core becomes a gap line.
+3. **The gap** is the region (less the outer bead's overlap) that no loop's band and no infill's reach covers,
+   opened by the minimum feature size. A piece too thin for any loop is all gap. That is the same whether or
+   not another island on the layer has loops, as Studio prints the board's 0.4 mm bar with Detect thin wall off.
+4. **Each strip** is drawn down its centreline (`medialPaths`), each 0.1 mm step as wide as the room plus the
+   bead overlap (`variableRuns`). The floor is the minimum feature size, not the minimum wall width: Studio's
+   gap lines go down to 0.22.
+5. An opening that takes nothing away keeps the outline as it was, so a part with no gap (the box, the
+   cylinder, the clip) slices byte for byte as before.
+
+| piece | Studio | NSO |
+|---|---|---|
+| 1.0 mm tube / bar | outer loop, gap 0.22 | outer loop, gap 0.24 |
+| 1.2 mm tube, 1.2 mm L | outer loop, gap 0.42 | outer loop, gap 0.44 |
+| 1.4 mm tube | outer loop, gap 0.62 (no inner loop) | the same, gap 0.64 |
+| 2.0 mm L / bar | two loops, gap 0.42 between them | the same |
+| 1.6 mm tube, 0.8 mm | loops, no gap | the same |
+
+Gap infill over whole prints:
+- walls tester: 7,472 against Studio's 7,482 (−0.1 %);
+- thin board: 4,343 against 4,113 (+5.6 %).
+
+`slicer:test` "Classic, measured":
+- every piece Studio gap-fills has NSO's gap infill too, walls and gap within 3 % of Studio's plastic (worst
+  1.4 % on the tester's 5, 1.1 % on the board's 42);
+- 13 of the tester's 16 pieces are within 5 %, and 44 of the board's 50.
+
+**What still differs is Detect thin wall's, not gap infill.**
+- With it on (the walls tester), Studio lays a thin feature as one wall of its own thickness plus the bead
+  overlap: the 0.2 mm tube 0.24, the 0.4 0.44, the 0.6 one 0.63 wall. NSO's thin wall is the bead's fixed
+  0.42, and up to 1.05 beads (0.44) wide: the 0.2 tube is +73 %, and the 0.6 tube is laid as two loops,
+  +31 %.
+- With it off (the board), Studio lays a 0.4–0.6 mm bar as its outer loop narrowed to 0.38. NSO lays the 0.5
+  and 0.6 at the loop's 0.42 (+9.6 %), and the 0.4 as one gap line (−53 %).
 
 ---
 

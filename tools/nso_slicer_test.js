@@ -366,8 +366,10 @@ function frustum(n, r0, r1, z0, z1) {
     // a 0.40 x 20 strip, 1 mm tall: nothing without the flag, one pass with it
     const strip = (wd, len) => prism(rect(0, len, 0, wd), 0, 1);
     const off40 = slice(strip(0.40, 20)), on40 = slice(strip(0.40, 20), { detectThinWall: true });
-    check('a 0.40 strip (under the bead): without Detect thin wall, nothing is drawn (the classic inset keeps nothing)',
-          live(off40).every(L => L.paths.length === 0), live(off40).map(L => L.paths.length).join(' '));
+    /* without the flag the classic inset keeps no loop - and the strip is Gap infill, one line (2026-11-20: Studio prints the thin board's 0.4 mm bar,
+       Detect thin wall off; before gap infill nothing was drawn) */
+    check('a 0.40 strip (under the bead): without Detect thin wall, no wall loop - the strip is one Gap infill line down its middle (no thin-wall pass)',
+          live(off40).every(L => L.paths.length === 1 && L.paths[0].feature === 'Gap infill' && !L.paths[0].thinWall), live(off40).map(L => L.paths.map(q => q.feature).join('+')).join(' '));
     const ps = live(on40).map(L => L.paths);
     const p0 = ps[0][0];
     check('...with it, every layer is ONE open Outer wall pass at the bead\'s width, down the middle (y 0.200), its ends flush: half a bead in (x 0.200 - 19.800)',
@@ -436,7 +438,7 @@ function frustum(n, r0, r1, z0, z1) {
     const forced = live(slice(strip(0.40, 20), { detectThinWall: true }, { detectThinWall: false }));
     check('on for a support (every NSO support carries detect_thin_wall = 1), off for a part, and an object can say either way',
           SL.CONSTANTS.thinWall.supportsOn === true && SL.defaultsFor(0.4).detectThinWall === false &&
-          asSupport.every(L => L.paths.length === 1) && asPart.every(L => L.paths.length === 0) && forced.every(L => L.paths.length === 0));
+          asSupport.every(L => L.paths.length === 1 && L.paths[0].thinWall) && asPart.every(L => L.paths.every(q => !q.thinWall)) && forced.every(L => L.paths.every(q => !q.thinWall)));
     check('the thin-wall constants cite their source: 1.05 x the bead, 0.13 mm the thinnest wall printed',
           SL.CONSTANTS.thinWall.ratio === 1.05 && SL.CONSTANTS.thinWall.minMm === 0.13 && SL.CONSTANTS.thinWall.source.length > 40);
     // the repo meshes, pinned: G-code sha256 (first 16 hex) at both nozzles, flag off and on - the slicer's own defaults.
@@ -454,15 +456,19 @@ function frustum(n, r0, r1, z0, z1) {
     // hinge_knuckle_box @0.4 and shape-torus @0.6 on 2026-11-20, when a narrow sparse strip went solid only where it borders solid infill: Studio keeps
     // a strip between walls sparse down to 0.52 mm (the walls tester's L legs) - the hinge's solid 1183 -> 878 mm2 (its sparse 0 -> 51, and the solid
     // over that sparse an internal Bridge, 27 -> 106), the torus's 201 -> 96.
+    // ...and on 2026-11-20 again, when Classic began to lay Studio's Gap infill (gapFill: an inner loop whose sides would lie on each other dropped
+    // for a gap line, a core too narrow for infill a gap line, any strip no loop or infill covers a gap line): the sphere @0.6, the hinge, torus and
+    // tube at both nozzles, the coupon @0.6. The tube's 1.38 mm wall @0.6 gains a 0.25 line in the 0.19 strip its two outer loops left empty (+19 %);
+    // @0.4 its inner loop, laid over itself, is a gap line (-13 %). The box, the cylinder and the top clip are byte for byte as they were.
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
-      'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
-      'fixtures/hinge_knuckle_box.stl': ['b72dd95c195c3f92', '0156b77d8893373f'],
-      'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'dd9573c9c4d8cc62'],
-      'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
+      'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '5626e62da2acc517'],
+      'fixtures/hinge_knuckle_box.stl': ['17eac969ce3c23ad', 'e6c71e16e65ebe31'],
+      'fixtures/quick/shape-torus.stl': ['b684b84ac3ade45a', '5139236ab8c20e4c'],
+      'fixtures/quick/shape-tube.stl': ['1899158d936a2cb8', '8082b91666eac726'],
       'fixtures/supports/top_clip_x2.stl': ['f79c02b856b6974f', '895ad934f185710a'],
-      'fixtures/supports/top_clip_x2_coupon.stl': ['42466b39965e65be', '0b074e76435c796e']
+      'fixtures/supports/top_clip_x2_coupon.stl': ['42466b39965e65be', '196d5db127e28341']
     };
     const bad = [];
     let n = 0;
@@ -555,18 +561,29 @@ function frustum(n, r0, r1, z0, z1) {
     const REF = JSON.parse(require('fs').readFileSync(path.join(ROOT, 'fixtures', 'slicer-arachne-reference.json'), 'utf8'));
     const plen = p => { const q = p.closed ? p.pts.concat([p.pts[0]]) : p.pts; let l = 0; for (let i = 0; i + 1 < q.length; i++) l += Math.hypot(q[i + 1][0] - q[i][0], q[i + 1][1] - q[i][1]); return l; };
     for (const set of REF.sets) {
-      const o = SL.defaultsFor(0.4, Object.assign({}, set.settings, { wallGenerator: 'arachne', firstLayerMm: set.settings.layerMm, topShellLayers: 0, bottomShellLayers: 0,
+      const gen = set.generator || 'arachne';
+      const o = SL.defaultsFor(0.4, Object.assign({}, set.settings, { wallGenerator: gen, firstLayerMm: set.settings.layerMm, topShellLayers: 0, bottomShellLayers: 0,
         topShellThicknessMm: 0, bottomShellThicknessMm: 0, onlyOneWallTop: false }));
       const rows = set.samples.map((smp) => {
         const cs = new wasm.CrossSection(smp.polys, 'Positive'), m3 = cs.extrude(3 * set.settings.layerMm), mesh = m3.getMesh(), np = mesh.numProp, V = mesh.vertProperties, T = mesh.triVerts, soup = [];
         for (let i = 0; i < T.length; i++) soup.push(V[T[i] * np], V[T[i] * np + 1], V[T[i] * np + 2]);
         cs.delete(); m3.delete();
         const r = SL.sliceObjects([{ name: 'piece', soup }], o, wasm), L = r.objects[0].layers[1];
-        let plastic = 0, len = 0, wl = 0;
-        L.paths.filter((p) => /wall/.test(p.feature)).forEach((p) => { const l = plen(p), w = p.width * set.flow; plastic += l * w; len += l; wl += l * w; });
+        let plastic = 0, len = 0, wl = 0, gap = 0;
+        L.paths.filter((p) => /wall|Gap infill/.test(p.feature)).forEach((p) => { const l = plen(p), w = p.width * set.flow; plastic += l * w; len += l; wl += l * w; if (p.feature === 'Gap infill') gap += l * w; });
         const sLen = Object.values(smp.walls).reduce((a, b) => a + b, 0), sW = Object.entries(smp.walls).reduce((a, [w, l]) => a + +w * l, 0) / sLen;
-        return { d: plastic / smp.plastic - 1, dw: wl / len - sW, w: wl / len, sW };
+        return { d: plastic / smp.plastic - 1, dw: wl / len - sW, w: wl / len, sW, gap, sGap: smp.gap || 0, size: smp.polys[0].length };
       });
+      if (gen === 'classic') {
+        /* Classic: every piece Studio fills with Gap infill, within 3 % with it; the rest, its thin-wall pieces, as many within 5 % as before */
+        const g = rows.filter((r) => r.sGap > 0.5), gw = g.reduce((a, r) => Math.max(a, Math.abs(r.d)), 0);
+        check(set.name + ' (' + set.file + '): every one of its ' + g.length + ' pieces with Studio\'s Gap infill has NSO\'s too, walls and gap within 3 % of Studio\'s plastic',
+              g.length > 0 && g.every((r) => r.gap > 0) && gw < 0.03, 'worst ' + (gw * 100).toFixed(1) + ' %; ' + g.map((r) => (r.d * 100).toFixed(1)).join(' '));
+        const within = rows.filter((r) => Math.abs(r.d) < 0.05).length, floor = /tester/.test(set.name) ? 12 : 44;
+        check('...and ' + within + ' of its ' + rows.length + ' pieces within 5 % (at least ' + floor + '; the rest are Detect thin wall\'s: docs/SLICER.md "Gap infill")', within >= floor,
+              rows.filter((r) => Math.abs(r.d) >= 0.05).map((r) => (r.d * 100).toFixed(1) + ' %').join(' '));
+        continue;
+      }
       const worst = rows.reduce((a, r) => Math.max(a, Math.abs(r.d)), 0), worstW = rows.reduce((a, r) => Math.max(a, Math.abs(r.dw)), 0);
       check(set.name + ' (' + set.file + ', Studio ' + set.studio + ', flow ' + set.flow + '): every one of its ' + rows.length + ' test pieces\' walls within 2 % of Studio\'s plastic, their mean width within 0.015 mm',
             worst < 0.02 && worstW < 0.015, 'worst ' + (worst * 100).toFixed(1) + ' % / ' + worstW.toFixed(3) + ' mm; ' + rows.map((r) => (r.d * 100).toFixed(1)).join(' '));

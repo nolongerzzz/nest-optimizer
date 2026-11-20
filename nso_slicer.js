@@ -294,6 +294,7 @@
       // (arachneWalls). Classic unless asked, as both real profiles. The six Arachne levers are Studio's, with its defaults; the four
       // given as a fraction are of the nozzle's diameter, as Studio's percentages are.
       wallGenerator: 'classic',
+      gapFill: true,                       // Studio's Gap infill: a strip no wall loop or infill covers is one centreline as wide as its room (perimeters / gapPaths); false: left empty, as before 2026-11-20
       wallTransitionAngleDeg: 10,          // wall_transition_angle: a wedge opening wider than this gets no middle bead
       wallTransitionFilterMargin: 0.25,    // wall_transition_filter_deviation: a bead's width changes only when the room moves more than this
       wallTransitionLength: 1,             // wall_transition_length: the length a bead's width follows the room over
@@ -1730,11 +1731,20 @@
           from = keep;
         }
       }
-      var next = g.offset(from, -(se / 2 + si / 2));
+      /* GAP FILL (o.gapFill, Studio's Classic): an inner loop is laid only where its two sides stand apart - its centres' region opened by
+         GAP_LOOP_MIN of a spacing; where they would lie on each other the loop is dropped and the strip is gap infill (the walls tester: a
+         1.4 mm tube's inner loop, 0.196 between its sides, dropped for a 0.62 gap line; a 1.6 mm tube's, 0.396, kept) */
+      /* (an opening that takes nothing away keeps the loop as it was: its outline, and so its seam, unmoved) */
+      var openLoop = function (x) {
+        if (!o.gapFill || g.isEmpty(x)) return x;
+        var y = g.offset(g.offset(x, -GAP_LOOP_MIN * si / 2), GAP_LOOP_MIN * si / 2);
+        return Math.abs(g.area(y) - g.area(x)) < 1e-6 ? x : y;
+      };
+      var next = openLoop(g.offset(from, -(se / 2 + si / 2)));
       for (var k = 1; k < o.wallLoops && !g.isEmpty(next); k++) {
         loops.push({ depth: k, cs: next });
         cur = next; lastSpacing = si; count = k + 1;
-        next = g.offset(cur, -si);
+        next = openLoop(g.offset(cur, -si));
       }
     }
     // Infill boundary (bead CENTRES): the innermost loop moved in by the
@@ -1747,7 +1757,44 @@
       var outerOnly = g.diff(g.offset(loops[0].cs, -se * keepIn), g.offset(keep, -si * (1 - keepIn)));
       innerEdge = count > 1 ? g.union(innerEdge, outerOnly) : outerOnly;
     }
-    return { loops: loops, wallCount: count, infillRegion: innerEdge };
+    /* GAP INFILL: the infill goes only where its region is at least one infill line across (opened by half a line: the walls tester's 2.4 mm L
+       keeps its 0.50 core sparse, the 1.4 mm tube's 0.34 core is a gap line); what no loop and no infill covers is gap infill - one line down
+       each strip's middle, as wide as the room plus the bead overlap (drawn by the caller, gapPaths) */
+    var gaps = null;
+    /* (a piece too thin for any loop is all gap: the same whether or not another island on the layer has loops) */
+    if (o.gapFill && !keep) {
+      var okFill = g.offset(g.offset(innerEdge, -o.infillWidthMm / 2), o.infillWidthMm / 2);
+      if (Math.abs(g.area(okFill) - g.area(innerEdge)) < 1e-6) okFill = innerEdge;       /* nothing too narrow: the region as it was */
+      innerEdge = okFill;
+      var bands = loops.map(function (lp, i) { var sp = i === 0 ? se : si; return g.diff(g.offset(lp.cs, sp / 2), g.offset(lp.cs, -sp / 2)); });
+      var covered = g.unionAll(bands.concat([g.offset(okFill, lastSpacing * keepIn)]));
+      var minGap = ofNozzle(o, o.minFeatureSize, 0.25);
+      gaps = g.diff(g.offset(region, -(we - se) / 2), covered);
+      gaps = g.offset(g.offset(gaps, -minGap / 2), minGap / 2);
+      if (g.isEmpty(gaps)) gaps = null;
+    }
+    return { loops: loops, wallCount: count, infillRegion: innerEdge, gaps: gaps };
+  }
+
+  /* An inner loop is kept where its centres' region is at least this share of a spacing across - FITTED between the walls tester's tubes:
+     0.196 between an inner loop's sides is dropped, 0.396 kept (0.48 .. 0.97 of the 0.407 spacing); the middle of that bracket. */
+  var GAP_LOOP_MIN = 0.72;
+
+  /**
+   * Gap infill for a layer: one centreline down each strip of `gaps`, as wide as the room there plus the bead overlap (Studio's: a 1.0 mm tube's
+   * strip 0.22, a 1.2 mm L's 0.42, a 2.0 mm L's middle 0.42), never narrower than the minimum feature size -> [{ feature, width, closed, pts }].
+   */
+  function gapPaths(g, gaps, region, h, o) {
+    if (!gaps || g.isEmpty(gaps)) return [];
+    var fat = o.innerWallWidthMm - spacingOf(o.innerWallWidthMm, h), out = [], piece = g.polys(region), minGap = ofNozzle(o, o.minFeatureSize, 0.25);
+    g.parts(gaps).forEach(function (gp) {
+      var polys = g.polys(gp), med = medialPaths(polys, o.innerWallWidthMm, []);
+      if (!med) return;
+      med.forEach(function (pa) {
+        variableRuns(pa, polys, piece, fat, o, false, minGap).forEach(function (r) { out.push({ feature: 'Gap infill', width: r.width, closed: false, pts: r.pts, gap: true }); });
+      });
+    });
+    return out;
   }
 
   // ===========================================================================
@@ -2368,11 +2415,11 @@
    * in, fat the bead's overlap: a step whose room is bounded by beads takes it on (a bead between beads), one bounded by the piece's own
    * outline does not, and is that stretch's outer wall. centreFill: the piece has loops (the angle rule applies between them).
    */
-  function variableRuns(pa, polys, piece, fat, o, centreFill) {
+  function variableRuns(pa, polys, piece, fat, o, centreFill, floorMm) {
     var pts = pa.closed ? pa.pts.concat([pa.pts[0]]) : pa.pts;
     /* Minimum wall width is a share of the inner wall's line, not the nozzle: Studio widens the walls tester's 0.20 mm tube to 0.38 = 85 % of
        its 0.45 inner wall (of the 0.4 nozzle it would be 0.34). The minimum feature size stays the nozzle's, as Studio states it. */
-    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25), minBead = (o.minBeadWidth != null && isFinite(o.minBeadWidth) ? o.minBeadWidth : 0.85) * o.innerWallWidthMm;
+    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25), minBead = floorMm != null ? floorMm : (o.minBeadWidth != null && isFinite(o.minBeadWidth) ? o.minBeadWidth : 0.85) * o.innerWallWidthMm;
     var margin = ofNozzle(o, o.wallTransitionFilterMargin, 0.25), tLen = ofNozzle(o, o.wallTransitionLength, 1);
     var wMax = 2 * o.innerWallWidthMm, angle = o.wallTransitionAngleDeg != null ? o.wallTransitionAngleDeg : 10;
     /* the path cut into short steps, the room at each step's middle */
@@ -2638,7 +2685,8 @@
         var lightningAt = null;                                   /* lightning: each layer's sparse region, by layer */
         /* A SUPPORT IS HOLLOW, as its export says (SHEET.slicerSettings: wall_loops 1, sparse_infill_density 0%) and as Bambu's own tree is: one wall
            round the trunk and no filler inside it. The shells (the first layers, the top under a sheet) stay the profile's. */
-        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: o.supportWallLoops >= 1 ? Math.round(o.supportWallLoops) : CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity, narrowSparseMm: 0, minSparseAreaMm2: 0 }) : o;
+        /* ...and no gap infill: a support's slice was fitted on Bambu's support slices as it was (its sheets are thin walls, its trunks one loop) */
+        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: o.supportWallLoops >= 1 ? Math.round(o.supportWallLoops) : CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity, narrowSparseMm: 0, minSparseAreaMm2: 0, gapFill: false }) : o;
         var TT = P.role === 'support' ? CONSTANTS.supportWalls.topShellLayers : T, BB = P.role === 'support' ? CONSTANTS.supportWalls.bottomShellLayers : B;
         if (P.role === 'brim') {
           /* a brim built with the supports (brimFor): one layer, its section printed as the brim's own loops, nothing else */
@@ -2723,6 +2771,8 @@
             });
           });
 
+          /* gap infill after the walls, as Studio prints it */
+          if (per.gaps) { var gp = gapPaths(g, per.gaps, region, h, o); gp.forEach(function (pa) { L.paths.push(pa); }); L.gapPaths = gp.length; }
           if (thin) {
             thin.paths.forEach(function (pa) {
               L.paths.push({ feature: 'Outer wall', width: o.outerWallWidthMm, closed: pa.closed, pts: pa.pts, thinWall: true });
