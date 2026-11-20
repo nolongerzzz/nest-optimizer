@@ -90,6 +90,8 @@
      layer by "G1 X0 Y{CY} F18000" then "G1 X-13.0 F3000"), and the wipe is the start block's "wipe and shake", all three passes of it
      (two left a tail of TPU on the part: the owner's prints of 2026-11-14). {CY} is the plate's
      first-layer centre, as the hook has it. The P1S's chute is behind the bed and has its own moves: not written yet. */
+  /* the printers whose Studio writes the objects still to print (M639; see the planner's "THE OBJECTS STILL TO PRINT") */
+  var REMAINING = { 'p1s-0.4': true };
   var PARK = {
     'a1mini-0.4': {
       go: ['G1 X0 Y{CY} F18000', 'G1 X-13.5 F3000'],
@@ -1094,6 +1096,23 @@
       var m = /^@M73 (\d+)$/.exec(l);
       put(m ? { at: +m[1] } : l);
     });
+    /* THE OBJECTS STILL TO PRINT (Studio 02.09.01.70 on the P1S, the owner's eight-part desk hanger, 2026-11-20): with more than one
+       object on the plate Studio writes the set still to print, as M624's mask - after the start block (every object), at the layer
+       change where an object has printed its last layer (after that layer's M625), and empty after the last one. Not yet seen in an
+       A1 mini slice, so written for the P1S only. */
+    var remainingOn = labelled && REMAINING[Pr.id];
+    var lastPj = res.objects.map(function (ob) {
+      for (var q = printing.length - 1; q >= 0; q--) { var Lq = ob.layers[printing[q]]; if (Lq && Lq.paths && Lq.paths.length) return q; }
+      return -1;
+    });
+    var remainingAt = function (pj0) { var r = []; lastPj.forEach(function (q, oi) { if (q >= pj0) r.push(oi); }); return r; };
+    var remaining = null;
+    var putRemaining = function (list) {
+      put('; remaining object ids: ' + list.map(function (oi) { return ids[oi]; }).join(','));
+      put('M639 ' + objectMask(list));
+      remaining = list;
+    };
+    if (remainingOn) putRemaining(remainingAt(0));          /* the start block ends at '; MACHINE_START_GCODE_END'; the filament's start follows */
     thaw(withFilamentStart(Pr.afterStart, opts.filamentStart), vals, flags).forEach(function (l) { put(l); });
     var bodyFrom = W.lines.length;
 
@@ -1223,6 +1242,7 @@
       } else {
         flushRetract();
         closeObject();
+        if (remainingOn) { var nowR = remainingAt(pj); if (nowR.length < remaining.length) putRemaining(nowR); }
       }
       put('; layer num/total_layer_count: ' + layerNo + '/' + totalLayers);
       put('; update layer progress');
@@ -1370,6 +1390,7 @@
     accel(S.accel.travel);
     if (R.hop > 0) spiral(top + R.hop, false);
     closeObject();
+    if (remainingOn) putRemaining([]);
     var bodyTo = W.lines.length;
     // the time, from the lines themselves
     var est = estimateLines(W.lines.slice(bodyFrom, bodyTo), { jerk: S.jerk, accel: S.accel.def });

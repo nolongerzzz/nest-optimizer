@@ -837,7 +837,7 @@ async function main() {
     for (const [label, rel, fid, cfgT, prn] of [
       ['CR-TPU on the P1S', 'fixtures/print-planner/p1s-0.4/studio-owner-cr-tpu-squishy.slim.gcode.3mf', 'cr-tpu', p1sCfg, p1sPrinter],
       ['ELEGOO PETG on the A1 mini', 'fixtures/print-planner/a1mini-0.4/studio-owner-elegoo-petg.slim.gcode.3mf', 'elegoo-petg', tpl, a1],
-      ['ELEGOO PETG on the P1S', 'fixtures/print-planner/p1s-0.4/studio-owner-elegoo-petg.slim.gcode.3mf', 'elegoo-petg', p1sCfg, p1sPrinter]]) {
+      ['ELEGOO PETG on the P1S (Generic PETG as it is: it printed better than the owner\'s ELEGOO-PETG preset)', 'fixtures/print-planner/p1s-0.4/studio-owner-generic-petg.slim.gcode.3mf', 'elegoo-petg', p1sCfg, p1sPrinter]]) {
       const st = await L.bambuSlice(rel), sc = st.config, one = k => Array.isArray(sc[k]) ? sc[k][0] : sc[k];
       const f = PRINT.FILAMENTS[fid], keys = PRINT.filamentKeys(cfgT, fid);
       const badK = Object.keys(keys).filter(k => k !== 'filament_settings_id' && String(one(k)) !== String(keys[k]));
@@ -861,7 +861,8 @@ async function main() {
       check('...NSO\'s start block with that slice\'s numbers is Studio\'s, all ' + want.length + ' lines (' + S.filament.type + ', ' + S.filament.maxVolumetric + ' mm^3/s, ' + S.temp.nozzle + ' C, bed ' + S.temp.bedInitial + '/' + S.temp.bed + ')',
         want.length === got.length && off < 0, off >= 0 ? 'line ' + off + ': ' + JSON.stringify([want[off], got[off]]) : want.length + ' / ' + got.length);
       const vt = prn.afterStart.findIndex(l => typeof l === 'string' && /^;VT\d/.test(l));
-      const wantAfter = noM73(sl.slice(iM + 1, iL)), gotAfter = noM73(PL.thaw(f.start(Math.max(S.temp.bed, S.temp.bedInitial), cfgT).concat(prn.afterStart.slice(vt)), v, {}));
+      /* (a plate of several objects: Studio's list of the objects still to print comes first - checked below, 5a's last checks) */
+      const wantAfter = noM73(sl.slice(iM + 1, iL)).filter(l => !/^; remaining object ids:|^M639 /.test(l)), gotAfter = noM73(PL.thaw(f.start(Math.max(S.temp.bed, S.temp.bedInitial), cfgT).concat(prn.afterStart.slice(vt)), v, {}));
       check('...and so is the filament\'s own start G-code after it', JSON.stringify(wantAfter) === JSON.stringify(gotAfter), JSON.stringify([wantAfter, gotAfter]));
       const fb = PRINT.filamentBase(cfgT, fid);
       check('...the card\'s rows start at the preset: ' + fb.nozzleTemp + ' C (first layer ' + fb.firstTemp + '), bed ' + fb.bedTemp + ', ' + fb.maxFlow + ' mm^3/s, flow ratio ' + fb.flowRatio,
@@ -875,6 +876,38 @@ async function main() {
         out.ok && gc('filament_type') === one('filament_type') && gc('filament_settings_id').replace(/"/g, '') === one('filament_settings_id') && gc('nozzle_temperature') === one('nozzle_temperature') &&
           gc('textured_plate_temp') === one('textured_plate_temp') && g.indexOf('; filament start gcode\n' + f.start(Math.max(S.temp.bed, S.temp.bedInitial), cfgT).slice(1).join('\n')) >= 0, out.reason);
     }
+  }
+
+  {
+    /* THE OBJECTS STILL TO PRINT (M639): Studio 02.09.01.70 on the P1S, the owner's eight-part desk hanger (2026-11-20, its first lines
+       in fixtures/print-planner/p1s-0.4/studio-owner-generic-petg.slim.gcode.3mf): after the start block, the objects still to print as
+       M624's mask; again at the layer change where some have printed their last layer; empty after the last. */
+    const st = await L.bambuSlice('fixtures/print-planner/p1s-0.4/studio-owner-generic-petg.slim.gcode.3mf');
+    const sl = st.gcode.split('\n'), iM = sl.indexOf('; MACHINE_START_GCODE_END');
+    const firstLayer = sl.find(l => /^M624 /.test(l));
+    check('Studio\'s slice of a plate of several objects: "; remaining object ids: <the ids>" and M639 with the mask its first layer\'s M624 has, right after the start block',
+      /^; remaining object ids: 5152,5207,5259,5293$/.test(sl[iM + 1]) && sl[iM + 2] === 'M639 DwAAAAAAAAA=' && firstLayer === 'M624 DwAAAAAAAAA=', JSON.stringify(sl.slice(iM, iM + 3)));
+    /* NSO: two pieces of different heights on the P1S */
+    const vp = asViewportPieces(plate.objs.slice(0, 1), a1.bed)[0].soup;     /* the coupon, centred on the bed's middle */
+    let zMin = Infinity, zMax = -Infinity, xMin = Infinity, xMax = -Infinity;
+    for (let i = 0; i < vp.length; i += 3) { xMin = Math.min(xMin, vp[i]); xMax = Math.max(xMax, vp[i]); zMin = Math.min(zMin, vp[i + 2]); zMax = Math.max(zMax, vp[i + 2]); }
+    const shift = (xMax - xMin) / 2 + 3, tallSoup = Float32Array.from(vp), lowSoup = Float32Array.from(vp);
+    for (let i = 0; i < vp.length; i += 3) { tallSoup[i] -= shift; lowSoup[i] += shift; lowSoup[i + 2] = zMin + (vp[i + 2] - zMin) * 0.5; }   /* side by side; the right one half as tall */
+    const two = PRINT.pieceObjects([{ name: 'tall', soup: tallSoup }, { name: 'low', soup: lowSoup }], p1sPrinter.bed);
+    const rb = await PRINT.build(two, { config: p1sCfg, printer: p1sPrinter }, { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg)) });
+    const g = rb.ok ? L.text(await L.R.openZip(rb.bytes).read('Metadata/plate_1.gcode')).split('\n') : [];
+    const at = g.map((l, i) => /^; remaining object ids:/.test(l) ? i : -1).filter(i => i >= 0);
+    const zOf = i => { for (let j = i; j >= 0; j--) if (/^; Z_HEIGHT: /.test(g[j])) return +g[j].slice(11); return 0; };
+    const ids = rb.ok ? (/^; remaining object ids: (.*)$/.exec(g[at[0]]) || [])[1].split(',') : [];
+    check('NSO, two pieces on the P1S, one half as tall: the list after the start block (both), at the layer change after the low one\'s last layer (the tall one, its M625 just before), and empty after the last; each with its mask',
+      rb.ok && at.length === 3 && g[at[0] - 1] === '; MACHINE_START_GCODE_END' && g[at[0] + 1] === 'M639 AwAAAAAAAAA=' && ids.length === 2 &&
+        g[at[1]] === '; remaining object ids: ' + ids[0] && g[at[1] + 1] === 'M639 AQAAAAAAAAA=' && g[at[1] - 1] === 'M625' && /^; layer num\//.test(g[at[1] + 2]) &&
+        Math.abs(zOf(at[1]) - (zMax - zMin) * 0.5) < 0.6 &&
+        g[at[2]] === '; remaining object ids: ' && g[at[2] + 1] === 'M639 AAAAAAAAAAA=' && g.indexOf('; MACHINE_END_GCODE_START') > at[2],
+      JSON.stringify([rb.reason, at.map(i => [zOf(i), g[i - 1], g[i], g[i + 1]])]));
+    const ra = await PRINT.build(PRINT.pieceObjects([{ name: 'tall', soup: tallSoup }, { name: 'low', soup: lowSoup }], a1.bed), { config: tpl, printer: a1 }, { settings: Object.assign({}, PRINT.settingsFromConfig(tpl)) });
+    const ga = ra.ok ? L.text(await L.R.openZip(ra.bytes).read('Metadata/plate_1.gcode')) : '';
+    check('...not on the A1 mini: no Studio slice of it has shown the list yet', ra.ok && !/M639|remaining object ids/.test(ga), ra.reason);
   }
 
   // ===========================================================================

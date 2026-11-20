@@ -170,11 +170,12 @@
   // fixtures/print-planner/p1s-0.4/studio-owner-cr-tpu-squishy.slim.gcode.3mf): 220 C, first layer too, bed 30 on every plate,
   // 3 mm^3/s, the fan 40 - 65 %, overhangs past 50 % at 70 %. The A1 mini keeps what its prints found (215, first layer 235).
   //
-  // ELEGOO PETG (the owner's own Studio presets, both slices of 2026-11-18: fixtures/print-planner/<printer>/studio-owner-elegoo-petg.slim.gcode.3mf).
-  // The keys are Bambu Studio's Generic PETG (fdm_filament_pet) with the owner's edits: 245 C, first layer too, on both printers. On the
-  // A1 mini (ELEGOO-PETG-A1mini, from Generic PETG @BBL A1M) 10 mm^3/s and flow ratio 0.95; on the P1S (ELEGOO-PETG, from Generic PETG)
-  // 12 mm^3/s, flow ratio 1, and the textured plate at 75 after a first layer at 70. The fan is off for 3 layers, then 40 - 90 %
-  // (overhangs past 10 % at 90), no aux fan; the chamber fan at 180 over a 60 C bed, 255 over 80.
+  // ELEGOO PETG (an ELEGOO spool; the owner's Studio slices: fixtures/print-planner/a1mini-0.4/studio-owner-elegoo-petg.slim.gcode.3mf,
+  // fixtures/print-planner/p1s-0.4/studio-owner-generic-petg.slim.gcode.3mf). The keys are Bambu Studio's Generic PETG (fdm_filament_pet)
+  // as it is, untouched: 255 C, first layer too, 12 mm^3/s, flow ratio 0.95, bed 70 - on the P1S that printed better than the owner's
+  // ELEGOO-PETG preset (245 C, flow ratio 1, bed 75: their second P1S PETG print, 2026-11-20). The A1 mini keeps the owner's
+  // ELEGOO-PETG-A1mini preset (from Generic PETG @BBL A1M: 245 C, 10 mm^3/s), not yet printed against Generic. Both: the fan off for 3
+  // layers, then 40 - 90 % (overhangs past 10 % at 90), no aux fan; the chamber fan at 180 over a 60 C bed, 255 over 80.
   var isA1Mini = function (config) { return /A1 mini/i.test(cfgRaw(config, 'printer_model') + cfgRaw(config, 'printer_settings_id')); };
   var TPU_START = function (bed, config) {
     var fan = bed > 35 ? 'M106 P3 S255' : bed > 30 ? 'M106 P3 S180' : null;
@@ -227,21 +228,22 @@
       id: 'elegoo-petg', label: 'ELEGOO PETG',
       keys: {
         filament_type: 'PETG', filament_ids: 'GFG99', filament_vendor: 'Generic',
-        nozzle_temperature: '245', nozzle_temperature_initial_layer: '245', nozzle_temperature_range_low: '220', nozzle_temperature_range_high: '270',
+        nozzle_temperature: '255', nozzle_temperature_initial_layer: '255', nozzle_temperature_range_low: '220', nozzle_temperature_range_high: '270',
         cool_plate_temp: '0', cool_plate_temp_initial_layer: '0', eng_plate_temp: '70', eng_plate_temp_initial_layer: '70',
         hot_plate_temp: '70', hot_plate_temp_initial_layer: '70', textured_plate_temp: '70', textured_plate_temp_initial_layer: '70',
         supertack_plate_temp: '70', supertack_plate_temp_initial_layer: '70',
-        filament_max_volumetric_speed: '12', filament_flow_ratio: '1',
+        filament_max_volumetric_speed: '12', filament_flow_ratio: '0.95',
         filament_density: '1.27', temperature_vitrification: '60', filament_adhesiveness_category: '300', filament_cost: '30',
         close_fan_the_first_x_layers: '3', additional_cooling_fan_speed: '0', close_additional_fan_first_x_layers: '3'
       },
       cooling: { overhang_fan_threshold: '10%', overhang_fan_speed: '90', fan_min_speed: '40', fan_cooling_layer_time: '30', fan_max_speed: '90',
                  slow_down_layer_time: '12', slow_down_min_speed: '20' },
       printerKeys: function (config) {
-        return isA1Mini(config) ? { filament_max_volumetric_speed: '10', filament_flow_ratio: '0.95' } : { textured_plate_temp: '75' };
+        /* the A1 mini: the owner's ELEGOO-PETG-A1mini preset; the P1S: Generic PETG as it is */
+        return isA1Mini(config) ? { nozzle_temperature: '245', nozzle_temperature_initial_layer: '245', filament_max_volumetric_speed: '10' } : {};
       },
       start: PETG_START,
-      studioId: function (config) { return isA1Mini(config) ? 'ELEGOO-PETG-A1mini' : 'ELEGOO-PETG'; }
+      studioId: function (config) { return isA1Mini(config) ? 'ELEGOO-PETG-A1mini' : 'Generic PETG'; }
     }
   };
   /* the rows that are a filament's: each the config key the planner reads (the bed's is its plate's, bedKeyOf) */

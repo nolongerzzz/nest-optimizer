@@ -113,8 +113,16 @@ it), CONFIG_BLOCK (Studio's, with NSO's cooling keys put in), EXECUTABLE_BLOCK,
 - **The M624 mask** is one bit per object, by its place in the plate's label
   order, as a 64-bit little-endian integer in base64: `AQAAAAAAAAA=`,
   `AgAAAAAAAAA=`, both `AwAAAAAAAAA=` (measured on the owner's two-object slice;
-  the third, `BAAAAAAAAAA=`, follows the same law and is not confirmed - no
-  Studio slice with three objects is in the repo).
+  confirmed past two by their four-object P1S desk hanger of 2026-11-20: all four
+  `DwAAAAAAAAA=`, the second and fourth `CgAAAAAAAAA=`).
+- **The objects still to print (P1S).** On a plate of several objects Studio
+  02.09.01.70 on the P1S writes `; remaining object ids: <ids>` and `M639 <mask>`
+  (M624's mask of those objects): right after `; MACHINE_START_GCODE_END`, again at
+  the layer change where some object has printed its last layer (after that
+  layer's closing `M625`, before `; layer num`), and once more, empty
+  (`M639 AAAAAAAAAAA=`), after the last object closes. NSO writes the same
+  (`REMAINING` in `nso-print-planner.js`). Not on the A1 mini: no Studio slice
+  of it has shown the list yet. Checked in `print-slice-check` 5a.
 - **The hook** (timelapse photo, nozzle-clog check) goes after the first run of
   walls in a layer, inside the union mask. Each of timelapse / clog / spaghetti
   can be left out per profile (`hooks: { timelapse: false }`); the default is the

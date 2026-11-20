@@ -57,16 +57,23 @@ When sending: untick the AMS, and turn off flow dynamics calibration (Bambu's ad
 
 ### ELEGOO PETG
 
-The owner's own Studio presets (their slices of 2026-11-18, kept slim as
-`fixtures/print-planner/<printer>/studio-owner-elegoo-petg.slim.gcode.3mf`), both from Studio's
+An ELEGOO spool, printed from the owner's Studio slices (kept slim as
+`fixtures/print-planner/a1mini-0.4/studio-owner-elegoo-petg.slim.gcode.3mf` and
+`fixtures/print-planner/p1s-0.4/studio-owner-generic-petg.slim.gcode.3mf`), both from Studio's
 Generic PETG (`fdm_filament_pet`): printable 220 - 270 C, density 1.27.
 
-| | A1 mini (`ELEGOO-PETG-A1mini`, from `Generic PETG @BBL A1M`) | P1S (`ELEGOO-PETG`, from `Generic PETG`) |
+| | A1 mini (`ELEGOO-PETG-A1mini`, from `Generic PETG @BBL A1M`) | P1S (`Generic PETG`, untouched) |
 |---|---|---|
-| Nozzle | 245 C, first layer too (owner's) | 245 C, first layer too (owner's) |
+| Nozzle | 245 C, first layer too (owner's) | 255 C, first layer too |
 | Max flow | 10 mm^3/s (owner's) | 12 mm^3/s |
-| Flow ratio | 0.95 | 1 (owner's) |
-| Bed (textured) | 70 | 70 the first layer, then 75 (owner's) |
+| Flow ratio | 0.95 | 0.95 |
+| Bed (textured) | 70 | 70 |
+
+**The P1S went back to Generic PETG (2026-11-20).** The owner's second P1S PETG print, a desk
+hanger on Studio's Generic PETG as it is, came out a little better than their ELEGOO-PETG preset
+(245 C, flow ratio 1, bed 75 after a 70 first layer), so the P1S now prints Studio's own values and
+the file names `Generic PETG`. The A1 mini keeps the owner's preset until it has printed PETG
+against Generic too.
 
 Both: the fan off for the first 3 layers, then 40 - 90 % between a 30 s and a 12 s layer, slowing to
 20 mm/s at most; overhangs past 10 % at 90 %; no aux fan. The start G-code turns the chamber fan to
