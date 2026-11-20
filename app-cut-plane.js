@@ -95,7 +95,8 @@ function cutPlaneRun(m, info) {
     state.editId = snap.source.id;
     return fail('Plane failed to make the piece - original restored');
   }
-  pushUndo({ type: 'splitReplace', source: snap.source, newIds: [id], siblings: snap.siblings, editId: prevEditId, cutT: prevCutT });
+  pushUndo({ type: 'splitReplace', source: snap.source, newIds: [id], siblings: snap.siblings, editId: prevEditId, cutT: prevCutT,
+            cutMemo: typeof cutBladeMemo === 'function' ? cutBladeMemo() : null });
 
   const made = state.models.find(function (x) { return x.id === id; });
   state.selectedIndex = -1;

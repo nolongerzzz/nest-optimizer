@@ -671,7 +671,10 @@ function undoLastStep() {
       state.editId = entry.editId;
     }
     if (entry.cutT != null) state.cutT = entry.cutT;
-    state.cutterOpen = false;
+    /* A cut made with the Cut card open leaves it open (entry.cutMemo, app-cut.js cutBladeMemo): the piece is back and the blade goes
+       back on it where it stood. A cut made with the card shut still closes it, as before. */
+    const keepCutter = !!(entry.cutMemo && entry.source);
+    state.cutterOpen = keepCutter;
     state.previewMesh = null;
     state.selectedIndex = -1;
     removeCutHelper();
@@ -685,6 +688,7 @@ function undoLastStep() {
     updateAdjustUI();
     updateUndoBtn();
     setStatus('Undo: ' + state.models.length + ' piece(s) on plate');
+    if (keepCutter && typeof cutRestoreAfterUndo === 'function') cutRestoreAfterUndo(entry.cutMemo, entry.source.id);
     return;
   }
   if (entry.type === 'joinReplace') {
@@ -2213,8 +2217,9 @@ function placeNewModel(id, name, options) {
   /* Cut's armed cutter shows one piece alone (showEditPreview empties the plate).
      Crop's card is armed with no blade and keeps the plate: a piece imported while
      it is open - the cutter for Piece or Outline - lands on the plate beside the rest. */
-  if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection && !(typeof cutPlateOn === 'function' && cutPlateOn())) {
-    /* The piece just loaded is the one the cutter works on: showEditPreview shows getActiveModel(), which is state.editId, and
+  if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection && !options.at && !(typeof cutPlateOn === 'function' && cutPlateOn())) {
+    /* (A 3MF that keeps the file's own positions - options.at - is a plate laid out, not one piece to cut: it goes down where the file puts it.)
+       The piece just loaded is the one the cutter works on: showEditPreview shows getActiveModel(), which is state.editId, and
        nothing else sets it on an upload - so with the Cut card open and nothing picked the preview was skipped, the plate stayed
        empty, and the status line still said "cutter open, slide red plane". */
     state.editId = id;

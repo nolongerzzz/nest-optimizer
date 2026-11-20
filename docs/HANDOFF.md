@@ -51,6 +51,7 @@ merging its list by hand. The list below is generated.
 - [Cut card: the Rotate piece number is the centre of its wheel; the blade-placed hint line is gone (2026-11-18)](handoff/cut-card-rotate-number-in-the-wheel-hint-line-gone.md)
 - [Cut: Whole plate - one level blade across every piece, to shorten a plate of print tests (2026-11-05)](handoff/cut-plate.md)
 - [Cut: a sized blade - cut between things, and notch into a face without going through (2026-11-02)](handoff/cut-sized-blade.md)
+- [Cut: a blade square to the walls, Undo keeps the card open and the blade where it was, 3MF import with the card open (2026-11-20)](handoff/cut-square-blade-walls-undo-keeps-card.md)
 - [Detach / Reattach - a detected flange off the hull, and back on elsewhere (2026-09-26)](handoff/detach-reattach-a-detected-flange-off-the-hull-and-back-on.md)
 - [Draw: Bead side - the path drawn is the bead's edge, laid off the wall; wall-corner snaps (2026-11-18)](handoff/draw-bead-side.md)
 - [DRAW: the Connect card renamed, a flat Draw editor, and Connect as a stage with a ghost (2026-11-16)](handoff/draw-card-editor-and-connect-stage.md)

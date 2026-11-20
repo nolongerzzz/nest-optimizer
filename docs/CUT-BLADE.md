@@ -99,6 +99,20 @@ wiring), `app-core.js` (the click's point and face, the ring grab under Cut), `a
 in `index.html`. Real-browser checks: `npm run notch:drive` (bars) and
 `npm run notch:strand-drive` (a spiral of cord).
 
+## The square blade, and Undo
+
+**Which way "square" runs.** The blade loads square across the piece's longest dimension as it lies, and the length is read off the footprint's narrowest
+rectangle (nso-bounds.js, `pieceFrame`). On a chunky, stepped footprint - a bracket whose legs differ in length - that rectangle can lie on a diagonal
+by a few percent of area, and the blade then ran across a piece whose every wall is square to its own axes (the owner's Desk Side Hanger loaded at
+29.7 degrees while the card said "square"). The Cut blade now also reads the piece's **side walls** (`pieceFrame(mesh, { walls: true })`, "WALLS ALONG
+THE BODY"): if at least 30% of the wall length runs along the body axes, within 2 degrees, and the box along those axes is no more than 30% bigger than
+the narrowest rectangle, the body axes are the frame and the blade is square to the walls. A bar modelled on a slant has its walls along the bar, so it
+still reads off its hull and the blade is square to the bar. Every other tool keeps the frame it had.
+
+**Undo of a cut keeps the card.** A cut made with the Cut card open (Chop or Plane) is undone with the card still open: the piece is back and selected,
+and the blade is where it stood - the same blade, place, mitre and bevel (`cutMemo` on the Undo entry, `cutRestoreAfterUndo`). A cut made with the card
+shut still closes it. Real-browser check: `npm run cut-square:drive`.
+
 ## Plane
 
 **Plane** is Chop with one side thrown away: the blade is the same (slider, the mm box, mitre, bevel), but Cut takes the **nearer end** of

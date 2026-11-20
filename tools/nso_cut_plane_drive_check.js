@@ -124,10 +124,10 @@ withApp(async (page, logs) => {
   check('and one more gives the original back: 60 mm, closed', p.n === 1 && Math.abs(p.len - 60) < 0.02 && p.faults.total === 0, JSON.stringify(p));
 
   console.log('a slanted plane');
-  // An Undo closes the cutter (as for every Cut); opening it again starts on Chop, so Plane is pressed again.
-  await page.evaluate(() => { openCutter('cut'); __pick(); });
+  // An Undo of a cut leaves the card open with the blade it had (app-core.js splitReplace), so Plane is still the blade.
+  await page.evaluate(() => { __pick(); });
   await page.waitForTimeout(300);
-  await page.click('#btn-cut-blade-plane'); await page.waitForTimeout(200);
+  check('after the Undos the card is open and Plane is still the blade', await page.evaluate(() => state.cutterOpen && state.cutBlade.mode === 'plane'));
   await page.fill('#cut-miter-deg', '20'); await page.press('#cut-miter-deg', 'Tab'); await page.waitForTimeout(250);
   await setMm(2);
   const rd = await page.textContent('#cut-readout');
@@ -138,7 +138,7 @@ withApp(async (page, logs) => {
   await page.click('#btn-undo'); await page.waitForTimeout(600);
 
   console.log('Chop is as it was');
-  await page.evaluate(() => { openCutter('cut'); __pick(); });
+  await page.evaluate(() => { __pick(); });
   await page.waitForTimeout(300);
   await page.click('#btn-cut-square'); await page.waitForTimeout(150);
   await page.click('#btn-cut-blade-full'); await page.waitForTimeout(250);

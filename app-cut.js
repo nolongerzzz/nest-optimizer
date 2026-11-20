@@ -298,7 +298,7 @@ function cutFrame(model) {
    so such a piece keeps the local frame bit for bit. With nothing to measure
    (no placed mesh, no nso-bounds), the geometry box decides, as it did. */
 function cutTravel(m, mesh, toLocal, bbox) {
-  const f = (mesh && typeof nsoBounds !== 'undefined' && nsoBounds.pieceFrame) ? nsoBounds.pieceFrame(mesh) : null;
+  const f = (mesh && typeof nsoBounds !== 'undefined' && nsoBounds.pieceFrame) ? nsoBounds.pieceFrame(mesh, { walls: true }) : null;   // walls: a piece whose side walls run along its own axes is squared to them (nso-bounds.js WALLS ALONG THE BODY)
   if (!f || !toLocal) return { axis: cutLongAxis(bbox), base: 0 };
   const loc = v => v.clone().transformDirection(toLocal);
   const up = loc(new THREE.Vector3(0, 1, 0));
@@ -3740,6 +3740,27 @@ function syncCutBladeUI() {
         (cutStrandOn(b) ? ' - and of that, only the strand under the click' : '') + '. One Undo puts it back.'
       : 'Split the piece at the blade: two pieces that meet exactly at the plane and add back to the original - no kerf. One Undo puts it back.';
   cutApplyHide();
+}
+
+/** What the Cut card is showing, kept on a cut's Undo entry so Undo can put the blade back (null with the card shut). */
+function cutBladeMemo() {
+  if (!state.cutterOpen) return null;
+  const b = state.cutBlade;
+  return { cutT: state.cutT, miter: state.cutMiterDeg, bevel: state.cutBevelDeg, blade: b ? JSON.parse(JSON.stringify(b)) : null };
+}
+
+/** An Undo of a cut made with the card open (app-core.js splitReplace) has put the piece back and left the card open: put the
+    blade where it stood - the blade in use, its place, its mitre and bevel - and on the piece again. */
+function cutRestoreAfterUndo(memo, sourceId) {
+  if (!memo || !state.cutterOpen) return;
+  state.cutMiterDeg = memo.miter;
+  state.cutBevelDeg = memo.bevel;
+  state.cutPlumb = null;
+  state.cutBlade = memo.blade;
+  state.cutT = memo.cutT != null ? memo.cutT : 0.5;
+  const i = (state.placed || []).findIndex(function (p) { return p && p.sourceId === sourceId; });
+  if (i >= 0) selectPlaced(i);                 // the blade goes back on the piece, at state.cutT
+  cutBladeRefresh();
 }
 
 function cutBladeRefresh() {

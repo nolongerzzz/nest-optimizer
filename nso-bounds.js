@@ -365,7 +365,7 @@
       and short level, long x up = short), { lengths: { long, short } } in mm,
       `centre` (the footprint's middle, at the piece's lowest point) and
       `square` (no long side). `p` is a placed entry or a mesh. */
-  function pieceFrame(p) {
+  function pieceFrame(p, opts) {
     var three = T();
     if (!three || !p) return null;
     if (held.has(p)) return cloneFrame(held.get(p));
@@ -375,7 +375,7 @@
     var e = mesh.matrixWorld.elements, f = frameUnder(mesh.geometry, e);
     if (!f) return null;
     var box = worldBox(mesh);
-    var r = squareToBody(placedOf(p, mesh), mesh, f) || f;
+    var r = squareToBody(placedOf(p, mesh), mesh, f, opts) || f;
     var L = vec(r.long);
     return {
       long: L, short: new three.Vector3(-L.z, 0, L.x), up: new three.Vector3(0, 1, 0),
@@ -389,6 +389,55 @@
     var S = typeof state !== 'undefined' ? state : null;
     return (S && S.placed) ? S.placed.find(function (q) { return q && q.mesh === mesh; }) || null : null;
   }
+  /* WALLS ALONG THE BODY (opt-in: pieceFrame(p, { walls: true }); the Cut blade asks). The narrowest rectangle round the shadow can lie on a
+     diagonal of a chunky, stepped footprint - a bracket whose legs differ in length - by a few percent of area, and the blade then runs
+     diagonally across a piece whose every wall is square to its own axes. So the piece's SIDE WALLS are read: the horizontal run of every
+     edge of every steep triangle (a wall; tops, bottoms and shallow faces are left out), as a histogram of direction in half degrees
+     weighted by length. A piece whose walls run along its body axes (within WALL_TOL_DEG, at least WALL_ALONG of their length) is squared
+     to its body even where the narrowest rectangle is up to WALL_AREA_CAP times smaller; a bar modelled on a slant has its walls along
+     the bar, not along its body axes, and still reads off the hull. Cached per geometry like the frame. */
+  var WALL_TOL_DEG = 2, WALL_ALONG = 0.3, WALL_AREA_CAP = 1.3;
+  var wallCache = new WeakMap();
+  function wallHistogram(g, e) {
+    var pos = positionOf(g);
+    if (!pos || !(pos.count > 2)) return null;
+    var r = rotOf(e), hit = wallCache.get(g);
+    if (hit && hit.pos === pos && hit.version === pos.version && hit.count === pos.count && sameRot(hit.rot, r)) return hit.h;
+    var idx = g.index, nT = Math.floor((idx ? idx.count : pos.count) / 3), bins = new Float64Array(360), total = 0;
+    var P = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    function at(k, out) {
+      var i = idx ? idx.getX(k) : k, x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      out[0] = r[0] * x + r[3] * y + r[6] * z; out[1] = r[1] * x + r[4] * y + r[7] * z; out[2] = r[2] * x + r[5] * y + r[8] * z;
+    }
+    for (var t = 0; t < nT; t++) {
+      at(3 * t, P[0]); at(3 * t + 1, P[1]); at(3 * t + 2, P[2]);
+      var ux = P[1][0] - P[0][0], uy = P[1][1] - P[0][1], uz = P[1][2] - P[0][2];
+      var vx = P[2][0] - P[0][0], vy = P[2][1] - P[0][1], vz = P[2][2] - P[0][2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (!(nl > 0) || Math.abs(ny) / nl >= 0.5) continue;                       // not a wall
+      for (var k = 0; k < 3; k++) {
+        var a = P[k], b = P[(k + 1) % 3], dx = b[0] - a[0], dz = b[2] - a[2], l = Math.sqrt(dx * dx + dz * dz);
+        if (!(l > 1e-9)) continue;
+        var ang = Math.atan2(dz, dx) * 180 / Math.PI;
+        ang = ((ang % 180) + 180) % 180;
+        bins[Math.min(359, Math.floor(ang * 2))] += l; total += l;
+      }
+    }
+    var h = { bins: bins, total: total };
+    wallCache.set(g, { pos: pos, version: pos.version, count: pos.count, rot: r, h: h });
+    return h;
+  }
+  /* The share of the wall length running along direction `d` ([x, z] unit) or square to it, within WALL_TOL_DEG. */
+  function wallShare(h, d) {
+    if (!h || !(h.total > 0)) return 0;
+    var c = ((Math.atan2(d[1], d[0]) * 180 / Math.PI) % 180 + 180) % 180, s = 0;
+    for (var k = 0; k < 360; k++) {
+      var a = (k + 0.5) / 2, d0 = Math.abs(a - c); d0 = Math.min(d0, 180 - d0);
+      var d1 = Math.abs(d0 - 90); if (Math.min(d0, d1) <= WALL_TOL_DEG) s += h.bins[k];
+    }
+    return s / h.total;
+  }
+
   /* SQUARE TO THE BODY FIRST. The narrowest rectangle is ill-defined where
      the footprint is round or nearly square (a tube's shadow has one per facet,
      at whatever angle each falls) and off by a hair where the geometry carries
@@ -402,7 +451,7 @@
      reads its own axes bit for bit; only a piece whose body really lies across
      its footprint is read off the hull. */
   var BODY_TOL = 0.02;
-  function squareToBody(p, mesh, f) {
+  function squareToBody(p, mesh, f, opts) {
     var three = T();
     if (!three || !f.hull || !f.hull.length) return null;
     var q = (p && typeof window.nsoPieceBodyQ === 'function') ? window.nsoPieceBodyQ(p) : mesh.quaternion.clone();
@@ -424,7 +473,13 @@
                  mid: [((lo0 + hi0) / 2) * d[0] - ((lo1 + hi1) / 2) * d[1], ((lo0 + hi0) / 2) * d[1] + ((lo1 + hi1) / 2) * d[0]] };
       }
     });
-    if (!best || !(best.area <= f.area * (1 + BODY_TOL) + 1e-12)) return null;
+    if (!best) return null;
+    var within = best.area <= f.area * (1 + BODY_TOL) + 1e-12;
+    if (!within && opts && opts.walls && best.area <= f.area * WALL_AREA_CAP) {
+      mesh.updateMatrixWorld(true);
+      within = wallShare(wallHistogram(mesh.geometry, mesh.matrixWorld.elements), best.d) >= WALL_ALONG;   // the walls say the body is the frame
+    }
+    if (!within) return null;
     var L = best.ed >= best.en ? best.d : [-best.d[1], best.d[0]];
     if (L[0] < -1e-12 || (Math.abs(L[0]) <= 1e-12 && L[1] < 0)) L = [-L[0], -L[1]];
     var lenL = Math.max(best.ed, best.en), lenS = Math.min(best.ed, best.en);

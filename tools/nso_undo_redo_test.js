@@ -83,6 +83,11 @@ async function roundTrip(page, label, doStep, opts) {
        gate's. What it must hold is the models: the same ids, geometry and soups. */
     const m = x => JSON.stringify(JSON.parse(x).models);
     check(label + ': Undo puts the models back as they were', m(undone) === m(before));
+  } else if (opts.undoReselects) {
+    /* An Undo of a cut made with the Cut card open puts the piece back SELECTED, with the blade on it where it stood (app-core.js
+       splitReplace, app-cut.js cutRestoreAfterUndo): the one thing that differs is which piece is picked. Everything else must match. */
+    const noSel = x => { const o = JSON.parse(x); delete o.sel; return JSON.stringify(o); };
+    check(label + ': Undo puts the plate back as it was (the piece is selected again, the blade on it)', noSel(undone) === noSel(before));
   } else {
     check(label + ': Undo puts the plate back as it was', undone === before);
   }
@@ -140,7 +145,7 @@ withApp(async (page, logs) => {
   await N(() => { document.querySelectorAll('details').forEach(d => { d.open = true; }); });
   if (!(await N(() => cutterArmed('cut')))) await N(() => openCutter('cut'));
   await selectModel(page, cutId);
-  await roundTrip(page, 'cut', () => N(() => { if (typeof updateCutHelper === 'function') updateCutHelper(); cutActiveModel(); }));
+  await roundTrip(page, 'cut', () => N(() => { if (typeof updateCutHelper === 'function') updateCutHelper(); cutActiveModel(); }), { undoReselects: true });
   check('the cut left two halves', await N(() => state.models.length === 2 && state.placed.length === 2));
 
   console.log('\n=== 4. a boolean (Join) ===');

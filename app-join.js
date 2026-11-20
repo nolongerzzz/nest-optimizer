@@ -2855,7 +2855,8 @@ function cutActiveModel(opts) {
     newIds: newIds.slice(),
     siblings: siblingSnapshots,
     editId: prevEditId,
-    cutT: prevCutT
+    cutT: prevCutT,
+    cutMemo: typeof cutBladeMemo === 'function' ? cutBladeMemo() : null    // Undo leaves the card open, the blade where it was
   });
   console.log('[nest] split undo pushed', state.undoStack.length, newIds);
 
