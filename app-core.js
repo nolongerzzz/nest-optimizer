@@ -2447,18 +2447,41 @@ function cloneSelectedModel(opts) {
      the first clone appeared far from the piece it copied and the rest queued
      along the plate's edge. placeNewModel() (From File, From Library) puts a
      new piece just right of the rightmost piece, 4 mm clear; a clone does the
-     same, in line with the piece it copies, and each clone pushes that edge
-     out for the next - a row growing from the original. */
+     same, in line with the piece it copies, alternating sides so the row
+     grows outward from the original in both directions. */
   const gap = 4;
   const srcPlaced = (state.selectedIndex >= 0 && state.placed[state.selectedIndex]
       && state.placed[state.selectedIndex].sourceId === src.id)
     ? state.placed[state.selectedIndex]
     : state.placed.find(p => p.sourceId === src.id);
   const rowZ = srcPlaced ? srcPlaced.z : 0;
-  let rightEdge = Math.max(...state.placed.map(p => p.x + (p.width || 0) / 2));
+  /* CLONES FLANK THE ORIGINAL, ALTERNATING RIGHT THEN LEFT.
+     Stacking every clone on the right pushed a centred piece's copies off
+     the plate edge while the left half of the plate sat empty. Now the
+     first clone goes right, the second left, and so on, so the original
+     stays in the middle of its row. Only pieces that share the row's depth
+     band set the edges, so a piece in another row does not push the clones
+     away from the original. */
+  const halfD = src.size.z / 2;
+  const rowPieces = state.placed.filter(p =>
+    Math.abs(p.z - rowZ) < (p.depth || 0) / 2 + halfD + gap);
+  const edgeSet = rowPieces.length ? rowPieces : state.placed;
+  let rightEdge = srcPlaced ? srcPlaced.x + (srcPlaced.width || 0) / 2 : 0;
+  let leftEdge = srcPlaced ? srcPlaced.x - (srcPlaced.width || 0) / 2 : 0;
+  if (edgeSet.length) {
+    rightEdge = Math.max(rightEdge, ...edgeSet.map(p => p.x + (p.width || 0) / 2));
+    leftEdge = Math.min(leftEdge, ...edgeSet.map(p => p.x - (p.width || 0) / 2));
+  }
+  let spotCount = 0;
   function nextSpot() {
-    const x = rightEdge + src.size.x / 2 + gap;
-    rightEdge = x + src.size.x / 2;
+    const goRight = (spotCount++ % 2) === 0;
+    if (goRight) {
+      const x = rightEdge + src.size.x / 2 + gap;
+      rightEdge = x + src.size.x / 2;
+      return { x, z: rowZ };
+    }
+    const x = leftEdge - src.size.x / 2 - gap;
+    leftEdge = x - src.size.x / 2;
     return { x, z: rowZ };
   }
   const newIds = [];
