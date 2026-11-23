@@ -203,7 +203,6 @@
       if (line.charAt(0) === ';') {
         if (line === '; CHANGE_LAYER') {
           layer++; s.layers = layer + 1;
-          if (current >= 0) s.filamentByLayer[layer] = [current];
         } else if ((m = /^; start printing object, unique label id: (\d+)/.exec(line))) {
           label = m[1];
           if (!seen[label]) { seen[label] = true; s.labelsSeen.push(label); }
@@ -225,10 +224,6 @@
           s.loads[f] = (s.loads[f] || 0) + 1;
           if (s.firstFilament === null) s.firstFilament = f;
           current = f;
-          if (layer >= 0) {
-            var list = s.filamentByLayer[layer] || (s.filamentByLayer[layer] = []);
-            if (list.indexOf(f) < 0) list.push(f);
-          }
         }
         continue;
       }
@@ -240,6 +235,12 @@
       if (v.Z != null) z = absXY ? v.Z : z + v.Z;
       var extruding = v.E != null && (relE ? v.E > 0 : true);
       if (extruding && z > s.maxZ) s.maxZ = z;
+      /* a layer's filaments are the ones that print on it (Studio's layer_filament_lists: the 3-colour pyramid's change layer is the new
+         filament's alone) - not the one it starts loaded with, nor a purge at the chute */
+      if (extruding && layer >= 0 && current >= 0 && (nx !== x || ny !== y)) {
+        var list = s.filamentByLayer[layer] || (s.filamentByLayer[layer] = []);
+        if (list.indexOf(current) < 0) list.push(current);
+      }
       if (layer === 0 && extruding && (nx !== x || ny !== y)) {
         // A one-object plate has no "start printing object" labels; its layer-1
         // extrusion is kept apart and belongs to the one object.
@@ -388,7 +389,7 @@
       byKey[key].push(prev);
     }
     d.layerFilamentLists = groups.map(function (k) {
-      return { filament_list: k, layer_ranges: byKey[k].map(function (r) { return r.start + ' ' + r.end; }).join(' ') };
+      return { filament_list: k, layer_ranges: byKey[k].map(function (r) { return r.start + ' ' + r.end; }).join(',') };   /* Studio: "0 41,107 147" */
     });
 
     // Objects: the G-code's label ids, named from what was passed.

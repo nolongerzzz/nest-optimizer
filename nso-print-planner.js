@@ -90,6 +90,10 @@
      layer by "G1 X0 Y{CY} F18000" then "G1 X-13.0 F3000"), and the wipe is the start block's "wipe and shake", all three passes of it
      (two left a tail of TPU on the part: the owner's prints of 2026-11-14). {CY} is the plate's
      first-layer centre, as the hook has it. The P1S's chute is behind the bed and has its own moves: not written yet. */
+  /* the printers whose Studio puts the timelapse at the layer change, before the layer's first travel: a core-XY's (Studio's GCode.cpp:
+     need_insert_timelapse_gcode_for_traditional is an i3's - the A1 mini's, after its first run of walls). The owner's P1S slices, single
+     and multi-colour, all have it there: the spiral lift, the photo, then the object and the travel. */
+  var HOOK_AT_LAYER_START = { 'p1s-0.4': true };
   /* the printers whose Studio writes the objects still to print (M639; see the planner's "THE OBJECTS STILL TO PRINT") */
   var REMAINING = { 'p1s-0.4': true };
   var PARK = {
@@ -655,7 +659,7 @@
           if (sl > 1e-9) segs.push({ l: sl, ux: sx / sl, uy: sy / sl, v: 0, a: 0 });
         }
         items.push({
-          obj: oi, feature: p.feature, thin: !!p.thinWall, keep: p.feature === 'Bridge' || spans, pts: pts, closed: !!p.closed, loop: loop, segs: segs,
+          obj: oi, slot: L.slot || 0, feature: p.feature, thin: !!p.thinWall, keep: p.feature === 'Bridge' || spans, pts: pts, closed: !!p.closed, loop: loop, segs: segs,
           bead: bead, vFeature: fs.v, vWipe: v, v: v, a: fs.a, len: pathLength(pts), rings: rings
         });
       });
@@ -688,7 +692,7 @@
 
   /** Seconds the layer takes with every extrusion capped at `cap` mm/s
    *  (uniform_cooling), or scaled by `cap` (quality_first, cap < 1). */
-  function layerSeconds(items, S, mode, cap) {
+  function layerSecondsOf(items, S, mode, cap) {
     var t = 0;
     var minV = S.cooling.slow_down_min_speed;
     for (var k = 0; k < items.length; k++) {
@@ -711,8 +715,12 @@
    * slowdown, and the speed (uniform) or factor (quality_first) that brings it
    * to slow_down_layer_time, or null when it needs none.
    */
-  function coolLayer(items, S, first) {
-    var c = S.cooling;
+  var layerSeconds = layerSecondsOf;
+  function coolLayer(items, S, first, extraSeconds) {
+    var c = S.cooling, ex = extraSeconds || 0;
+    /* a filament change on the layer counts towards its time, as Studio's cooling buffer counts the whole layer's G-code: the owner's
+       3-colour pyramid's change layers print at full speed where the layers beside them slow down */
+    var layerSeconds = function (it, S0, logic, cap) { return layerSecondsOf(it, S0, logic, cap) + ex; };
     var t0 = layerSeconds(items, S, c.cooling_slowdown_logic, null);
     var out = { seconds: t0, cap: null, mode: c.cooling_slowdown_logic };
     if (first || !c.slow_down_for_layer_cooling || !(t0 < c.slow_down_layer_time) || !items.length) return out;
@@ -750,6 +758,330 @@
   function tnum(v) { return String(+(+v).toFixed(4)); }
   /** A computed feed rate as Studio writes it: six significant digits (299.339, 6033.27, 720). */
   function gnum(v) { return String(+(+v).toPrecision(6)); }
+
+  /* ===================== Studio's G-code templates (the filament change) =====================
+     STUDIO'S PLACEHOLDER LANGUAGE, the part its printer templates use: [name] and {expression} put a value in,
+     {if e} {elsif e} {else} {endif} keep or drop the text between them - newlines and all, which is how Studio's
+     output keeps its blank lines. An expression has numbers, "strings", names, name[index], + - * / %, comparisons,
+     && || ! and brackets. A number is written as C++'s ostream writes a double (six significant digits); a whole
+     one without a point. A name the values do not hold is an error, not a blank: a template this does not know
+     must not print. (Studio: src/libslic3r/PlaceholderParser.cpp.) */
+  function studioNumber(v) {
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    if (typeof v === 'string') return v;
+    if (!isFinite(v)) return String(v);
+    if (Number.isInteger(v)) return String(v);
+    var g = +v.toPrecision(6);
+    return String(g);
+  }
+  function studioExpr(src, vars) {
+    var toks = [], re = /\s*(?:(\d+\.\d*|\.\d+|\d+)|("(?:[^"\\]|\\.)*")|([A-Za-z_][A-Za-z0-9_]*)|(==|!=|>=|<=|&&|\|\||[-+*\/%()<>!\[\]]))/y, m;
+    re.lastIndex = 0;
+    while (re.lastIndex < src.length) {
+      var at = re.lastIndex;
+      m = re.exec(src);
+      if (!m) { if (/^\s*$/.test(src.slice(at))) break; throw new Error('template: cannot read "' + src + '" at ' + at); }
+      if (m[1] != null) toks.push({ n: +m[1] });
+      else if (m[2] != null) toks.push({ s: m[2].slice(1, -1).replace(/\\(.)/g, '$1') });
+      else if (m[3] != null) toks.push({ id: m[3] });
+      else toks.push({ op: m[4] });
+    }
+    var i = 0;
+    function peek(o) { return toks[i] && toks[i].op === o; }
+    function eat(o) { if (!peek(o)) throw new Error('template: expected ' + o + ' in "' + src + '"'); i++; }
+    function val(name) {
+      if (name === 'true') return true;
+      if (name === 'false') return false;
+      if (!Object.prototype.hasOwnProperty.call(vars, name)) throw new Error('template: no value for ' + name);
+      return vars[name];
+    }
+    function primary() {
+      var t = toks[i++];
+      if (!t) throw new Error('template: "' + src + '" ends early');
+      if (t.n != null) return t.n;
+      if (t.s != null) return t.s;
+      if (t.op === '(') { var v = or(); eat(')'); return v; }
+      if (t.op === '-') return -unary();
+      if (t.op === '!') return !truth(unary());
+      if (t.id) {
+        if (t.id === 'and' || t.id === 'or' || t.id === 'not') throw new Error('template: word operators are not read');
+        var v2 = val(t.id);
+        if (peek('[')) {
+          eat('['); var k = or(); eat(']');
+          if (!Array.isArray(v2)) throw new Error('template: ' + t.id + ' is not a list');
+          k = Math.trunc(+k);
+          return v2[k >= 0 && k < v2.length ? k : 0];
+        }
+        if (Array.isArray(v2)) return v2[0];
+        return v2;
+      }
+      throw new Error('template: unexpected ' + (t.op || '') + ' in "' + src + '"');
+    }
+    function unary() { return primary(); }
+    function truth(v) { return typeof v === 'string' ? v.length > 0 : !!v; }
+    function mul() {
+      var v = unary();
+      for (;;) {
+        if (peek('*')) { i++; v = v * unary(); }
+        else if (peek('/')) { i++; v = v / unary(); }
+        else if (peek('%')) { i++; v = v % unary(); }
+        else return v;
+      }
+    }
+    function add() {
+      var v = mul();
+      for (;;) {
+        if (peek('+')) { i++; var r = mul(); v = (typeof v === 'string' || typeof r === 'string') ? String(v) + String(r) : v + r; }
+        else if (peek('-')) { i++; v = v - mul(); }
+        else return v;
+      }
+    }
+    function rel() {
+      var v = add();
+      for (;;) {
+        if (peek('<')) { i++; v = v < add(); } else if (peek('>')) { i++; v = v > add(); }
+        else if (peek('<=')) { i++; v = v <= add(); } else if (peek('>=')) { i++; v = v >= add(); }
+        else return v;
+      }
+    }
+    function eq() {
+      var v = rel();
+      for (;;) {
+        if (peek('==')) { i++; var a = rel(); v = typeof v === 'string' || typeof a === 'string' ? String(v) === String(a) : v == a; }   // eslint-disable-line eqeqeq
+        else if (peek('!=')) { i++; var b = rel(); v = typeof v === 'string' || typeof b === 'string' ? String(v) !== String(b) : v != b; }   // eslint-disable-line eqeqeq
+        else return v;
+      }
+    }
+    function and() { var v = eq(); while (peek('&&')) { i++; var r = eq(); v = truth(v) && truth(r); } return v; }
+    function or() { var v = and(); while (peek('||')) { i++; var r = and(); v = truth(v) || truth(r); } return v; }
+    var out = or();
+    if (i < toks.length) throw new Error('template: "' + src + '" has more after it');
+    return { v: out, truth: truth(out) };
+  }
+  /** A Studio template's text with `vars` put in (the language above): the text, newlines as Studio leaves them. */
+  function studioTemplate(text, vars) {
+    var out = '', stack = [], live = function () { return stack.every(function (f) { return f.on; }); };
+    var i = 0, n = text.length;
+    while (i < n) {
+      var c = text.charAt(i);
+      if (c === '{') {
+        var j = text.indexOf('}', i);
+        if (j < 0) throw new Error('template: an unclosed {');
+        var body = text.slice(i + 1, j).trim();
+        var mIf = /^if\s+([\s\S]*)$/.exec(body), mEl = /^elsif\s*([\s\S]*)$/.exec(body);
+        if (mIf) {
+          var parentLive = live();
+          var on = parentLive && studioExpr(mIf[1], vars).truth;
+          stack.push({ on: on, done: on, parent: parentLive });
+        } else if (mEl) {
+          var top = stack[stack.length - 1];
+          if (!top) throw new Error('template: elsif without if');
+          if (top.done || !top.parent) top.on = false;
+          else { top.on = studioExpr(mEl[1], vars).truth; top.done = top.on; }
+        } else if (body === 'else') {
+          var t2 = stack[stack.length - 1];
+          if (!t2) throw new Error('template: else without if');
+          t2.on = t2.parent && !t2.done; t2.done = true;
+        } else if (body === 'endif') {
+          if (!stack.pop()) throw new Error('template: endif without if');
+        } else if (live()) {
+          out += studioNumber(studioExpr(body, vars).v);
+        }
+        i = j + 1;
+        continue;
+      }
+      if (c === '[') {
+        var mv = /^\[([A-Za-z_][A-Za-z0-9_]*)\]/.exec(text.slice(i, i + 80));
+        if (mv) {
+          if (live()) {
+            if (!Object.prototype.hasOwnProperty.call(vars, mv[1])) throw new Error('template: no value for ' + mv[1]);
+            var vv = vars[mv[1]];
+            out += studioNumber(Array.isArray(vv) ? vv[0] : vv);
+          }
+          i += mv[0].length;
+          continue;
+        }
+      }
+      if (live()) out += c;
+      i++;
+    }
+    if (stack.length) throw new Error('template: an {if} is not closed');
+    return out;
+  }
+  /** The template's extruder_offset as {x, y} mm ('0x2' on the P1S). */
+  function extruderOffset(config) {
+    var v = config && config.extruder_offset;
+    if (Array.isArray(v)) v = v[0];
+    var m = /^\s*(-?[\d.]+)\s*x\s*(-?[\d.]+)/.exec(String(v == null ? '' : v));
+    return m ? { x: +m[1], y: +m[2] } : { x: 0, y: 0 };
+  }
+
+  /**
+   * MULTI-COLOUR: what a filament change needs from the template's project settings (docs/MULTICOLOR.md). The values are Studio's own
+   * (GCode.cpp set_extruder, 02.09): the purge volume from flush_volumes_matrix (row: the old slot, column: the new) times flush_multiplier,
+   * less grab_length's worth, as filament length, in at most 4 equal parts of about 135 mm^3; a filament's own setting over the printer's
+   * where it has one ('nil' is none); a per-filament list may hold two entries a filament (its two extruder variants: the standard nozzle's
+   * first). Returns { initial, block(), endLines(), startLines(), temp(), toolchangeLength(), count } or { error }.
+   */
+  function multiColour(config, res, Pr, S) {
+    var list = function (k) { var v = config[k]; return Array.isArray(v) ? v : v == null ? [] : String(v).split(/[;,]/); };
+    var n = Math.max(list('filament_colour').length, list('filament_type').length);
+    if (!config.change_filament_gcode) return { error: 'this printer template has no filament change G-code (change_filament_gcode), so it cannot change colour' };
+    var per = function (k, slot) { var l = list(k); return l.length === n ? l[slot] : l.length === 2 * n ? l[2 * slot] : l[0]; };
+    var eff = function (fk, mk, slot) { var v = per(fk, slot); return v != null && v !== 'nil' && v !== '' ? v : list(mk)[0]; };
+    var maxSlot = -1, first = -1, firstPlane = Infinity;
+    res.objects.forEach(function (ob) {
+      ob.layers.forEach(function (L, li) {
+        if (!L || !L.paths || !L.paths.length) return;
+        var sl = L.slot || 0;
+        if (sl > maxSlot) maxSlot = sl;
+        if (li < firstPlane || (li === firstPlane && sl < first)) { firstPlane = li; first = sl; }
+      });
+    });
+    if (maxSlot >= n) return { error: 'a part prints with filament ' + (maxSlot + 1) + ', but the project has ' + n + ' filament' + (n === 1 ? '' : 's') };
+    var slots = []; for (var q = 0; q < n; q++) slots.push(q);
+    var num = function (v) { return +v; };
+    var matrix = list('flush_volumes_matrix').map(num), mult = num(list('flush_multiplier')[0] || 1), grab = num(list('grab_length')[0] || 0);
+    var areaOf = function (slot) { var d = num(per('filament_diameter', slot) || 1.75); return Math.fround(Math.PI / 4 * d * d); };
+    var plateKey = { 'Cool Plate': 'cool_plate_temp', 'Engineering Plate': 'eng_plate_temp', 'High Temp Plate': 'hot_plate_temp',
+                     'Textured PEI Plate': 'textured_plate_temp', 'Supertack Plate': 'supertack_plate_temp' }[String(Array.isArray(config.curr_bed_type) ? config.curr_bed_type[0] : config.curr_bed_type)] || 'textured_plate_temp';
+    var base = {
+      filament_type: slots.map(function (q) { return per('filament_type', q); }),
+      long_retractions_when_cut: slots.map(function (q) { return num(eff('filament_long_retractions_when_cut', 'long_retractions_when_cut', q)); }),
+      retraction_distances_when_cut: slots.map(function (q) { return num(eff('filament_retraction_distances_when_cut', 'retraction_distances_when_cut', q)); }),
+      flush_volumetric_speeds: slots.map(function (q) { return num(per('filament_flush_volumetric_speed', q)) || num(per('filament_max_volumetric_speed', q)); }),
+      flush_temperatures: slots.map(function (q) { return num(per('filament_flush_temp', q)) || num(list('nozzle_temperature_range_high')[q] != null ? list('nozzle_temperature_range_high')[q] : per('nozzle_temperature_range_high', q)); }),
+      initial_layer_print_height: num(list('initial_layer_print_height')[0]),
+      initial_layer_acceleration: num(list('initial_layer_acceleration')[0]),
+      default_acceleration: num(list('default_acceleration')[0]),
+      x_after_toolchange: 0, y_after_toolchange: 0, z_after_toolchange: 0
+    };
+    var tp = travelPoints(config, res);
+    base.travel_point_1_x = tp[0][0]; base.travel_point_1_y = tp[0][1];
+    base.travel_point_2_x = tp[1][0]; base.travel_point_2_y = tp[1][1];
+    base.travel_point_3_x = tp[2][0]; base.travel_point_3_y = tp[2][1];
+    var tempOf = function (slot, firstLayer) { return num(per(firstLayer ? 'nozzle_temperature_initial_layer' : 'nozzle_temperature', slot)); };
+    var tcLen = function (slot) { return num(eff('filament_retract_length_toolchange', 'retract_length_toolchange', slot)); };
+    var M = {
+      n: n, initial: first < 0 ? 0 : first, count: 0, changes: [],
+      temp: tempOf, toolchangeLength: tcLen,
+      /** the old filament's end G-code, as lines (Studio: its text, a newline added if it has none) */
+      endLines: function (slot) {
+        var t = studioTemplate(per('filament_end_gcode', slot) || '', { current_extruder: slot, layer_num: 0 });
+        if (t && t.charAt(t.length - 1) !== '\n') t += '\n';
+        return t ? t.slice(0, -1).split('\n') : [];
+      },
+      /** the new filament's start G-code, as lines */
+      startLines: function (slot) {
+        var t = studioTemplate(per('filament_start_gcode', slot) || '', {
+          current_extruder: slot, layer_num: 0,
+          bed_temperature: slots.map(function (q) { return num(per(plateKey, q)); }),
+          bed_temperature_initial_layer: slots.map(function (q) { return num(per(plateKey + '_initial_layer', q)); }),
+          activate_air_filtration: slots.map(function (q) { return num(per('activate_air_filtration', q) || 0); }),
+          support_air_filtration: num(list('support_air_filtration')[0] || 0),
+          during_print_exhaust_fan_speed_num: slots.map(function (q) { return Math.floor(255 * num(per('during_print_exhaust_fan_speed', q) || 0) / 100); })
+        });
+        if (t && t.charAt(t.length - 1) !== '\n') t += '\n';
+        return t ? t.slice(0, -1).split('\n') : [];
+      },
+      /** The change block from `from` to `to` (0-based slots) at the layer printing at `z`: { lines, extruded, accel, z }. fIn: the F the line
+       *  before it left in force (null: not known, nothing dropped at its first line). */
+      block: function (from, to, z, firstLayer, fIn) {
+        M.count++;
+        var b = M.blockAt(from, to, z, firstLayer, fIn, M.count);
+        M.changes.push({ from: from, to: to, z: z, purgeMm3: b.purgeMm3 });
+        return b;
+      },
+      /** the same block as the count-th change, without counting it (a layer's cooling counts the change's time before it is written) */
+      blockAt: function (from, to, z, firstLayer, fIn, count) {
+        var area = areaOf(to);
+        var wv = Math.fround(num(matrix[from * n + to] || 0) * mult);
+        wv = Math.fround(Math.max(0, wv - grab * area));
+        var wl = Math.fround(wv / area);
+        var cnt = Math.min(4, Math.round(wv / 135));
+        if (cnt === 0 && wv > 0) cnt = 1;
+        var unit = cnt ? Math.fround(wl / cnt) : 0;
+        var v = Object.assign({}, base, {
+          next_extruder: to, previous_extruder: from, max_layer_z: z, layer_z: z, toolchange_count: count,
+          old_filament_temp: tempOf(from, firstLayer), new_filament_temp: tempOf(to, firstLayer),
+          old_retract_length_toolchange: tcLen(from), new_retract_length_toolchange: tcLen(to), flush_length: wl
+        });
+        for (var k = 1; k <= 4; k++) v['flush_length_' + k] = k <= cnt ? unit : 0;
+        var text = studioTemplate(String(config.change_filament_gcode), v);
+        if (text.charAt(text.length - 1) === '\n') text = text.slice(0, -1);
+        var lines = dropRepeatedF(text.split('\n'), fIn).lines, out = [], ext = 0, acc = null, zz = null;
+        lines.forEach(function (l) {
+          out.push(l);
+          var mt = /^T(\d+)\s*$/.exec(l);
+          if (mt && +mt[1] < 255) out.push('M73 E' + mt[1]);           /* Studio's processor marks the slot after a T */
+          var me = /^G[01]\b[^;]*\bE(-?[\d.]+)/.exec(l);
+          if (me && !/^G92/.test(l)) ext += +me[1];
+          var ma = /^M204 S(\d+(?:\.\d+)?)/.exec(l); if (ma) acc = +ma[1];
+          var mz = /^G[01]\b[^;]*\bZ(-?[\d.]+)/.exec(l); if (mz) zz = +mz[1];
+        });
+        return { lines: out, extruded: ext, accel: acc, z: zz, purgeMm3: wv };
+      }
+    };
+    return M;
+  }
+
+  /**
+   * The three points of Studio's path to the filament cutter for the second change (GCode.cpp get_path_of_change_filament): from the
+   * template's start_end_points (the path's start and end, P1S: 30,-3 and 54,245) and the cutter's corner (bed_exclude_area's third
+   * point + 2), a free strip of x across the plate's objects (each object's x range widened 2 mm). [[x,y],[x,y],[x,y]].
+   */
+  function travelPoints(config, res) {
+    var def = [[54, 0], [54, 0], [54, 245]];
+    var pts = config.start_end_points, ex = config.bed_exclude_area;
+    var xy = function (s) { var m = /^\s*(-?[\d.]+)\s*x\s*(-?[\d.]+)/.exec(String(s)); return m ? [+m[1], +m[2]] : null; };
+    if (!Array.isArray(pts) || pts.length !== 2 || !Array.isArray(ex) || ex.length !== 4) return def;
+    var sp = xy(pts[0]), ep = xy(pts[1]), c2 = xy(ex[2]);
+    if (!sp || !ep || !c2) return def;
+    var cutY = c2[1] + 2, startX = sp[0], endX = ep[0], endY = ep[1], fromLeft = true;
+    var intervals = [];
+    res.objects.forEach(function (ob) {
+      var b = ob.bbox;
+      if (!b) {
+        b = { x0: Infinity, x1: -Infinity, y0: Infinity };
+        ob.layers.forEach(function (L) { if (L && L.paths) L.paths.forEach(function (p) { p.pts.forEach(function (q) { if (q[0] < b.x0) b.x0 = q[0]; if (q[0] > b.x1) b.x1 = q[0]; if (q[1] < b.y0) b.y0 = q[1]; }); }); });
+        if (!isFinite(b.x0)) return;
+      }
+      if (b.x0 < startX && b.y0 < cutY) fromLeft = false;
+      var sc = [b.x0 - 2, b.x1 + 2], merged = null, keep = [];
+      intervals.forEach(function (iv) {
+        if (iv[1] >= sc[0] && iv[0] <= sc[1]) merged = merged ? [Math.min(iv[0], merged[0]), Math.max(iv[1], merged[1])] : [Math.min(iv[0], sc[0]), Math.max(iv[1], sc[1])];
+        else keep.push(iv);
+      });
+      if (merged) { keep.push(merged); intervals = keep; } else intervals.push(sc);
+    });
+    intervals.sort(function (a, b) { return a[0] - b[0]; });
+    var avail = [], at = 0;
+    intervals.forEach(function (iv) { if (iv[0] > at) avail.push([at, iv[0]]); at = iv[1]; });
+    avail.push([at, 255]);
+    var path = 255;
+    for (var i = 0; i < avail.length; i++) {
+      var a = avail[i];
+      if (a[0] > endX) { var d = a[0] - endX; path = Math.abs(endX - path) < d ? path : a[0]; break; }
+      if (a[1] >= endX) { path = endX; break; }
+      if (!fromLeft && a[1] < startX) continue;
+      path = a[1];
+    }
+    return path < startX ? [[startX, cutY], [path, cutY], [path, endY]] : [[path, 0], [path, 0], [path, endY]];
+  }
+
+  /** Studio's cooling buffer writes a G0 / G1's F only when it changes: the F of each such line that repeats the one in force is dropped
+   *  (" F3000" out of "G1 X90 F3000" after "G1 Y265 F3000"). `f` is the F in force before the first line; returns { lines, f }. */
+  function dropRepeatedF(lines, f) {
+    var out = lines.map(function (l) {
+      var m = /^(G[01]\b[^;]*?)\s+F(\d+(?:\.\d+)?)(\b[^;]*)(;.*)?$/.exec(l);
+      if (!m) return l;
+      var v = +m[2];
+      if (f != null && v === f) { var rest = (m[1] + m[3]).replace(/\s+$/, ''); return m[4] != null ? rest + ' ' + m[4] : rest; }
+      f = v;
+      return l;
+    });
+    return { lines: out, f: f };
+  }
 
   /**
    * A frozen block as lines of text with the plate's numbers put in
@@ -890,7 +1222,6 @@
   /** A changed value as the CONFIG_BLOCK holds it: once per slot the line had (a per-filament key on a two-filament
    *  template: "220,220", PLA;PLA, "a b";"a b"), in quotes when Studio would quote it (a value with a space, a separator or a quote). */
   function configValue(was, value) {
-    var v = String(value);
     var slots = [], cur = '', q = false, sep = '';
     for (var i = 0; i < was.length; i++) {
       var c = was.charAt(i);
@@ -900,10 +1231,21 @@
       else cur += c;
     }
     slots.push(cur);
-    var text = /[\s;,"]/.test(v) ? '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n') + '"' : v;
+    var quote = function (x) {
+      x = String(x);
+      return /[\s;,"]/.test(x) ? '"' + x.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n') + '"' : x;
+    };
+    /* a list (a painted project's filaments: one entry a slot): each entry as Studio writes it, joined as the line joins its slots */
+    if (Array.isArray(value)) {
+      /* Studio joins numbers with ',' and words with ';' (filament_colour = #8E9089;#FFFFFF;#000000, filament_type = PLA;PLA;PLA) */
+      var sp = sep || (value.every(function (x) { return /^(-?[\d.]+%?|nil)$/.test(String(x)); }) ? ',' : ';');
+      return value.map(quote).join(sp);
+    }
+    var text = quote(value);
     if (slots.length < 2) return text;
     return slots.map(function () { return text; }).join(sep);
   }
+
 
   /** The CONFIG_BLOCK: Studio's own for this printer, with NSO's cooling keys put in, and any process
    *  setting the caller changed from the template (`over`, { key: value } - the Slice card's settings). */
@@ -913,7 +1255,8 @@
       var m = /^; ([^ =]+) = (.*)$/.exec(l);
       if (m && over && Object.prototype.hasOwnProperty.call(over, m[1])) return '; ' + m[1] + ' = ' + configValue(m[2], over[m[1]]);
       if (!m || !Object.prototype.hasOwnProperty.call(map, m[1])) return l;
-      var slots = m[2].split(',').length;
+      /* NSO's cooling keys on every filament: a painted project's count of them when it brings its list */
+      var slots = over && Array.isArray(over.filament_colour) ? over.filament_colour.length : m[2].split(',').length;
       var v = [];
       for (var i = 0; i < slots; i++) v.push(map[m[1]]);
       return '; ' + m[1] + ' = ' + v.join(',');
@@ -1082,11 +1425,24 @@
     var allMask = objectMask(res.objects.map(function (o, i) { return i; }));
     var idList = ids.join(',');
 
+    /* MULTI-COLOUR (docs/MULTICOLOR.md): a layer of an object carries the filament slot it prints with (L.slot, 0-based; the app sets it from
+       the piece's paint). With more than one slot, or one that is not the first, the print changes filament the way Studio's does: its own
+       change block (the template's change_filament_gcode) with the purge from its table, at the layer change or between two objects. */
+    var usedSlots = {};
+    res.objects.forEach(function (ob) { ob.layers.forEach(function (L) { if (L && L.paths && L.paths.length) usedSlots[L.slot || 0] = 1; }); });
+    var MC = (Object.keys(usedSlots).length > 1 || !usedSlots[0]) ? multiColour(opts.config, res, Pr, S) : null;
+    if (MC && MC.error) return { ok: false, reason: MC.error };
+    /* the extruder's offset (the P1S template's extruder_offset is 0x2): Studio writes every move of the print that far back, the bed-mesh box
+       not (the owner's 3-colour pyramid: printed 2 mm below its G29 box, in Y); custom blocks are the printer's own coordinates */
+    var OFF = extruderOffset(opts.config);
+    var gx = function (v) { return fx(v - OFF.x); }, gy = function (v) { return fx(v - OFF.y); };
+    var hookAtStart = !!HOOK_AT_LAYER_START[Pr.id];
+
     // ---- the writer: every line with the print's clock at that line
     var W = { lines: [] };
     var put = function (l) { W.lines.push(l); };
     var st = { nozzleT: S.temp.nozzleInitial, x: null, y: null, z: 0, fan: null, layerFan: null, aux: null, A: null, feature: null, lw: null, lh: null, retracted: false,
-               openObj: -1, objId: -1, pending: null, extruded: 0 };
+               openObj: -1, objId: -1, pending: null, extruded: 0, slot: MC ? MC.initial : 0, retractLen: null, bySlot: {} };
     /** M204 only when the acceleration changes, as Studio writes it. */
     var accel = function (a) { var v = fmt(a, 0); if (st.A !== v) { put('M204 S' + v); st.A = v; } };
     var travelV = function (first) { return first ? S.speed.firstTravel : S.speed.travel; };
@@ -1094,6 +1450,8 @@
 
     thaw(Pr.start, vals, flags).forEach(function (l) {
       var m = /^@M73 (\d+)$/.exec(l);
+      /* the first filament is loaded in the start block: its slot, when it is not the first (Studio's [initial_extruder]) */
+      if (!m && MC && MC.initial !== 0 && typeof l === 'string') l = l.replace(/^(M62[01] S)0(A\b)/, '$1' + MC.initial + '$2').replace(/^(\s*T)0$/, '$1' + MC.initial);
       put(m ? { at: +m[1] } : l);
     });
     /* THE OBJECTS STILL TO PRINT (Studio 02.09.01.70 on the P1S, the owner's eight-part desk hanger, 2026-11-20): with more than one
@@ -1162,7 +1520,7 @@
         for (var q = 1; q < wp.length; q++) {
           // what the file says, so the cycle sums to the retraction to the last digit
           var share = +fe(rest * RETRACT_DURING_WIPE * dist(wp[q - 1], wp[q]) / wl);
-          put('G1 X' + fx(wp[q][0]) + ' Y' + fx(wp[q][1]) + (share > 0 ? ' E-' + fe(share) : ''));
+          put('G1 X' + gx(wp[q][0]) + ' Y' + gy(wp[q][1]) + (share > 0 ? ' E-' + fe(share) : ''));
           spent += share;
         }
         put('; WIPE_END');
@@ -1172,11 +1530,44 @@
         put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0));
       }
       st.retracted = true;
+      st.retractLen = R.length;
     }
     function deretract() {
       if (!st.retracted) return;
-      put('G1 E' + fe(R.length + R.restartExtra) + ' F' + fmt(R.deretractSpeed * 60, 0));
+      /* after a filament change the filament is out by the change's own length (retract_length_toolchange), and goes back by that */
+      put('G1 E' + fe((st.retractLen != null ? st.retractLen : R.length) + R.restartExtra) + ' F' + fmt(R.deretractSpeed * 60, 0));
       st.retracted = false;
+      st.retractLen = null;
+    }
+    /**
+     * A FILAMENT CHANGE, as Studio's set_extruder writes it with no prime tower (GCode.cpp): the retraction topped up to the change's length,
+     * the old filament's end G-code, the template's change block (MC.block: the purge from its table, the cut, the new slot loaded), the fans
+     * and the nozzle temperature put back, and the new filament's start G-code. Ends lifted 3 mm, retracted by the new filament's change length.
+     */
+    function changeFilament(to, z, first) {
+      var from = st.slot;
+      if (!st.retracted) { put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0)); st.retracted = true; st.retractLen = R.length; }
+      var have = st.retractLen != null ? st.retractLen : R.length, more = MC.toolchangeLength(from) - have, fIn = null;
+      if (more > 1e-9) { put('G1 E-' + fe(more) + ' F' + fmt(R.speed * 60, 0)); fIn = R.speed * 60; }
+      MC.endLines(from).forEach(put);
+      var blk = MC.block(from, to, z, first, fIn);
+      blk.lines.forEach(put);
+      if (blk.accel != null) st.A = fmt(blk.accel, 0);
+      if (blk.z != null) st.z = blk.z;
+      st.bySlot[to] = (st.bySlot[to] || 0) + blk.extruded;
+      st.extruded += blk.extruded;
+      /* Studio's _FORCE_RESUME_FAN_SPEED: the block turned the fans off; the layer's come back */
+      put(fanLine(st.fan == null ? 0 : st.fan));
+      if (S.fan.aux) put('M106 P2 S' + fc(st.aux == null ? 0 : st.aux, 2));
+      var T = MC.temp(to, first);
+      put('M104 S' + fmt(T, 0) + ' ; set nozzle temperature');
+      st.nozzleT = T;
+      MC.startLines(to).forEach(put);
+      st.retracted = true;
+      st.retractLen = MC.toolchangeLength(to);
+      st.slot = to;
+      st.feature = null; st.lw = null;
+      return true;
     }
     function emitHook(li, z) {
       var h = hookLines(Pr, layerNo, z, vals.cy, flags);
@@ -1209,11 +1600,32 @@
       var lastLayer = pj === printing.length - 1;
       layerNo = pj + 1;
       var items = layerItems(res, li, S);
+      if (MC) {
+        /* a layer's filaments: the one loaded first, then the others in slot order (Studio's tool ordering keeps the last of a layer for the
+           start of the next); a path before a change ends wiped and retracted */
+        var cur = st.slot;
+        items = items.map(function (it, i) { return { it: it, i: i }; }).sort(function (a, b) {
+          var ka = a.it.slot === cur ? -1 : a.it.slot, kb = b.it.slot === cur ? -1 : b.it.slot;
+          return ka - kb || a.i - b.i;
+        }).map(function (x) { return x.it; });
+      }
       var endPos = planTravels(items, S, startPos, first ? true : R.onLayerChange);
       items[items.length - 1].retractAfter = lastLayer ? true : R.onLayerChange;
-      var hookAt = hookAfter(items);
+      var hookAt = hookAtStart ? -2 : hookAfter(items);      /* -2: the timelapse goes at the layer change (HOOK_AT_LAYER_START) */
       if (hookAt >= 0) items[hookAt].retractAfter = true;
-      var cool = coolLayer(items, S, first);
+      if (MC) for (var kc = 1; kc < items.length; kc++) if (items[kc].slot !== items[kc - 1].slot) items[kc - 1].retractAfter = true;
+      /* the layer's filament changes, timed (their moves, as the cooling counts the layer's) */
+      var changeSec = 0;
+      if (MC) {
+        var cs = st.slot, nth = MC.count;
+        items.forEach(function (it) {
+          if (it.slot === cs) return;
+          nth++;
+          changeSec += estimateLines(MC.blockAt(cs, it.slot, pl.printZ, first, null, nth).lines, { jerk: S.jerk, accel: S.accel.def }).seconds;
+          cs = it.slot;
+        });
+      }
+      var cool = coolLayer(items, S, first, changeSec);
       var fan = fanFor(S, pj, cool.seconds);
       // reduce_fan_stop_start_freq: a layer keeps the fan it has unless the new one is 2 % or more away
       if (st.layerFan != null && pj >= S.fan.closeFirst + 1 && S.cooling.reduce_fan_stop_start_freq && Math.abs(fan - st.layerFan) < 2.55 * 2) fan = st.layerFan;
@@ -1299,25 +1711,56 @@
         var prev = k ? items[k - 1] : null;
         var parkT = parkFor(k);
         // ----- the boundary and the travel to this path
-        if (k === 0) {
+        if (k === 0 && hookAtStart) {
+          /* STUDIO'S CORE-XY LAYER CHANGE (the P1S): lift - on the first layer straight up from the bed, after it the spiral - then the
+             timelapse, then a filament change if the layer starts on another, then the object, the travel (its F dropped when the lift's is
+             in force, as Studio's cooling buffer drops it) and down to the layer */
           if (parkT != null) parkAt(parkT);
+          var liftF = travelV(first) * 60;
+          accel(first ? S.accel.firstTravel : S.accel.travel);
+          var lifted = R.hop > 0 && (first || R.onLayerChange);
+          if (lifted) { if (first) put('G1 Z' + fx(R.hop) + ' F' + fmt(liftF, 0)); else spiral(st.z + R.hop, false); }
+          emitHook(li, z);
+          var changed = MC && it.slot !== st.slot ? changeFilament(it.slot, z, first) : false;
+          openObject(it.obj);
+          put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + (lifted && !changed ? '' : ' F' + fmt(liftF, 0)));
+          put('G1 Z' + fx(z));
+          deretract();
+        } else if (k === 0) {
+          if (parkT != null) parkAt(parkT);
+          var changed0 = MC && it.slot !== st.slot ? changeFilament(it.slot, z, first) : false;
           openObject(it.obj);
           if (first) {
             accel(S.accel.firstTravel);
-            put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(S.speed.firstTravel * 60, 0));
+            put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(S.speed.firstTravel * 60, 0));
             if (R.hop > 0) put('G1 Z' + fx(z + R.hop));
             put('G1 Z' + fx(z));
           } else {
             accel(S.accel.travel);
-            if (R.hop > 0 && R.onLayerChange) {
+            if (changed0) {
+              put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(S.speed.travel * 60, 0));
+              put('G1 Z' + fx(z));
+            } else if (R.hop > 0 && R.onLayerChange) {
               var zUp = st.z + R.hop;
               spiral(zUp, false);
-              put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(zUp) + ' F' + fmt(S.speed.travel * 60, 0));
+              put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' Z' + fx(zUp) + ' F' + fmt(S.speed.travel * 60, 0));
               put('G1 Z' + fx(z));
             } else {
-              put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(z) + ' F' + fmt(S.speed.travel * 60, 0));
+              put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' Z' + fx(z) + ' F' + fmt(S.speed.travel * 60, 0));
             }
           }
+          deretract();
+        } else if (MC && it.slot !== st.slot) {
+          /* a change between two paths of a layer (two objects of different filaments): closed out, changed, and back down to the layer */
+          if (parkT != null) prev.retractAfter = true;
+          flushRetract();
+          closeObject();
+          if (parkT != null) parkAt(parkT);
+          changeFilament(it.slot, z, first);
+          openObject(it.obj);
+          accel(travelA(first));
+          put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
+          put('G1 Z' + fx(z));
           deretract();
         } else {
           if (parkT != null) prev.retractAfter = true;          // the path before a park ends as a travel's does: wiped and retracted
@@ -1337,14 +1780,14 @@
           if (parkT != null) { closeObject(); parkAt(parkT); openObject(it.obj); atHop = true; }
           if (t.retract || atHop) {
             accel(travelA(first));
-            if (atHop) put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
-            else if (t.hop) put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(z + R.hop) + ' F' + fmt(travelV(first) * 60, 0));
-            else put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
+            if (atHop) put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
+            else if (t.hop) put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' Z' + fx(z + R.hop) + ' F' + fmt(travelV(first) * 60, 0));
+            else put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
             if (atHop || t.hop) put('G1 Z' + fx(z));
             deretract();
           } else {
             accel(t.d < 2 ? S.accel.short : travelA(first));
-            put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
+            put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
           }
         }
         // ----- the path
@@ -1368,8 +1811,9 @@
           var d = Math.hypot(tx - x, ty - y);
           if (!(d > 5e-4)) continue;
           var e = it.bead.area * d / filA * F.flow;
-          put('G1 X' + fx(tx) + ' Y' + fx(ty) + ' E' + fe(e));
+          put('G1 X' + gx(tx) + ' Y' + gy(ty) + ' E' + fe(e));
           st.extruded += e;
+          st.bySlot[it.slot] = (st.bySlot[it.slot] || 0) + e;
           x = tx; y = ty;
           lastPts.push([tx, ty]);
         }
@@ -1426,20 +1870,36 @@
       var h = 0; ob.layers.forEach(function (Ly) { if (Ly && Ly.paths.length) h = Math.max(h, Ly.printZ); });
       return h;
     });
+    var slotTotals = null;
+    if (MC) {
+      /* MULTI-COLOUR: each slot's length, volume and weight - what it printed, its purges, and the start block's purge for the first -
+         as Studio's header lists them, one a filament of the project */
+      var lst = function (k) { var v = opts.config[k]; return Array.isArray(v) ? v : v == null ? [] : String(v).split(/[;,]/); };
+      slotTotals = [];
+      for (var sl = 0; sl < MC.n; sl++) {
+        var dia = +(lst('filament_diameter')[sl] || F.diameter), den = +(lst('filament_density')[sl] || density);
+        var mm = (st.bySlot[sl] || 0) + (sl === MC.initial ? (Pr.purgeMm || 0) : 0);
+        var vol = mm * Math.PI * dia * dia / 4;
+        slotTotals.push({ slot: sl, mm: mm, volume: vol, grams: vol / 1000 * den, density: den, diameter: dia });
+      }
+      lengthMm = slotTotals.reduce(function (a, t) { return a + t.mm; }, 0);
+      volume = slotTotals.reduce(function (a, t) { return a + t.volume; }, 0);
+    }
+    var joinT = function (key, d) { return slotTotals.map(function (t) { return t[key].toFixed(d); }).join(','); };
     var head = ['; HEADER_BLOCK_START', '; BambuStudio ' + Pr.studio,
       '; model printing time: ' + duration(bodySeconds) + '; total estimated time: ' + duration(totalSeconds),
       '; total layer number: ' + totalLayers,
-      '; total filament length [mm] : ' + lengthMm.toFixed(2),
-      '; total filament volume [cm^3] : ' + volume.toFixed(2),              // mm^3 under Studio's label, as Studio writes it
-      '; total filament weight [g] : ' + (volume / 1000 * density).toFixed(2)];
+      '; total filament length [mm] : ' + (slotTotals ? joinT('mm', 2) : lengthMm.toFixed(2)),
+      '; total filament volume [cm^3] : ' + (slotTotals ? joinT('volume', 2) : volume.toFixed(2)),              // mm^3 under Studio's label, as Studio writes it
+      '; total filament weight [g] : ' + (slotTotals ? joinT('grams', 2) : (volume / 1000 * density).toFixed(2))];
     if (labelled) {
       head.push('; model label id: ' + idList);
       head.push('; object max height: ' + heights.map(function (h) { return h.toFixed(2); }).join(','));
     }
-    head.push('; filament_density: ' + cfgOf('filament_density'));
-    head.push('; filament_diameter: ' + cfgOf('filament_diameter'));
+    head.push('; filament_density: ' + (slotTotals ? slotTotals.map(function (t) { return gnum(t.density); }).join(',') : cfgOf('filament_density')));
+    head.push('; filament_diameter: ' + (slotTotals ? slotTotals.map(function (t) { return gnum(t.diameter); }).join(',') : cfgOf('filament_diameter')));
     head.push('; max_z_height: ' + top.toFixed(2));
-    head.push('; filament: 1');
+    head.push('; filament: ' + (slotTotals ? slotTotals.filter(function (t) { return t.mm > 0; }).map(function (t) { return t.slot + 1; }).join(',') : '1'));
     head.push('; support_material_on_wipe_tower: 0');
     head.push('; HEADER_BLOCK_END');
 
@@ -1474,7 +1934,9 @@
       labelled: labelled,
       stats: {
         layers: totalLayers, maxZ: top, filamentMm: lengthMm, bodyFilamentMm: st.extruded, volumeMm3: volume,
-        grams: volume / 1000 * density, box: box,
+        grams: slotTotals ? slotTotals.reduce(function (a, t) { return a + t.grams; }, 0) : volume / 1000 * density, box: box,
+        filaments: slotTotals ? slotTotals.map(function (t) { return { slot: t.slot, mm: t.mm, grams: t.grams }; }) : null,
+        changes: MC ? MC.changes.slice() : null,
         bridgeTemp: bridgeT != null ? { temp: bridgeT, changes: bridgeStat.changes, layers: bridgeStat.layers, secondsEach: BRIDGE_TEMP_SECONDS, fromLayer: +opts.bridgeTempFrom >= 2 ? +opts.bridgeTempFrom : null } : null,
         tempBands: steps ? bands : null,                       // the temperature steps as written: [{ temp, fromZ, layer }]
         seconds: { start: startS, body: bodySeconds, end: Pr.timing.endSeconds, total: totalSeconds }
@@ -1518,7 +1980,7 @@
    *  close_additional_fan_first_x_layers, then additional_cooling_fan_speed %. */
   function auxFanFor(S, layerIndex) {
     if (!S.fan.aux || layerIndex < S.fan.closeAux) return 0;
-    return Math.round(S.fan.auxPercent * 255 / 100);
+    return Math.floor(S.fan.auxPercent * 255 / 100);          /* Studio's set_additional_fan: (int)(255.0 * speed / 100.0), 70 % is 178 */
   }
 
   return {
@@ -1534,6 +1996,8 @@
     plan: plan,
     toGcode3mf: toGcode3mf,
     thaw: thaw,
+    studioTemplate: studioTemplate,
+    dropRepeatedF: dropRepeatedF,
     configValue: configValue,
     firstLayerBox: firstLayerBox,
     objectMask: objectMask,

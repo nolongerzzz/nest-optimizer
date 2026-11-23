@@ -97,7 +97,7 @@
 
   // The files the slice worker loads, in order: the page's own <script> tags
   // (a ?v= bump is picked up), so each must be one of them.
-  var ENGINE = ['nso-cooling-profiles.js', 'nso-3mf.js', 'nso-3mf-read.js', 'nso_csg.js', 'nso_slicer.js',
+  var ENGINE = ['nso-cooling-profiles.js', 'nso-3mf.js', 'nso-3mf-read.js', 'nso_paint.js', 'nso_csg.js', 'nso_slicer.js',
                 'nso-print-planner.js', 'nso-gcode3mf-write.js', 'app-print.js'];
 
   // ---- the card's Slice settings ---------------------------------------------
@@ -597,7 +597,8 @@
       return { name: p.name, soup: soup, key: p.sourceId, gapCloseMm: p.nonSolid ? 0 : undefined,
                role: p.support ? (p.brim ? 'brim' : 'support') : 'part', hostKey: p.support ? p.hostSourceId : undefined,
                interfaceLayers: p.support ? p.interfaceLayers : undefined,
-               sheetLayerMm: p.support ? p.sheetLayerMm : undefined };
+               sheetLayerMm: p.support ? p.sheetLayerMm : undefined,
+               paint: p.support ? null : (p.paint || null) };            /* its painted colours (nso_paint.js): the layers' filament slots */
     });
   }
 
@@ -694,6 +695,107 @@
     });
   }
 
+  /**
+   * MULTI-COLOUR, STEP 2 (docs/MULTICOLOR.md): each layer of a painted piece prints with the filament its paint has at the layer's
+   * mid-height - the plane Studio slices at, and where its slice of the owner's 3-colour pyramid changed filament (8.6, 15.4, 21.6: the first
+   * layer whose middle is past each band's edge). The layer's slot (0-based) goes on the slicer's layer (L.slot) for the planner; a piece with
+   * no paint prints with the first filament. A layer whose outline crosses two colours (a logo on a face, two parts of different
+   * filaments) is not split between them yet: refused, with where. Also puts each object's footprint on it (bbox, the plate's frame), for
+   * the filament change's travel path. Returns null, or the refusal.
+   */
+  function layerSlots(objects, res) {
+    var P = lazy('nso_paint.js', 'NSO_Paint');
+    if (!res.objects || res.objects.length !== objects.length) return null;
+    for (var k = 0; k < objects.length; k++) {
+      var ob = objects[k], ro = res.objects[k], soup = ob.soup;
+      if (soup && soup.length) {
+        var b = { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity };
+        for (var i = 0; i < soup.length; i += 3) {
+          if (soup[i] < b.x0) b.x0 = soup[i]; if (soup[i] > b.x1) b.x1 = soup[i];
+          if (soup[i + 1] < b.y0) b.y0 = soup[i + 1]; if (soup[i + 1] > b.y1) b.y1 = soup[i + 1];
+        }
+        ro.bbox = b;
+      }
+      if (!ob.paint || !P || !P.fits(ob.paint, soup.length)) continue;
+      /* the leaves, by height: each its z range, filament and the triangle to cut */
+      var leaves = [];
+      P.eachLeaf(soup, ob.paint, function (p, q, r, f) {
+        leaves.push({ lo: Math.min(p[2], q[2], r[2]), hi: Math.max(p[2], q[2], r[2]), f: f, t: [p, q, r] });
+      });
+      leaves.sort(function (a, b2) { return a.lo - b2.lo; });
+      var maxF = 0;
+      for (var li = 0; li < res.planes.length; li++) {
+        var L = ro.layers[li];
+        if (!L || !L.paths || !L.paths.length) continue;
+        var pl = res.planes[li], h = L.h || pl.h, zc = pl.printZ - h / 2;
+        var len = {};
+        for (var j = 0; j < leaves.length && leaves[j].lo < zc; j++) {
+          var lf = leaves[j];
+          if (lf.hi <= zc) continue;
+          var t = lf.t, cut = [];
+          for (var e = 0; e < 3; e++) {
+            var A = t[e], B = t[(e + 1) % 3];
+            if ((A[2] - zc) * (B[2] - zc) < 0) { var u = (zc - A[2]) / (B[2] - A[2]); cut.push([A[0] + u * (B[0] - A[0]), A[1] + u * (B[1] - A[1])]); }
+          }
+          if (cut.length === 2) len[lf.f] = (len[lf.f] || 0) + Math.hypot(cut[1][0] - cut[0][0], cut[1][1] - cut[0][1]);
+        }
+        var fs = Object.keys(len).map(Number), tot = 0, best = 0;
+        fs.forEach(function (f) { tot += len[f]; if (!best || len[f] > len[best]) best = f; });
+        if (!fs.length) continue;
+        /* a sliver of another colour (a leaf's edge just touching the plane) is not a second colour: under 1 % of the outline */
+        if (len[best] < tot * 0.99) {
+          return 'Multi-colour: ' + (ob.name || 'a piece') + ' has ' + fs.length + ' colours in one layer (at ' + pl.printZ.toFixed(2) +
+            ' mm: filaments ' + fs.sort().join(', ') + '). A layer of one piece prints in one colour for now; colours that share a layer ' +
+            '(a logo on a face) come next.';
+        }
+        L.slot = best - 1;
+        if (best > maxF) maxF = best;
+      }
+    }
+    return null;
+  }
+
+  /* the keys a painted project brings that are not a list of its filaments: the purge table and the colours' map */
+  var MC_KEYS = /^(flush_volumes_matrix|flush_volumes_vector|flush_multiplier|filament_map)$/;
+  /**
+   * MULTI-COLOUR (docs/MULTICOLOR.md): a plate whose painted pieces use more than one filament slices with their Studio project's filaments -
+   * its slots' colours, types, temperatures and purge table - over the printer profile's template, which holds one filament (or two). The
+   * per-filament lists of the project (one entry a filament, or two: a filament's two extruder variants) replace the template's; the rest of
+   * the template stays. Returns assets with that config and `filamentOver` (the keys, for the file's CONFIG_BLOCK), or the assets as they
+   * were; { error } when the paint uses a filament the project does not have.
+   */
+  function withProjectFilaments(assets, pieces) {
+    var P = lazy('nso_paint.js', 'NSO_Paint');
+    var painted = (pieces || []).filter(function (p) { return p && p.paint && !p.support; });
+    if (!painted.length || !P) return assets;
+    var most = 0, file = null;
+    painted.forEach(function (p) { P.filaments(p.paint).forEach(function (f) { if (f > most) most = f; }); if (!file && p.file) file = p.file; });
+    if (most <= 1) return assets;
+    var reg = root && root.nsoProjects, proj = file && reg && reg[file] ? reg[file].config : null;
+    if (!proj) return { error: 'This piece is painted in ' + most + ' filaments, but the Studio project it came from (its filament list) is not open: open the project file again.' };
+    var listOf = function (v) { return Array.isArray(v) ? v : v == null ? [] : String(v).split(/[;,]/); };
+    var n = listOf(proj.filament_colour).length;
+    if (n < most) return { error: 'This piece is painted with filament ' + most + ', but its project has ' + n + ' filament' + (n === 1 ? '' : 's') + '.' };
+    var tpl = assets.config, cfg = Object.assign({}, tpl), over = {};
+    var tn = listOf(tpl.filament_settings_id).length || 1;
+    /* a key of the template's filaments (one entry a filament, or two: a filament's extruder variants) that the project lists for its own */
+    Object.keys(proj).forEach(function (k) {
+      if (!Object.prototype.hasOwnProperty.call(tpl, k)) return;
+      var v = proj[k], t = tpl[k];
+      var perFil = Array.isArray(t) && (t.length === tn || t.length === 2 * tn) && Array.isArray(v) && (v.length === n || v.length === 2 * n) &&
+                   (t.length === tn) === (v.length === n);
+      if (!perFil && !MC_KEYS.test(k)) return;
+      cfg[k] = Array.isArray(v) ? v.slice() : v;
+      /* the G-code's CONFIG_BLOCK lists a filament once: a key kept per extruder variant gives its standard nozzle's (Studio: nozzle_temperature
+         = 220,220,220 where the project has six) */
+      over[k] = perFil && v.length === 2 * n ? v.filter(function (x, i) { return i % 2 === 0; }) : cfg[k];
+    });
+    /* which settings each filament changed from its preset: the project's, one entry a filament between the process's and the printer's */
+    var pd = proj.different_settings_to_system, td = tpl.different_settings_to_system;
+    if (Array.isArray(pd) && pd.length === n + 2 && Array.isArray(td) && td.length >= 2) cfg.different_settings_to_system = [td[0]].concat(pd.slice(1, n + 1), [td[td.length - 1]]);
+    return Object.assign({}, assets, { config: cfg, filamentOver: over });
+  }
+
   function build(objects, assets, opts) {
     opts = opts || {};
     var stage = opts.onStage || function () {};
@@ -709,8 +811,12 @@
       return SL.run(objects, so.o);
     }).then(function (res) {
       if (!res.ok) return { ok: false, reason: 'Slice refused: ' + res.reason };
+      var mixed = layerSlots(objects, res);
+      if (mixed) return { ok: false, reason: mixed };
       stage('writing', { layers: res.planes.length });
       var ex = plannerExtras(config, settings);
+      /* a painted project's filaments go into the file's CONFIG_BLOCK as lists, under the card's own changes */
+      if (assets.filamentOver) over = Object.assign({}, assets.filamentOver, over);
       return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps, bridgeTemp: ex.bridgeTemp, bridgeTempFrom: ex.bridgeTempFrom, hangSpeed: ex.hangSpeed }).then(function (out) {
         var seen = {};
         out.plan.layers.forEach(function (l) { l.features.forEach(function (f) { seen[f] = 1; }); });
@@ -853,7 +959,7 @@
 
   var api = {
     PROFILES: PROFILES, ENGINE: ENGINE, profileFor: profileFor, readTemplate: readTemplate, pieceObjects: pieceObjects,
-    fileName: fileName, gcodeName: gcodeName, build: build, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
+    fileName: fileName, gcodeName: gcodeName, build: build, withProjectFilaments: withProjectFilaments, layerSlots: layerSlots, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
     SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
     configOverlay: configOverlay, withOverlay: withOverlay, plateProject: plateProject,
     FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf, hangSpeedOf: hangSpeedOf
@@ -898,6 +1004,8 @@
       var soup = sup && typeof root.nsoSupportSliceSoup === 'function' ? root.nsoSupportSliceSoup(m, o.positions) : o.positions;
       return { name: o.name, file: m && m.sourceFile ? m.sourceFile : null, soup: soup, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined, interfaceLayers: sup ? sup.interfaceLayers : undefined, sheetLayerMm: sup ? sup.sheetLayerMm : undefined,
                nonSolid: !!(pm && typeof root.nsoNonSolid === 'function' && root.nsoNonSolid(pm)),
+               /* its painted colours, while its triangles are the ones they were read with (the soup keeps the piece's order) */
+               paint: !sup && m && m.paint && root.NSO_Paint && root.NSO_Paint.fits(m.paint, (o.positions || []).length) ? m.paint : null,
                settings: m && m.slicerSettings ? Object.assign({}, m.slicerSettings) : null };      // a support's own slicer overrides ride into a 3MF
     });
   }
@@ -1424,6 +1532,8 @@
     mine.finish = ended;
     loadAssets(profile).then(function (assets) {
       if (mine.cancelled) return null;
+      assets = withProjectFilaments(assets, pieces);
+      if (assets.error) return { ok: false, reason: assets.error };
       var objects = pieceObjects(pieces, assets.printer.bed);
       mine.run = runAway(objects, assets, onStage, settings, { stacks: !!(hook && hook.stacks) });
       return mine.run.promise;

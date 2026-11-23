@@ -911,6 +911,69 @@ async function main() {
   }
 
   // ===========================================================================
+  section('5c. Multi-colour: the owner\'s 3-colour pyramid on the P1S with the AMS, against Studio\'s slice of it (docs/MULTICOLOR.md)');
+  // ===========================================================================
+  {
+    const R3 = require(path.join(ROOT, 'nso-3mf-read.js')), PP = require(path.join(ROOT, 'nso_paint.js'));
+    const file = 'Test_Pyramid_3_Colors_P1S_AMS.3mf';
+    const st = await L.bambuSlice('fixtures/multicolor/pyramid-3colors-notower.slim.gcode.3mf');      /* Studio's, prime tower off: its moves dropped */
+    const rd = await R3.parse3MF(new Uint8Array(fs.readFileSync(path.join(ROOT, 'fixtures/multicolor/pyramid-3colors.3mf'))), { name: file });
+    const o = rd.objects[0], soup = Float32Array.from(o.positions);
+    for (let i = 0; i < soup.length; i += 3) { soup[i] -= p1sPrinter.bed.x / 2; soup[i + 1] -= p1sPrinter.bed.y / 2; }   /* where Studio has it */
+    const pieces = [{ name: 'Test Pyramid.stl', file, soup, sourceId: 1, paint: PP.make(o.paint.codes, o.paint.flip, o.paint.ext, o.paint.colours) }];
+    const was = global.nsoProjects;
+    global.nsoProjects = { [file]: { config: st.config, objects: [] } };
+    const assets = PRINT.withProjectFilaments({ config: p1sCfg, printer: p1sPrinter }, pieces);
+    check('the painted pyramid slices with its project\'s three filaments over the P1S template: colours, types, the purge table',
+      !assets.error && JSON.stringify(assets.config.filament_colour) === JSON.stringify(['#8E9089', '#FFFFFF', '#000000']) &&
+        assets.config.flush_volumes_matrix.join(',') === '0,381,123,123,0,143,439,623,0' && p1sCfg.filament_colour.length === 1, JSON.stringify(assets.error || assets.config.filament_colour));
+    const objsMC = PRINT.pieceObjects(pieces, p1sPrinter.bed);
+    const r = await PRINT.build(objsMC, assets, { settings: PRINT.settingsFromConfig(p1sCfg) });
+    check('...and slices', r.ok, r.reason);
+    if (r.ok) {
+      const z = L.R.openZip(r.bytes), g = L.text(await z.read('Metadata/plate_1.gcode')), gl = g.split('\n'), sl = st.gcode.split('\n');
+      const changesOf = lines => { const out = []; let zz = null; lines.forEach(l => { const m = /^; Z_HEIGHT: (.*)$/.exec(l); if (m) zz = +m[1]; const c = /^M620 S(\d)A$/.exec(l); if (c) out.push(zz + ':' + c[1]); }); return out.join(' '); };
+      check('three changes where Studio\'s are: black (slot 3) at 8.6, white (2) at 15.4, grey (1) at 21.6', changesOf(gl) === '8.6:2 15.4:1 21.6:0' && changesOf(sl) === changesOf(gl), changesOf(gl));
+      /* each change, from the timelapse before it to the object after it, line for line */
+      const regions = lines => {
+        const out = [];
+        lines.forEach((l, i) => {
+          if (!/^M620 S\dA$/.test(l)) return;
+          let a = i; while (a > i - 60 && !lines[a].startsWith('; SKIPPABLE_END')) a--;
+          let b = i; while (b < i + 400 && !lines[b].startsWith('; OBJECT_ID')) b++;
+          out.push(lines.slice(a, b).filter(x => !/^M73 [PR]/.test(x)));
+        });
+        return out;
+      };
+      const A = regions(sl), B = regions(gl);
+      const offs = A.map((x, k) => { const y = B[k] || []; const at = x.findIndex((l, j) => l !== y[j] && !(/^M106 S/.test(l) && /^M106 S/.test(y[j]))); return at < 0 && x.length === y.length ? -1 : at; });
+      check('...each written as Studio wrote it, line for line (' + A.map(x => x.length).join(', ') + ' lines): the retraction to 2 mm, the filament end, the P1S change block with its purge (51 mm, then 4 x 65 mm for black to white), the travel path on the second, the fans, the nozzle, the filament start (the part fan\'s value is the layer\'s)',
+        A.length === 3 && offs.every(x => x === -1), JSON.stringify(offs.map((at, k) => at < 0 ? null : [A[k][at], (B[k] || [])[at]])));
+      const head = k => ((new RegExp('^; ' + k + ': ?(.*)$', 'm').exec(g) || [])[1] || '');
+      check('the header lists each filament: "filament: 1,2,3", a length, volume and weight each', head('filament') === '1,2,3' && head('total filament length \\[mm\\] ').split(',').length === 3 &&
+        head('filament_density') === '1.26,1.26,1.26', JSON.stringify([head('filament'), head('total filament length \\[mm\\] ')]));
+      const si = L.text(await z.read('Metadata/slice_info.config'));
+      const fil = [...si.matchAll(/<filament id="(\d)" tray_info_idx="([^"]*)" type="([^"]*)" color="([^"]*)"[^>]*total_load_time="([\d.]+)" total_unload_time="([\d.]+)"/g)].map(m => m.slice(1).join(' '));
+      check('...and the plate info: three filaments, their trays, colours and load / unload times as Studio\'s', JSON.stringify(fil) === JSON.stringify(['1 GFA00 PLA #8E9089 58.00 28.00', '2 GFA00 PLA #FFFFFF 29.00 28.00', '3 GFA00 PLA #000000 29.00 28.00']), JSON.stringify(fil));
+      const lfl = t => [...t.matchAll(/<layer_filament_list filament_list="([^"]*)" layer_ranges="([^"]*)"/g)].map(m => m[1] + ':' + m[2]).filter(x => !/^:/.test(x)).sort().join(' | ');
+      check('...its layer filament lists are Studio\'s: grey 0-41 and 107-147, black 42-75, white 76-106', lfl(si) === lfl(L.text(await L.R.openZip(fs.readFileSync(path.join(ROOT, 'fixtures/multicolor/pyramid-3colors-notower.slim.gcode.3mf'))).read('Metadata/slice_info.config'))), lfl(si));
+      const ps = JSON.parse(L.text(await z.read('Metadata/project_settings.config')));
+      check('...and its project settings carry the three filaments (colours, presets, each filament\'s changes)', ps.filament_colour.length === 3 && ps.filament_settings_id.length === 3 && ps.different_settings_to_system.length === 5,
+        JSON.stringify([ps.filament_colour, ps.different_settings_to_system.length]));
+      const cfgLine = k => ((new RegExp('^; ' + k + ' = (.*)$', 'm').exec(g) || [])[1]);
+      check('...and its CONFIG_BLOCK too, as Studio writes them (filament_colour, filament_type, the purge table, nozzle_temperature once a filament)',
+        ['filament_colour', 'filament_type', 'flush_volumes_matrix', 'nozzle_temperature', 'filament_ids', 'filament_map'].every(k => cfgLine(k) === (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(st.gcode) || [])[1]),
+        JSON.stringify(['filament_colour', 'nozzle_temperature'].map(cfgLine)));
+      /* the change layers print at the layer's own speed: their change counts towards the layer's time, as Studio's cooling counts it */
+      const wallF = zz => { const i = gl.indexOf('; Z_HEIGHT: ' + zz); const j = gl.indexOf('; FEATURE: Inner wall', i); return +((/^G1 F([\d.]+)/.exec(gl.slice(j, j + 4).find(l => /^G1 F/.test(l)) || '') || [])[1]); };
+      check('a change layer\'s walls are not slowed for the layer\'s time (8.6: F' + wallF('8.6') + ', the layer under it F' + wallF('8.4') + ')', wallF('8.6') > 2 * wallF('8.4'));
+    }
+    const bad = PRINT.withProjectFilaments({ config: p1sCfg, printer: p1sPrinter }, [{ name: 'x', file: 'not-open.3mf', soup, paint: pieces[0].paint }]);
+    check('a piece painted in three filaments whose project is not open is refused in words', !!bad.error && /not open/.test(bad.error), bad.error);
+    global.nsoProjects = was;
+  }
+
+  // ===========================================================================
   section('5b. The slice worker\'s load: the files in a global with no DOM and no module');
   // ===========================================================================
   {
