@@ -83,7 +83,12 @@ carry their slot.
    `top_color_penetration_layers` - 1 below it, each one (outer wall + spacing) further in
    from the layer's outline; a bottom face the same upwards (`bottom_color_...`). A face the
    next layer covers is no top / bottom. They win over the sides.
-3. What is left, and any sliver narrower than half a wall, is the piece's own filament.
+3. What is left is the piece's own filament.
+4. **Crumbs**: where the side split meets an inset top / bottom shell the two do not quite
+   meet, and the gaps came out as islands of 0.2 - 3 mm^2, each with its own walls (on the
+   logo's first print: stops in the preview, dark dashes round the rim and the letters).
+   Any part of a region thinner than a wall or under 0.5 mm^2 now goes to the region it
+   touches most. Checked in 5e: no outer wall under 2.5 mm across on any layer.
 
 **The order of a layer's colours** (planner `orderColours`, Studio's
 `reorder_filaments_for_minimum_flush_volume`): layer by layer, every order of its

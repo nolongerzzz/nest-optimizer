@@ -317,19 +317,41 @@
       tb[0] = g.diff(tb[0], claimed);
       var tbAll = g.unionAll(tb);
       var sd = sides(g, cs, segsAt[i]) || {};
-      var got = g.empty();
+      /* each filament's region as the rules give it, exactly: the sides less the tops and bottoms, the tops and bottoms, the rest own */
+      var raw = {}, got = g.empty();
       var add = function (filament, region) {
         region = g.inter(region, cs);
-        /* a sliver no wall can print (where two edges of the split nearly meet) is the piece's own: Studio's opening and its 0.1 mm^2 */
-        if (filament !== own) region = g.dropSmall(open(region), 0.1);
-        if (g.isEmpty(region) || g.area(region) < 1e-4) return;
-        var slot = filament - 1;
-        res[slot] = res[slot] ? g.union(res[slot], region) : region;
+        if (g.isEmpty(region) || g.area(region) < 1e-6) return;
+        raw[filament] = raw[filament] ? g.union(raw[filament], region) : region;
         got = g.union(got, region);
       };
       Object.keys(sd).map(Number).forEach(function (f) { if (f >= 1) add(f, g.diff(sd[f], tbAll)); });
-      for (var c5 = 1; c5 <= nc; c5++) add(c5, tb[c5]);
+      for (var c5 = 1; c5 <= nc; c5++) add(c5, g.diff(tb[c5], got));
       add(own, g.diff(cs, got));
+      /* THE SLIVERS (the owner's logo, 2026-11-23: under the letters' top skin, where the side split and the skin's inset edge meet, a
+         dozen islands and holes of 0.2 - 3 mm^2, each walled round - the "weird stops" in the preview, the dashes on the print): a piece
+         of a region too thin for a line (Studio's opening: half an outer wall) or under 0.5 mm^2 goes to the region it borders most */
+      var fs = Object.keys(raw).map(Number);
+      fs.forEach(function (f) {
+        var keep = [], give = [];
+        g.parts(raw[f]).forEach(function (pc) {
+          var thin = g.isEmpty(g.offset(pc, -openR)) || g.area(pc) < 0.5;
+          (thin ? give : keep).push(pc);
+        });
+        if (!give.length || fs.length < 2) return;
+        raw[f] = g.unionAll(keep);
+        give.forEach(function (pc) {
+          var grown = g.offset(pc, 0.06), best = -1, bestA = 0;
+          fs.forEach(function (o2) {
+            if (o2 === f || !raw[o2] || g.isEmpty(raw[o2])) return;
+            var a2 = g.area(g.inter(grown, raw[o2]));
+            if (a2 > bestA) { bestA = a2; best = o2; }
+          });
+          if (best < 0) { raw[f] = g.union(raw[f], pc); return; }
+          raw[best] = g.union(raw[best], pc);
+        });
+      });
+      fs.forEach(function (f) { if (raw[f] && !g.isEmpty(raw[f]) && g.area(raw[f]) > 1e-4) res[f - 1] = raw[f]; });
       return res;
     });
   }

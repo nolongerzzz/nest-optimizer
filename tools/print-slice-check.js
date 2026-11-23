@@ -1073,6 +1073,20 @@ async function main() {
       check('ten changes, the tower 35 x 15.5 mm (two purges a layer), and each change marked with how many are still to come (M73 E9 ... E0)',
         r.stats.changes === 10 && r.stats.tower && Math.abs(r.stats.tower.depth - 15.5) < 1e-3 &&
           (g.match(/^M73 E\d+$/mg) || []).join(' ') === 'M73 E9 M73 E8 M73 E7 M73 E6 M73 E5 M73 E4 M73 E3 M73 E2 M73 E1 M73 E0', JSON.stringify([r.stats.changes, r.stats.tower]));
+      /* no walled crumbs: where a letter's top skin met the side split, slivers of 0.2 - 3 mm2 each got walls of their own (stops and dashes on the print) */
+      const crumbs = (() => {
+        const out = []; let z = '', box = null, x = 0, y = 0;
+        const close = () => { if (box && box[2] - box[0] < 2.5 && box[3] - box[1] < 2.5) out.push(z); box = null; };
+        g.split('\n').forEach(l => {
+          if (/^; Z_HEIGHT: /.test(l)) { close(); z = l.slice(12); return; }
+          if (/^; FEATURE: /.test(l)) { close(); if (/Outer wall/.test(l)) box = [Infinity, Infinity, -Infinity, -Infinity]; return; }
+          const m = /^G1 .*?(?:X(-?[\d.]+))?\s*(?:Y(-?[\d.]+))?\s*E[\d.]/.exec(l);
+          if (/^G[01] /.test(l)) { const mx = / X(-?[\d.]+)/.exec(l), my = / Y(-?[\d.]+)/.exec(l); if (mx) x = +mx[1]; if (my) y = +my[1]; }
+          if (m && box && / E[\d.]/.test(l) && !/ E-/.test(l)) { box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y); box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y); }
+        });
+        close(); return out;
+      })();
+      check('no walled crumbs: no outer wall smaller than 2.5 mm across on any layer (the colour split hands its slivers to the region beside them)', crumbs.length === 0, crumbs.join(' '));
       /* the tower's part of each layer, line for line: the numbers to 0.0011 (the way round the tower: 194.022 where Studio has 194.023);
          not the object's own wipes (NSO's paths), the spiral, the fans, the first layer's speed */
       const byLayer = t => { const out = {}; let zz = null; t.split('\n').forEach(l => { const m = /^; Z_HEIGHT: (.*)$/.exec(l); if (m) { zz = m[1]; out[zz] = []; } else if (zz != null && !/^M73 [PR]/.test(l)) out[zz].push(l); }); return out; };
