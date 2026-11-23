@@ -328,6 +328,7 @@
       supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
       supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
       seamOffOverhang: true,               // a wall loop cut by an overhang begins at a piece on the layer below, not at one hanging over air; false: where its seam fell
+      seamAligned: true,                   // each wall loop starts at its most hidden corner, in line with the seams below (Studio's seam_position aligned); false: where its polygon began
       bridgeFirst: false,                  // a layer's open-air bridges laid before its walls (a soft filament's: the walls first, the nozzle rides a hanging wall down); false: walls first, as Studio
       shortFillMm: 0,                      // an open fill piece shorter than this (mm) is dropped: each is a travel, prime and retraction of its own (NO CRUMBS); 0 keeps all, as Studio does (a filament's choice: CR-TPU 1)
       islandOrder: true,                   // a layer's separate islands print one after the other, each whole (islandOrder), as Studio's do; false: every island's inner walls, then every outer wall, then the fill
@@ -955,6 +956,58 @@
       }
     }
     return false;
+  }
+
+  /* A TOP SURFACE ENDS ON A LONG LINE (the owner's Gulf logo, 2026-11-23: a curl on the letters' tops at every place a top run stopped). A run swept
+     into a corner ends on its shortest strokes, and the wipe - 2 mm back along the path while it retracts - folds over them in a millimetre: the
+     ooze lands in one spot. Studio's runs start in the corner and end on a long line, the wipe drawn out along it. So a top run whose last stroke
+     is shorter than its first is laid the other way round. */
+  /* WHERE A LOOP STARTS (Studio's SeamPlacer, seam_position aligned - in short). Every loop has a seam: its start, the seam gap left where it
+     ends, a wipe and a prime beside it. NSO began each loop wherever its polygon began - on the owner's Gulf logo the rim's inner wall began
+     half way down its smooth right side, and the seam showed there as a break with a grey fleck in the white (2026-11-23); Studio's began in the
+     concave corner where the rim meets the white band. Each vertex is scored by the turn of the loop round it (taken ~a millimetre either
+     side, so a curve made of many short edges is one smooth turn): a concave corner (the material's inside angle over 180) is best, a sharp
+     convex one next, a straight or gently curving stretch worst - Studio's compute_angle_penalty. To that is added a little for the distance
+     from the nearest seam on the layer below, so seams line up layer on layer, and a loop with no corner keeps its seam where the one below was. */
+  function placeSeam(pts, polys, prev, w) {
+    var n = pts.length;
+    if (n < 3) return pts;
+    var cum = [0], i;
+    for (i = 1; i <= n; i++) cum.push(cum[i - 1] + Math.hypot(pts[i % n][0] - pts[i - 1][0], pts[i % n][1] - pts[i - 1][1]));
+    var total = cum[n];
+    if (!(total > 4 * w)) return pts;
+    /* which side the material is on: left of the longest edge, or right */
+    var le = 0, ll = -1;
+    for (i = 0; i < n; i++) { var l0 = cum[i + 1] - cum[i]; if (l0 > ll) { ll = l0; le = i; } }
+    var a0 = pts[le], b0 = pts[(le + 1) % n], ex = (b0[0] - a0[0]) / ll, ey = (b0[1] - a0[1]) / ll;
+    var probe = Math.min(w / 2, ll / 2), side = inside(polys, (a0[0] + b0[0]) / 2 - ey * probe, (a0[1] + b0[1]) / 2 + ex * probe) ? 1 : -1;
+    var r = Math.min(Math.max(0.5, 2 * w), total / 6);
+    var at = function (d) {                                     /* the point d along the loop from pts[0] (d may wrap) */
+      d = ((d % total) + total) % total;
+      var lo = 0, hi = n;
+      while (hi - lo > 1) { var mid = (lo + hi) >> 1; if (cum[mid] <= d) lo = mid; else hi = mid; }
+      var p = pts[lo], q = pts[(lo + 1) % n], seg = cum[lo + 1] - cum[lo], u = seg > 0 ? (d - cum[lo]) / seg : 0;
+      return [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u];
+    };
+    var best = 0, bestScore = Infinity;
+    for (i = 0; i < n; i++) {
+      var v = pts[i], bk = at(cum[i] - r), fw = at(cum[i] + r);
+      var ux = v[0] - bk[0], uy = v[1] - bk[1], vx = fw[0] - v[0], vy = fw[1] - v[1];
+      var th = side * Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);       /* > 0 convex, < 0 concave */
+      var pen = Math.exp(-th * th * 1.5) + 1 / (2 + Math.exp(-th));
+      var dmin = 10;
+      for (var k = 0; k < prev.length; k++) { var dd = Math.hypot(prev[k][0] - v[0], prev[k][1] - v[1]); if (dd < dmin) dmin = dd; }
+      var score = pen + 0.02 * dmin;
+      if (score < bestScore - 1e-9) { bestScore = score; best = i; }
+    }
+    return best ? pts.slice(best).concat(pts.slice(0, best)) : pts;
+  }
+
+  function endOnLongRun(pts) {
+    var n = pts.length;
+    if (n < 3) return pts;
+    var first = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]), last = Math.hypot(pts[n - 1][0] - pts[n - 2][0], pts[n - 1][1] - pts[n - 2][1]);
+    return last < first ? pts.slice().reverse() : pts;
   }
 
   function connect(segs, maxLen, hull, startAt) {
@@ -2774,10 +2827,14 @@
           L.overhangMm2 = g.area(over);
           var belowPolys = below ? g.polys(below) : null, belowIn = belowPolys ? insideIndex(belowPolys) : null;
 
+          /* ALIGNED SEAMS (o.seamAligned, Studio's seam_position aligned): each loop starts at its most hidden corner, in line with the seams below */
+          var seamOn = o.seamAligned !== false && P.role === 'part', seamsPrev = P._seamsPrev || [], seamsNow = [];
           per.loops.slice().reverse().forEach(function (lp) {     // inner walls first, outer last
             var feat = lp.depth === 0 ? 'Outer wall' : 'Inner wall';
             var w = lp.width || (lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm);
+            var lpPolys = seamOn ? g.polys(lp.cs) : null;
             loopsOf(g, lp.cs).forEach(function (path) {
+              if (seamOn) { path.pts = placeSeam(path.pts, lpPolys, seamsPrev, w); seamsNow.push(path.pts[0]); }
               var seq = [];
               splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm, belowIn).forEach(function (piece) {
                 if (!piece.over) { seq.push({ feature: feat, width: w, closed: piece.closed, pts: piece.pts }); return; }
@@ -2813,8 +2870,21 @@
             });
           });
 
+          if (seamOn) P._seamsPrev = seamsNow;
           /* gap infill after the walls, as Studio prints it */
-          if (per.gaps) { var gp = gapPaths(g, per.gaps, region, h, o); gp.forEach(function (pa) { L.paths.push(pa); }); L.gapPaths = gp.length; }
+          if (per.gaps) {
+            var gp = gapPaths(g, per.gaps, region, h, o);
+            /* a gap line that runs right round (its ends a line apart) is a loop too: it begins at the walls' seam, not where it fell (the Gulf
+               logo's rim: a gap ring between its two walls began and ended half way down the smooth side, a break and a fleck there) */
+            if (seamOn) gp.forEach(function (pa) {
+              var q = pa.pts, m = q.length;
+              if (m < 4 || Math.hypot(q[0][0] - q[m - 1][0], q[0][1] - q[m - 1][1]) > 1.5 * pa.width) return;
+              var ring = q.slice(), nearPrev = seamsNow.concat(seamsPrev);
+              var rot = placeSeam(ring, [ring], nearPrev, pa.width);
+              if (rot !== ring) pa.pts = rot;
+            });
+            gp.forEach(function (pa) { L.paths.push(pa); }); L.gapPaths = gp.length;
+          }
           if (thin) {
             thin.paths.forEach(function (pa) {
               L.paths.push({ feature: 'Outer wall', width: o.outerWallWidthMm, closed: pa.closed, pts: pa.pts, thinWall: true });
@@ -2976,7 +3046,7 @@
             /* a support's first layer at its own density (Bambu's Initial layer density): the lines that much further apart */
             var sFill = P.role === 'support' && i === 0 && o.supportFirstLayerDensity > 0 && o.supportFirstLayerDensity < 1 ? sInf / Math.max(0.2, o.supportFirstLayerDensity) : sInf;
             connect(scanFill(polys, solidAngle, sFill, 0), sFill > sInf ? 3 * sFill : solidJoin, hull).forEach(function (pth) {
-              L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
+              L.paths.push({ feature: feat, width: wInf, closed: false, pts: feat === 'Top surface' ? endOnLongRun(pth.pts) : pth.pts });
             });
           }
           /* a bridge's angle: the profile's bridge_angle (Bambu lays every bridge at it); else, under the column rule's 3.6 angles (Studio 02.09,

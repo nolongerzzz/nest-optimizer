@@ -291,7 +291,7 @@ its eighth finding records the run counts (Bambu 2 a layer, NSO 1).
      the comparison;
    - support *generation* (detection only);
    - support expansion;
-   - seams and wall ordering beyond inner-then-outer;
+   - wall ordering beyond inner-then-outer (seams: see "Aligned seams");
    - ironing, gap fill, arc fitting;
    - Arachne variable-width walls (both real files use `classic`).
 7. **Sparse infill length** is 12 % short on supportwithinsupport. The
@@ -1316,3 +1316,32 @@ probes and `hornUnderMap` (18 maps of 101 x 101 columns, up to 12 casts each, on
 the axis alone: the same numbers. supp_ref_2x with the column rule, the build's own time in the page 13.1 -> 8.4 s, GENERATE 31.7 -> 25.5 s;
 the plate's G-code the same bytes on all three plates, both gates the same JSON. Looked for and not repeated work: the 11 crowns' meshes
 (`blobSoup`) are 11 different bodies, `leg` asked the same question twice is 0.3 s of 1.8, and the thickness probes are built once a mesh.
+
+
+### Aligned seams (`seamAligned`, 2026-11-23)
+
+Every loop has a seam: where it starts, the seam gap where it ends, the wipe and the next prime
+beside it. NSO began each loop where its polygon happened to begin; on the owner's half-size Gulf
+logo a gap-infill ring between the rim's two walls began half way down the rim's smooth right side,
+and printed there as a break with a grey fleck in the white. Studio (`seam_position = aligned`)
+began the same loops in the concave corner where the rim meets the white band.
+
+`placeSeam` scores each vertex by the loop's turn round it, taken about a millimetre either side
+(so a curve of many short edges is one gentle turn): a concave corner is best, a sharp convex one
+next, a straight or gently curving stretch worst (Studio's `compute_angle_penalty`). It adds 0.02 per
+mm from the nearest seam on the layer below (to 10 mm), so a loop with no corner keeps its seam
+where the one below was. A gap line whose ends meet is a ring and begins the same way, beside the
+walls' seams. The box's seam stays on one corner, the cylinder's in one line, all the way up.
+
+### A top run ends on a long line (`endOnLongRun`, 2026-11-23)
+
+A top-surface run swept into a corner ended on its shortest strokes, and the wipe (2 mm back along
+the path while retracting) folded over them in a millimetre: the owner's logo letters had a curl
+at each such corner. Studio's runs start in the corner and end on a long line. A top run whose last
+stroke is shorter than its first is now laid the other way round.
+
+### A connector may not cut across the outline (`crossesOutline`, 2026-11-23)
+
+Fill lines were joined by a straight connector when its midpoint lay inside the fill; an 18 mm
+sparse connector on the logo jumped the G's open counter and stayed bare on the top. A connector
+that crosses the fill's outline is now a travel.
