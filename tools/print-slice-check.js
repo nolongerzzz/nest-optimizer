@@ -1086,6 +1086,23 @@ async function main() {
         });
         close(); return out;
       })();
+      /* no fill over the G's open counter above the base (0.8 up): an 18 mm sparse connector jumped it, its midpoint inside the letter, and stayed bare on top */
+      const overCounter = (() => {
+        let z = 0, f = '', x = 0, y = 0; const hit = [];
+        g.split('\n').forEach(l => {
+          if (/^; Z_HEIGHT: /.test(l)) { z = +l.slice(12); return; }
+          if (/^; FEATURE: /.test(l)) { f = l.slice(11); return; }
+          if (!/^G1 /.test(l)) return;
+          const mx = / X(-?[\d.]+)/.exec(l), my = / Y(-?[\d.]+)/.exec(l), nx = mx ? +mx[1] : x, ny = my ? +my[1] : y;
+          if (z >= 0.8 && /infill/i.test(f) && / E[\d.]/.test(l)) {
+            const dx = nx - x, dy = ny - y, L2 = dx * dx + dy * dy, u = L2 ? Math.max(0, Math.min(1, ((81.5 - x) * dx + (116.5 - y) * dy) / L2)) : 0;
+            if (Math.hypot(x + u * dx - 81.5, y + u * dy - 116.5) < 1) hit.push(z + ' ' + f);
+          }
+          x = nx; y = ny;
+        });
+        return hit;
+      })();
+      check('no infill crosses the G\'s open counter above the base: a connector that would cut across the fill\'s outline is a travel', overCounter.length === 0, overCounter.join('; '));
       check('no walled crumbs: no outer wall smaller than 2.5 mm across on any layer (the colour split hands its slivers to the region beside them)', crumbs.length === 0, crumbs.join(' '));
       /* the tower's part of each layer, line for line: the numbers to 0.0011 (the way round the tower: 194.022 where Studio has 194.023);
          not the object's own wipes (NSO's paths), the spiral, the fans, the first layer's speed */

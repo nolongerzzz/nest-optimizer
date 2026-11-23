@@ -460,6 +460,8 @@ function frustum(n, r0, r1, z0, z1) {
     // for a gap line, a core too narrow for infill a gap line, any strip no loop or infill covers a gap line): the sphere @0.6, the hinge, torus and
     // tube at both nozzles, the coupon @0.6. The tube's 1.38 mm wall @0.6 gains a 0.25 line in the 0.19 strip its two outer loops left empty (+19 %);
     // @0.4 its inner loop, laid over itself, is a gap line (-13 %). The box, the cylinder and the top clip are byte for byte as they were.
+    // top_clip_x2 @0.4 on 2026-11-23, when an infill connector began to be refused where it cuts across the fill's outline, not only where its midpoint
+    // is outside (crossesOutline: the Gulf logo's 18 mm sparse connector over the G's open counter): its 10 mm connector through the notch's inner corner is a travel.
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
@@ -467,7 +469,7 @@ function frustum(n, r0, r1, z0, z1) {
       'fixtures/hinge_knuckle_box.stl': ['17eac969ce3c23ad', 'e6c71e16e65ebe31'],
       'fixtures/quick/shape-torus.stl': ['b684b84ac3ade45a', '5139236ab8c20e4c'],
       'fixtures/quick/shape-tube.stl': ['1899158d936a2cb8', '8082b91666eac726'],
-      'fixtures/supports/top_clip_x2.stl': ['f79c02b856b6974f', '895ad934f185710a'],
+      'fixtures/supports/top_clip_x2.stl': ['0fc8ff3eaa681d0e', '895ad934f185710a'],
       'fixtures/supports/top_clip_x2_coupon.stl': ['42466b39965e65be', '196d5db127e28341']
     };
     const bad = [];

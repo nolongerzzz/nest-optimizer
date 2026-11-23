@@ -884,7 +884,8 @@
    * Connect scan segments into paths: from the end of the current path, go to
    * the NEAREST free segment end - of any family - when the connector is short
    * (<= maxLen) and runs inside the printable area (its midpoint is tested
-   * against `hull`, the region grown to the beads' outer edge). Otherwise
+   * against `hull`, the region grown to the beads' outer edge, and it may not
+   * cut across that outline - a hole it would jump). Otherwise
    * travel, and start a new path at the nearest free end.
    *
    * With one family (solid infill) the nearest end is the next line's, so this
@@ -937,6 +938,25 @@
     return res.length >= 3 ? res : out;
   }
 
+  /* Does the straight move p -> q cross the outline of polys (an edge cut through, not touched at an end)? A connector whose midpoint is inside can
+     still cut across a hole: on the owner's Gulf logo an 18 mm sparse connector jumped the G's counter at 0.8, open to the top (2026-11-23). */
+  function crossesOutline(polys, p, q) {
+    var x0 = Math.min(p[0], q[0]), x1 = Math.max(p[0], q[0]), y0 = Math.min(p[1], q[1]), y1 = Math.max(p[1], q[1]);
+    var dx = q[0] - p[0], dy = q[1] - p[1], E = 1e-9;
+    for (var k = 0; k < polys.length; k++) {
+      var P = polys[k], n = P.length;
+      for (var i = 0; i < n; i++) {
+        var a = P[i], b = P[(i + 1) % n];
+        if (Math.max(a[0], b[0]) < x0 || Math.min(a[0], b[0]) > x1 || Math.max(a[1], b[1]) < y0 || Math.min(a[1], b[1]) > y1) continue;
+        var ex = b[0] - a[0], ey = b[1] - a[1], den = dx * ey - dy * ex;
+        if (Math.abs(den) < E) continue;
+        var t = ((a[0] - p[0]) * ey - (a[1] - p[1]) * ex) / den, u = ((a[0] - p[0]) * dy - (a[1] - p[1]) * dx) / den;
+        if (t > 1e-6 && t < 1 - 1e-6 && u >= 0 && u <= 1) return true;
+      }
+    }
+    return false;
+  }
+
   function connect(segs, maxLen, hull, startAt) {
     var n = segs.length;
     if (!n) return [];
@@ -958,7 +978,7 @@
       var sg = segs[best];
       var s0 = flip ? sg.b : sg.a, s1 = flip ? sg.a : sg.b;
       var join = path && bd <= maxLen2 &&
-        (!hull || inside(hull, (cur[0] + s0[0]) / 2, (cur[1] + s0[1]) / 2));
+        (!hull || (inside(hull, (cur[0] + s0[0]) / 2, (cur[1] + s0[1]) / 2) && (bd < 1 || !crossesOutline(hull, cur, s0))));
       if (join) path.pts.push(s0, s1);
       else { path = { closed: false, pts: [s0, s1] }; paths.push(path); }
       used[best] = 1; left--;
