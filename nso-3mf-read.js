@@ -12,7 +12,12 @@
  *   3D/Objects/*.model          Production-extension object parts, reached via
  *                               p:path on <component> / <item> (Bambu Studio
  *                               and PrusaSlicer write their meshes this way)
- *   Metadata/model_settings.config   Bambu object names, when present
+ *   Metadata/model_settings.config   Bambu object names, when present, and the filament
+ *                                    (extruder) each object and part prints with
+ *   paint_color on a <triangle>      Studio's painted filament colours (PrusaSlicer:
+ *                                    slic3rpe:mmu_segmentation), kept per triangle with
+ *                                    the project's filament colours - nso_paint.js reads
+ *                                    them (docs/MULTICOLOR.md)
  *   Metadata/nso_scene.json          NSO's own scene block, handed back
  *                                    verbatim as `sceneJson` when the archive
  *                                    has one - this reader does not interpret
@@ -370,7 +375,7 @@
             model.objects.set(cur.id, cur);
             break;
           case 'mesh':
-            if (cur) { inMesh = true; cur.mesh = { vertices: [], triangles: [] }; }
+            if (cur) { inMesh = true; cur.mesh = { vertices: [], triangles: [], paint: null }; }
             break;
           case 'vertex':
             if (inMesh) {
@@ -388,6 +393,12 @@
                 throw new Error('Bad triangle indices in object ' + cur.id);
               }
               cur.mesh.triangles.push(a, b, c);
+              /* a painted triangle's filament colours (Studio's paint_color, PrusaSlicer's mmu_segmentation): kept as written */
+              var pc = attrs.paint_color || attrs['slic3rpe:mmu_segmentation'] || null;
+              if (pc) {
+                if (!cur.mesh.paint) cur.mesh.paint = [];
+                cur.mesh.paint[cur.mesh.triangles.length / 3 - 1] = String(pc);
+              }
             }
             break;
           case 'component':
@@ -432,6 +443,34 @@
       }
     });
     return model;
+  }
+
+  /**
+   * The filament each object and part prints with, from Bambu's model_settings.config: { objectId: { ext: n, parts: { partId: n } } }
+   * (1-based; a part's own beats its object's). A part's id is the object id of its component in the model.
+   */
+  function parseModelSettingsExtruders(xml) {
+    var out = {}, objId = null, partId = null, depth = 0, objDepth = -1, partDepth = -1;
+    walkXml(xml, {
+      open: function (name, attrs) {
+        depth++;
+        if (name === 'object' && attrs.id != null) { objId = String(attrs.id); objDepth = depth; out[objId] = out[objId] || { ext: 0, parts: {} }; }
+        else if (name === 'part' && objId && attrs.id != null) { partId = String(attrs.id); partDepth = depth; }
+        else if (name === 'metadata' && objId && attrs.key === 'extruder') {
+          var n = parseInt(attrs.value, 10);
+          if (n > 0) {
+            if (partId && depth === partDepth + 1) out[objId].parts[partId] = n;
+            else if (depth === objDepth + 1) out[objId].ext = n;
+          }
+        }
+      },
+      close: function (name) {
+        if (name === 'part' && depth === partDepth) { partId = null; partDepth = -1; }
+        if (name === 'object' && depth === objDepth) { objId = null; objDepth = -1; }
+        depth--;
+      }
+    });
+    return out;
   }
 
   /** Bambu's Metadata/model_settings.config: object id -> name. */
@@ -542,10 +581,15 @@
       ? zip.read('_rels/.rels').then(function (d) { return parseRootModelPart(decoder.decode(d)); })
       : Promise.resolve('3D/3dmodel.model');
 
-    var objectSettings = [];
+    var objectSettings = [], extruders = {};
     var bambuNames = zip.has('Metadata/model_settings.config')
       ? zip.read('Metadata/model_settings.config').then(function (d) {
-          try { var xml = decoder.decode(d); objectSettings = parseModelSettingsOverrides(xml); return parseModelSettingsNames(xml); }
+          try {
+            var xml = decoder.decode(d);
+            objectSettings = parseModelSettingsOverrides(xml);
+            try { extruders = parseModelSettingsExtruders(xml); } catch (e2) { extruders = {}; }
+            return parseModelSettingsNames(xml);
+          }
           catch (e) { warnings.push('model_settings.config unreadable: ' + e.message); return {}; }
         })
       : Promise.resolve({});
@@ -597,6 +641,7 @@
             var soup = [];
             var found = { name: '' };   // first <object name> met on the way down
             var itemPart = resolvePartPath(item.path, rootPart);
+            soup.extOf = extruders[String(item.objectid)] || { ext: 0, parts: {} };   // the filament of this item's object and its parts
             return collect(itemPart, item.objectid, item.transform, soup, 0, found).then(function () {
               if (!soup.length) {
                 warnings.push('Build item ' + (idx + 1) + ' (object ' + item.objectid + ') has no mesh; skipped');
@@ -610,9 +655,18 @@
               // object inside it may not be); then the file name.
               var name = names[item.objectid] || found.name ||
                          (items.length === 1 ? base : base + '_' + (idx + 1));
+              /* the filament colours: per triangle its paint code (or null), whether the reader swapped two of its corners,
+                 and the filament of its part / object - null when nothing is painted and every part prints with the first */
+              var anyPaint = soup.paint && soup.paint.some(function (x) { return !!x; });
+              var anyExt = soup.ext && soup.ext.some(function (x) { return x > 1; });
+              var paint = (anyPaint || anyExt) ? {
+                codes: soup.paint, flip: Uint8Array.from(soup.flip), ext: Uint8Array.from(soup.ext),
+                colours: colourList(project)
+              } : null;
               out.push({
                 id: item.objectid,
                 name: name,
+                paint: paint,
                 positions: positions,
                 // per soup vertex, its vertex in the file (appendTransformed): the mesh's own indexing, kept so an
                 // export can write it back rather than weld by position
@@ -639,6 +693,8 @@
             var chain = Promise.resolve();
             obj.components.forEach(function (comp) {
               chain = chain.then(function () {
+                /* a top-level component is a part: its filament is its own, else its object's */
+                if (depth === 0) soup.partExt = soup.extOf.parts[String(comp.objectid)] || 0;
                 return collect(resolvePartPath(comp.path, partName), comp.objectid,
                                mul(comp.transform, M), soup, depth + 1, found);
               });
@@ -673,13 +729,25 @@
     // A mirroring transform turns the mesh inside out; swap two corners so the
     // winding still points outward.
     var flip = det3(M) < 0;
+    var paint = soup.paint || (soup.paint = []), flips = soup.flip || (soup.flip = []), exts = soup.ext || (soup.ext = []);
+    var own = soup.partExt || (soup.extOf && soup.extOf.ext) || 1;
     for (var i = 0; i < t.length; i += 3) {
       var a = t[i], b = flip ? t[i + 2] : t[i + 1], c = flip ? t[i + 1] : t[i + 2];
       pushVertex(v, a, M, soup);
       pushVertex(v, b, M, soup);
       pushVertex(v, c, M, soup);
       ids.push(base + a, base + b, base + c);
+      paint.push((mesh.paint && mesh.paint[i / 3]) || null);
+      flips.push(flip ? 1 : 0);
+      exts.push(own);
     }
+  }
+
+  /** The project's filament colours, first filament first ('#RRGGBB'), from Studio's project_settings.config. */
+  function colourList(project) {
+    var c = project && project.filament_colour;
+    if (typeof c === 'string') c = c.split(/[;,]/);
+    return Array.isArray(c) ? c.map(function (x) { return String(x).trim(); }) : [];
   }
 
   function pushVertex(v, idx, M, soup) {
@@ -710,6 +778,7 @@
     walkXml: walkXml,
     parseModelXml: parseModelXml,
     parseModelSettingsNames: parseModelSettingsNames,
+    parseModelSettingsExtruders: parseModelSettingsExtruders,
     parseRootModelPart: parseRootModelPart,
     parseTransform: parseTransform,
     mul: mul,

@@ -1576,6 +1576,8 @@ function animate() {
   if (window.NSO_MICROSCOPE && window.NSO_MICROSCOPE.isOpen()) return;
   if (!(state.renderer && state.scene && state.camera)) return;
   const G = nsoRenderGate, now = performance.now();
+  /* a painted piece's colours (app-paint-view.js): added, refreshed or dropped before the gate looks, so they draw this frame */
+  if (window.NSO_PaintView) { try { window.NSO_PaintView.sync(); } catch (e) { console.warn('colours:', e); } }
   state.scene.updateMatrixWorld();
   state.camera.updateMatrixWorld();
   const sig = nsoRenderSignature();
@@ -2130,13 +2132,17 @@ function import3MF(filename, arrayBuffer) {
       const kept = (!scene && result.objects.length > 1)
         ? savedPlacements3MF(result.objects, getCurrentPlate()) : null;
       let loaded = 0;
+      const painted = [];
       let chain = Promise.resolve();
       result.objects.forEach((obj, i) => {
         chain = chain.then(() => {
           const geometry = new THREE.BufferGeometry();
           geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
           /* sourceFile: the file the piece came out of - a 3MF's objects carry their designer's names, and an export is named after the file */
-          const o3 = Object.assign({ srcVertexIds: obj.vertexIds || null, sourceFile: filename }, kept && kept.at ? { at: kept.at[i] } : {});
+          /* paint: a Studio project's painted colours, and each part's own filament (nso_paint.js, docs/MULTICOLOR.md) */
+          const paint = obj.paint && window.NSO_Paint ? window.NSO_Paint.make(obj.paint.codes, obj.paint.flip, obj.paint.ext, obj.paint.colours) : null;
+          if (paint) painted.push(obj.name + ': ' + window.NSO_PaintView.describe({ paint }));
+          const o3 = Object.assign({ srcVertexIds: obj.vertexIds || null, sourceFile: filename, paint }, kept && kept.at ? { at: kept.at[i] } : {});
           return addModelFromZUpGeometryAsync(obj.name, geometry, o3)
             .then(id => { if (id) loaded++; });
         });
@@ -2150,6 +2156,8 @@ function import3MF(filename, arrayBuffer) {
         } else if (!loaded) {
           setStatus(`${filename}: no usable geometry found`, true);
         }
+        /* painted in colours: said once, after the load's own line */
+        if (loaded && painted.length) setStatus(`Loaded ${filename} - painted in colour: ${painted.join('; ')}`);
         return result;
       });
     })
@@ -2196,7 +2204,9 @@ function addModel(name, geometry, opts) {
     centerOffset: options.centerOffset || null,
     // A 3MF's own vertex indexing, one id per soup vertex (nso-3mf-read.js vertexIds): the 3MF export writes it back
     // while it still lines up with the geometry (nsoIndexForExport), so shells that touch stay apart
-    srcVertexIds: options.srcVertexIds || null
+    srcVertexIds: options.srcVertexIds || null,
+    // Painted filament colours from a Studio project (nso_paint.js), while the triangles are the ones they were read with
+    paint: options.paint || null
   });
 
   if (!options.keepSelection) {
@@ -2538,6 +2548,7 @@ function cloneSelectedModel(opts) {
       silent: true,
       rawTris: (src.rawTris && src.rawTris.length) ? new Float32Array(src.rawTris) : null,
       srcVertexIds: src.srcVertexIds ? new Int32Array(src.srcVertexIds) : null,
+      paint: src.paint && window.NSO_Paint ? window.NSO_Paint.clone(src.paint) : null,
       rawAxis: src.rawAxis || null,
       centerOffset: src.centerOffset
         ? { x: src.centerOffset.x, y: src.centerOffset.y, z: src.centerOffset.z }
