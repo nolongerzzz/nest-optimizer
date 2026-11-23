@@ -2676,6 +2676,27 @@
                  layers: [], planes: pl === planes ? null : pl };
       }
       var perObject = objs.map(function (ob, oi) { return makeP(ob, oi, planes); });
+      /* COLOURS ON ONE LAYER (docs/MULTICOLOR.md; nso_paint_segment.js): a painted piece is split, layer by layer, into one region a
+         filament, as Studio splits it, and each region is sliced as a part of its own - its own walls round it, its own fill - while what is
+         a top or a bottom is still the whole piece's (P.Sfull). The regions come back together as one object, each path with its slot. */
+      var PSEG = root && root.NSO_PaintSegment, PNT = root && root.NSO_Paint;
+      if (PSEG && PNT) {
+        var split = [];
+        perObject.forEach(function (P, oi) {
+          var ob = objs[oi];
+          if (P.role !== 'part' || !ob.paint || !PNT.fits(ob.paint, ob.soup.length)) { split.push(P); return; }
+          var seg = PSEG.segment(g, ob.soup, ob.paint, PNT.decode, planes, P.S, {
+            topLayers: o.topColorPenetrationLayers != null ? o.topColorPenetrationLayers : T,
+            bottomLayers: o.bottomColorPenetrationLayers != null ? o.bottomColorPenetrationLayers : B,
+            wallWidthMm: o.outerWallWidthMm, layerMm: o.layerMm, ownFilament: ob.paint.ext && ob.paint.ext[0] || 1 });
+          var slots = {};
+          seg.forEach(function (byS) { Object.keys(byS).forEach(function (k) { slots[k] = 1; }); });
+          Object.keys(slots).map(Number).sort(function (a, b) { return a - b; }).forEach(function (sl) {
+            split.push(Object.assign({}, P, { S: seg.map(function (byS) { return byS[sl] || g.empty(); }), Sfull: P.S, slot: sl, colourOf: P, layers: [] }));
+          });
+        });
+        perObject = split;
+      }
 
       // Layers, object by object.
       var buildLayers = function (P) {
@@ -2704,8 +2725,9 @@
           P.layers.push(L);
           if (g.isEmpty(region)) { L.wallCount = 0; sparsePrev = g.empty(); continue; }
 
-          var above = i + 1 < n ? S[i + 1] : g.empty();
-          var below = i > 0 ? S[i - 1] : null;
+          var SF = P.Sfull || S;                       /* a colour's region: what is above and below it is the whole piece */
+          var above = i + 1 < n ? SF[i + 1] : g.empty();
+          var below = i > 0 ? SF[i - 1] : null;
           // Detect thin wall: the thin islands come out of the region and
           // print as their centre passes; with none, the region is as it was
           /* Arachne (o.wallGenerator): a part's walls fit to its thickness, thin features included - no Detect thin wall pass. A support and a
@@ -2785,11 +2807,11 @@
           var inner = per.infillRegion;
           var cover = null;
           for (var k = 1; k <= TT; k++) {
-            var up = i + k < n ? S[i + k] : g.empty();
+            var up = i + k < n ? SF[i + k] : g.empty();
             cover = cover ? g.inter(cover, up) : up;
           }
           for (var kb = 1; kb <= BB; kb++) {
-            var dn = i - kb >= 0 ? S[i - kb] : g.empty();
+            var dn = i - kb >= 0 ? SF[i - kb] : g.empty();
             cover = cover ? g.inter(cover, dn) : dn;
           }
           if (!cover) cover = region;
@@ -3185,6 +3207,7 @@
         for (var a = 0; a < perObject.length; a++) {
           for (var b = a + 1; b < perObject.length; b++) {
             if (perObject[a].planes || perObject[b].planes) continue;         // on different grids: below
+            if (perObject[a].colourOf && perObject[a].colourOf === perObject[b].colourOf) continue;   /* two colours of one piece meet, never overlap */
             var Sa = perObject[a].S[ci], Sb = perObject[b].S[ci];
             if (g.isEmpty(Sa) || g.isEmpty(Sb)) continue;
             var ov = g.inter(Sa, Sb);
@@ -3259,6 +3282,33 @@
         }),
         ms: 0
       };
+      /* a painted piece's colour regions are one object again: each layer's paths, colour after colour, each with its slot */
+      if (perObject.some(function (P) { return P.colourOf; })) {
+        var merged = [], byParent = new Map();
+        result.objects.forEach(function (ro, k) {
+          var P = perObject[k];
+          if (!P.colourOf) { merged.push(ro); return; }
+          ro.layers.forEach(function (L) { L.paths.forEach(function (pa) { pa.slot = P.slot; }); L.slots = L.paths.length ? [P.slot] : []; });
+          var M = byParent.get(P.colourOf);
+          if (!M) {
+            M = Object.assign({}, ro, { segmented: true, slots: [P.slot] });
+            M.layers = ro.layers.map(function (L, li) { return Object.assign({}, L, { sectionPolys: g.polys(P.Sfull[L.index]) }); });
+            byParent.set(P.colourOf, M); merged.push(M);
+            return;
+          }
+          M.slots.push(P.slot);
+          ro.layers.forEach(function (L, li) {
+            var T0 = M.layers[li];
+            T0.paths = T0.paths.concat(L.paths);
+            T0.areaMm2 += L.areaMm2;
+            T0.wallCount = Math.max(T0.wallCount, L.wallCount);
+            if (L.paths.length) T0.slots = T0.slots.concat([P.slot]);
+            T0.overhangPolys = T0.overhangPolys.concat(L.overhangPolys);
+            if (T0.sparsePolys && L.sparsePolys) T0.sparsePolys = T0.sparsePolys.concat(L.sparsePolys);
+          });
+        });
+        result.objects = merged;
+      }
       if (stacks) result.stacks = stacks;
       if (raftOb) { result.objects.push(raftOb); result.raft = { layers: rp.N, base: rp.nB, interface: rp.nI, topMm: rp.top, liftMm: rp.lift }; }
       result.ms = Date.now() - t0;

@@ -97,7 +97,7 @@
 
   // The files the slice worker loads, in order: the page's own <script> tags
   // (a ?v= bump is picked up), so each must be one of them.
-  var ENGINE = ['nso-cooling-profiles.js', 'nso-3mf.js', 'nso-3mf-read.js', 'nso_paint.js', 'nso_csg.js', 'nso_slicer.js',
+  var ENGINE = ['nso-cooling-profiles.js', 'nso-3mf.js', 'nso-3mf-read.js', 'nso_paint.js', 'nso_paint_segment.js', 'nso_csg.js', 'nso_slicer.js',
                 'nso-print-planner.js', 'nso-gcode3mf-write.js', 'app-print.js'];
 
   // ---- the card's Slice settings ---------------------------------------------
@@ -717,6 +717,7 @@
         ro.bbox = b;
       }
       if (!ob.paint || !P || !P.fits(ob.paint, soup.length)) continue;
+      if (ro.segmented) continue;                      /* the slicer split it by colour: each path carries its slot */
       /* the leaves, by height: each its z range, filament and the triangle to cut */
       var leaves = [];
       P.eachLeaf(soup, ob.paint, function (p, q, r, f) {
@@ -802,6 +803,7 @@
     opts = opts || {};
     var stage = opts.onStage || function () {};
     var SL = lazy('nso_slicer.js', 'NSO_Slicer'), PL = lazy('nso-print-planner.js', 'NSOPrintPlanner');
+    lazy('nso_paint.js', 'NSO_Paint'); lazy('nso_paint_segment.js', 'NSO_PaintSegment');      /* a painted piece's colours, split for the slicer */
     if (!SL) return Promise.resolve({ ok: false, reason: 'The slicer (nso_slicer.js) did not load - check console.' });
     if (!PL) return Promise.resolve({ ok: false, reason: 'The print planner (nso-print-planner.js) did not load - check console.' });
     var settings = opts.settings ? cleanSettings(opts.settings) : null, over = {}, config = assets.config;

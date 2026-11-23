@@ -659,7 +659,7 @@
           if (sl > 1e-9) segs.push({ l: sl, ux: sx / sl, uy: sy / sl, v: 0, a: 0 });
         }
         items.push({
-          obj: oi, slot: L.slot || 0, feature: p.feature, thin: !!p.thinWall, keep: p.feature === 'Bridge' || spans, pts: pts, closed: !!p.closed, loop: loop, segs: segs,
+          obj: oi, slot: p.slot != null ? p.slot : (L.slot || 0), feature: p.feature, thin: !!p.thinWall, keep: p.feature === 'Bridge' || spans, pts: pts, closed: !!p.closed, loop: loop, segs: segs,
           bead: bead, vFeature: fs.v, vWipe: v, v: v, a: fs.a, len: pathLength(pts), rings: rings
         });
       });
@@ -933,9 +933,11 @@
     res.objects.forEach(function (ob) {
       ob.layers.forEach(function (L, li) {
         if (!L || !L.paths || !L.paths.length) return;
-        var sl = L.slot || 0;
-        if (sl > maxSlot) maxSlot = sl;
-        if (li < firstPlane || (li === firstPlane && sl < first)) { firstPlane = li; first = sl; }
+        L.paths.forEach(function (pa) {
+          var sl = pa.slot != null ? pa.slot : (L.slot || 0);
+          if (sl > maxSlot) maxSlot = sl;
+          if (li < firstPlane || (li === firstPlane && sl < first)) { firstPlane = li; first = sl; }
+        });
       });
     });
     if (maxSlot >= n) return { error: 'a part prints with filament ' + (maxSlot + 1) + ', but the project has ' + n + ' filament' + (n === 1 ? '' : 's') };
@@ -964,6 +966,7 @@
     var tcLen = function (slot) { return num(eff('filament_retract_length_toolchange', 'retract_length_toolchange', slot)); };
     var M = {
       n: n, initial: first < 0 ? 0 : first, count: 0, changes: [], types: base.filament_type,
+      flushMatrix: slots.map(function (a) { return slots.map(function (b) { return num(matrix[a * n + b] || 0) * mult; }); }),
       temp: tempOf, toolchangeLength: tcLen,
       /** the old filament's end G-code, as lines (Studio: its text, a newline added if it has none) */
       endLines: function (slot) {
@@ -1013,7 +1016,8 @@
         lines.forEach(function (l) {
           out.push(l);
           var mt = /^T(\d+)\s*$/.exec(l);
-          if (mt && +mt[1] < 255) out.push('M73 E' + mt[1]);           /* Studio's processor marks the slot after a T */
+          /* Studio's processor marks after a T how many changes are still to come (the pyramid: 2, 1, 0; the Gulf logo's ten: 9 ... 0) */
+          if (mt && +mt[1] < 255) out.push('M73 E' + Math.max(0, (M.total != null ? M.total : count) - count));
           var me = /^G[01]\b[^;]*\bE(-?[\d.]+)/.exec(l);
           if (me && !/^G92/.test(l)) ext += +me[1];
           var ma = /^M204 S(\d+(?:\.\d+)?)/.exec(l); if (ma) acc = +ma[1];
@@ -1147,18 +1151,23 @@
    * prints with; planes: res.planes of the printing layers, in order. The tower stands at the project's wipe_tower_x / y when that is clear of
    * the pieces, else at the first clear spot along the back of the bed.
    */
-  function primeTower(config, S, MC, printingPlanes, layerSlot, objBoxes, bed, OFF) {
+  function primeTower(config, S, MC, printingPlanes, layerSeq, objBoxes, bed, OFF) {
     var list = function (k) { var v = config[k]; return Array.isArray(v) ? v : v == null ? [] : String(v).split(/[;,]/); };
     var one = function (k, d) { var v = list(k)[0]; return v == null || v === '' ? d : v; };
     if (String(one('enable_prime_tower', '0')) !== '1') return null;
     var n = MC.n;
     var per = function (k, slot) { var l = list(k); return l.length === n ? l[slot] : l.length === 2 * n ? l[2 * slot] : l[0]; };
-    /* the changes: a layer whose filament is not the one loaded */
+    /* the changes of each layer: its filaments in their order (layerSeq, the colour plan), from the one loaded */
     var changes = [], cur = MC.initial, last = -1;
-    layerSlot.forEach(function (sl, pj) { changes.push(sl !== cur ? { from: cur, to: sl } : null); if (sl !== cur) last = pj; cur = sl; });
+    layerSeq.forEach(function (seq, pj) {
+      var list0 = [];
+      seq.forEach(function (sl) { if (sl !== cur) { list0.push({ from: cur, to: sl }); cur = sl; } });
+      changes.push(list0);
+      if (list0.length) last = pj;
+    });
     if (last < 0) return null;
     if (+one('prime_tower_rib_wall', 0)) return { error: 'the project\'s prime tower has rib walls; NSO writes the plain rectangular tower so far. In Bambu Studio turn off the prime tower\'s Rib wall (Others > Prime tower), save the project and open it again.' };
-    var cats = {}; changes.forEach(function (c) { if (c) { cats[per('filament_adhesiveness_category', c.from)] = 1; cats[per('filament_adhesiveness_category', c.to)] = 1; } });
+    var cats = {}; changes.forEach(function (cl) { cl.forEach(function (c) { cats[per('filament_adhesiveness_category', c.from)] = 1; cats[per('filament_adhesiveness_category', c.to)] = 1; }); });
     if (Object.keys(cats).length > 1) return { error: 'the plate changes between filaments Studio keeps apart on the prime tower (different materials); NSO writes a tower of one material so far.' };
     var nozzle = +one('nozzle_diameter', 0.4);
     var W = f32(+one('prime_tower_width', 35)), lwSet = +one('prime_tower_line_width', 0);
@@ -1189,13 +1198,14 @@
     };
     var layers = [];
     for (var pj = 0; pj <= last; pj++) {
-      var pl = printingPlanes[pj], c = changes[pj], h = f32(pl.h);
-      var req = 0, wlen = 0;
-      if (c) {
-        wlen = vol2len(+per('filament_prime_volume', c.to) || 0, h);
-        req = f32(Math.ceil(wlen / f32(W - 2 * w)) * w);
-      }
-      layers.push({ pj: pj, z: pl.printZ, h: h, change: c, req: req, wipeLen: wlen });
+      var pl = printingPlanes[pj], h = f32(pl.h), req = 0;
+      var cl = changes[pj].map(function (c) {
+        var wlen = vol2len(+per('filament_prime_volume', c.to) || 0, h);
+        var r = f32(Math.ceil(wlen / f32(W - 2 * w)) * w);
+        req = f32(req + r);
+        return { from: c.from, to: c.to, req: r, wipeLen: wlen };
+      });
+      layers.push({ pj: pj, z: pl.printZ, h: h, changes: cl, req: req });
     }
     var maxDepth = 0; layers.forEach(function (L) { if (L.req > maxDepth) maxDepth = L.req; });
     var extra = gap, minDepth = wtLimitDepth(layers[layers.length - 1].z);
@@ -1203,11 +1213,15 @@
     /* a layer's depth: the deepest change at or above it (Studio carries the band's depth down); the first layer purges solid */
     var below = 0;
     for (var q = layers.length - 1; q >= 0; q--) {
-      var Lq = layers[q];
+      var Lq = layers[q], at0 = 0;
       Lq.req = f32(Lq.req * extra);
+      Lq.changes.forEach(function (c) {
+        c.req = f32(c.req * extra);
+        c.at = at0; at0 = f32(at0 + c.req);                       /* where its band starts, from the block's start */
+        if (q === 0) c.wipeLen = f32(f32(c.req / w) * f32(W - 2 * w));
+      });
       if (Lq.req > below) below = Lq.req;
       Lq.depth = below;
-      if (q === 0 && Lq.change) { Lq.wipeLen = f32(f32(Lq.req / w) * f32(W - 2 * w)); }
     }
     var D = f32(f32(maxDepth * extra) + w);
     layers.forEach(function (L) {
@@ -1217,10 +1231,14 @@
     /* the wall's filament: the one on the tower on most layers (Studio's get_wall_filament_for_all_layer) */
     var counts = {}, curT = MC.initial;
     layers.forEach(function (L) {
-      if (!L.change) { counts[curT] = (counts[curT] || 0) + 1; return; }
-      counts[L.change.from] = (counts[L.change.from] || 0) + 1;
-      if (L.change.to !== L.change.from) counts[L.change.to] = (counts[L.change.to] || 0) + 1;
-      curT = L.change.to;
+      if (!L.changes.length) { counts[curT] = (counts[curT] || 0) + 1; return; }
+      var used = {};
+      L.changes.forEach(function (c, i) {
+        if (i === 0) { counts[c.from] = (counts[c.from] || 0) + 1; used[c.from] = 1; }
+        if (!used[c.to]) counts[c.to] = (counts[c.to] || 0) + 1;
+        used[c.to] = 1;
+      });
+      curT = L.changes[L.changes.length - 1].to;
     });
     var wallSlot = -1, wallN = 0;
     Object.keys(counts).map(Number).sort(function (a, b) { return a - b; }).forEach(function (s) { if (counts[s] > wallN) { wallN = counts[s]; wallSlot = s; } });
@@ -1254,16 +1272,25 @@
     var T = {
       x: f32(tx), y: f32(ty), W: W, D: D, w: w, last: last, layers: layers, wallSlot: wallSlot, moved: moved,
       box: { x0: f32(tx) - ext, y0: f32(ty) - ext, x1: f32(tx) + W + ext, y1: f32(ty) + D + ext },
-      liftF: liftF, travelF: travelF, ltr: true, count: 0,
+      liftF: liftF, travelF: travelF, ltr: true, count: 0, maxSpeed: maxSpeed,
       ox: f32(OFF.x), oy: f32(OFF.y)
     };
     T.lineTag = (+w).toFixed(6);
-    /** the wall goes before the layer's change (in the old filament) unless the new filament is the wall's and the old one is not */
-    T.wallFirst = function (pj) {
-      var c = layers[pj].change;
-      if (!c) return true;
-      if (c.from === wallSlot) return true;
-      return c.to !== wallSlot;
+    /** Which of the layer's changes the wall goes with (get_wall_filament_for_layer): { k, before } - before change 0 when the old
+     *  filament is the wall's (or no change brings the wall's in: the old one, of its kind, stands in); else after the change that brings
+     *  the wall's filament in. null: no change on the layer, the wall (and grid) alone. */
+    T.wallAt = function (pj) {
+      var cl = layers[pj].changes;
+      if (!cl.length) return null;
+      var wallIdx = cl[0].from === wallSlot || cl.some(function (c) { return c.to === wallSlot; }) ? wallSlot : cl[0].from;
+      /* generate_new makes the wall at each change that fits and keeps the last: before change 0 when its old filament is the wall's, after
+         any change that brings the wall's in (the Gulf logo at 1.2: grey to black, black to grey, the wall grey - after the second) */
+      var at = { k: 0, before: true };
+      for (var i = 0; i < cl.length; i++) {
+        if (i === 0 && cl[0].from === wallIdx) at = { k: 0, before: true };
+        else if (cl[i].to === wallIdx) at = { k: i, before: false };
+      }
+      return at;
     };
     var writerFor = function (L, slot, x, y) {
       var first = L.pj === 0;
@@ -1291,53 +1318,63 @@
     };
     T.plate = function (p) { return [f32(p[0] + T.x), f32(p[1] + T.y)]; };
 
-    /* THE OUTER WALL (generate_support_wall_new): the rectangle, with a gap of 2.5 lines each way around where this layer's purge starts */
-    var gapWallPolylines = function (box, skip) {
+    /* THE OUTER WALL (generate_support_wall_new): the rectangle, with a gap of 2.5 lines each way around where each of this layer's purges
+       starts (remove_points_from_polygon) */
+    var gapWallPolylines = function (box, skips) {
       var x0 = box[0], y0 = box[1], x1 = box[2], y1 = box[3];
-      if (!skip) return { lines: [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]], poly: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] };
+      if (!skips || !skips.length) return { lines: [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]], poly: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] };
       var range = f32(2.5 * w), mx = f32((x0 + x1) / 2), r = Math.min(range, f32((x1 - x0) / 2 * 0.9));
       /* from the bottom edge's middle, counter-clockwise, with add_extra_point's two points either side of it */
       var pts = [[mx, y0], [f32(mx + r), y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0], [f32(mx - r), y0]];
-      var m = pts.length, isLeft = Math.abs(skip[0]) < W / 2, hit = -1, at = null;
-      for (var j = 0; j < m && hit < 0; j++) {
-        var a = pts[j], b = pts[(j + 1) % m];
-        if (Math.abs(a[0] - b[0]) > 1e-9) continue;                         /* the ray is horizontal: only an upright edge meets it */
-        var t1 = isLeft ? skip[0] - a[0] : a[0] - skip[0], lo = Math.min(a[1], b[1]), hi = Math.max(a[1], b[1]);
-        if (t1 >= -1e-6 && skip[1] >= lo - 1e-6 && skip[1] <= hi + 1e-6) { hit = j; at = [a[0], skip[1]]; }
-      }
-      if (hit < 0) return gapWallPolylines(box, null);
-      var walk = function (fwd) {
-        var left = range, p = at, i = fwd ? (hit + 1) % m : hit;
-        for (var guard = 0; guard < 2 * m; guard++) {
-          var q = pts[i], d = Math.hypot(q[0] - p[0], q[1] - p[1]);
-          if (d >= left) return { p: [f32(p[0] + (q[0] - p[0]) * left / d), f32(p[1] + (q[1] - p[1]) * left / d)], after: fwd ? (i - 1 + m) % m : i };
-          left -= d; p = q; i = fwd ? (i + 1) % m : (i - 1 + m) % m;
+      var m = pts.length, marks = [];
+      skips.forEach(function (skip, id) {
+        var isLeft = Math.abs(skip[0]) < W / 2, hit = -1, at = null;
+        for (var j = 0; j < m && hit < 0; j++) {
+          var a = pts[j], b = pts[(j + 1) % m];
+          if (Math.abs(a[0] - b[0]) > 1e-9) continue;                       /* the ray is horizontal: only an upright edge meets it */
+          var t1 = isLeft ? skip[0] - a[0] : a[0] - skip[0], lo = Math.min(a[1], b[1]), hi = Math.max(a[1], b[1]);
+          if (t1 >= -1e-6 && skip[1] >= lo - 1e-6 && skip[1] <= hi + 1e-6) { hit = j; at = [a[0], skip[1]]; }
         }
-        return { p: p, after: i };
-      };
-      var bw = walk(false), fw = walk(true);
-      /* the polygon with the gap's two ends in it, then cut open there */
+        if (hit < 0) return;
+        var walk = function (fwd) {
+          var left = range, p = at, i = fwd ? (hit + 1) % m : hit;
+          for (var guard = 0; guard < 2 * m; guard++) {
+            var q = pts[i], d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+            if (d >= left) {
+              var e = fwd ? (i - 1 + m) % m : i, pp2 = [f32(p[0] + (q[0] - p[0]) * left / d), f32(p[1] + (q[1] - p[1]) * left / d)];
+              return { p: pp2, after: e, d: Math.hypot(pp2[0] - pts[e][0], pp2[1] - pts[e][1]) };
+            }
+            left -= d; p = q; i = fwd ? (i + 1) % m : (i - 1 + m) % m;
+          }
+          return { p: p, after: i, d: 0 };
+        };
+        var bw = walk(false), fw = walk(true);
+        marks.push({ p: bw.p, after: bw.after, d: bw.d, id: id, end: 'b' }, { p: fw.p, after: fw.after, d: fw.d, id: id, end: 'f' });
+      });
+      if (!marks.length) return gapWallPolylines(box, null);
+      /* the polygon with every gap's two ends in it */
       var full = [];
       for (var k = 0; k < m; k++) {
         full.push({ p: pts[k] });
-        if (k === bw.after) full.push({ p: bw.p, gap: 'b' });
-        if (k === fw.after) full.push({ p: fw.p, gap: 'f' });
+        marks.filter(function (mk) { return mk.after === k; }).sort(function (a, b) { return a.d - b.d; }).forEach(function (mk) { full.push(mk); });
       }
       var polyAll = full.map(function (e) { return e.p; });
-      var bi = -1, fi = -1;
-      full.forEach(function (e, i) { if (e.gap === 'b') bi = i; if (e.gap === 'f') fi = i; });
+      /* cut open at each gap: from its 'b' end round to its 'f' end nothing is drawn */
+      var skipping = {}, open0 = false;
+      full.forEach(function (e) { if (e.end === 'f' && !skipping[e.id]) skipping[e.id] = 'pending'; });
+      /* a gap that wraps past the bottom middle is open at the start */
+      var startIn = {};
+      marks.forEach(function (mk) { if (mk.end === 'b') { var bi = full.indexOf(mk), fi = full.indexOf(marks.filter(function (x) { return x.id === mk.id && x.end === 'f'; })[0]); if (bi > fi) startIn[mk.id] = 1; } });
+      var inside = Object.keys(startIn).length > 0, active = Object.assign({}, startIn);
       var out = [], cur = [];
-      var inGap = function (i) { /* strictly between the gap's ends, going forward from b to f */
-        if (bi < 0 || fi < 0) return false;
-        return bi < fi ? i > bi && i < fi : i > bi || i < fi;
-      };
       for (var u = 0; u <= full.length; u++) {
-        var idx = u % full.length;
-        if (inGap(idx)) continue;
-        cur.push(full[idx].p);
-        if (idx === bi) { out.push(cur); cur = []; }
+        var e = full[u % full.length];
+        if (e.end === 'f' && active[e.id]) { delete active[e.id]; if (!Object.keys(active).length) { cur = [e.p]; } continue; }
+        if (Object.keys(active).length) continue;
+        cur.push(e.p);
+        if (e.end === 'b') { out.push(cur); cur = []; active[e.id] = 1; }
       }
-      if (cur.length) out.push(cur);
+      if (cur.length > 1) out.push(cur);
       /* Studio's polylines start at the bottom middle; drop the points on a straight run (its simplify) */
       out = out.map(function (pl) {
         return pl.filter(function (p, i) {
@@ -1378,13 +1415,17 @@
       for (var k = 1; k <= 4; k++) wr.extrude(cs[(best + k) % 4][0], cs[(best + k) % 4][1], feed);
       return cs.map(function (c, i) { return cs[(best + i) % 4]; });     /* from the start corner, counter-clockwise */
     };
-    var skipPoint = function (L) {
-      if (!L.change || !gapWall) return null;
-      var s0 = f32(w + L.yShift), wd = L.req, i = L.pj % 4;
-      if (i === 0) return [0, s0];
-      if (i === 1) return [W, f32(s0 + wd - f32(extra * w))];
-      if (i === 2) return [W, s0];
-      return [0, f32(s0 + wd - f32(extra * w))];
+    /* where each purge of the layer starts its band, on the wall (get_wall_skip_points) */
+    var skipPoints = function (L) {
+      if (!gapWall) return [];
+      var i = L.pj % 4;
+      return L.changes.map(function (c) {
+        var s0 = f32(w + L.yShift + c.at), wd = c.req;
+        if (i === 0) return [0, s0];
+        if (i === 1) return [W, f32(s0 + wd - f32(extra * w))];
+        if (i === 2) return [W, s0];
+        return [0, f32(s0 + wd - f32(extra * w))];
+      });
     };
 
     /**
@@ -1426,7 +1467,7 @@
       }
       /* the outer wall */
       var box = [0, f32(ys), W, f32(L.depth + w + ys)];
-      var gw = gapWallPolylines(box, fill ? null : skipPoint(L));
+      var gw = gapWallPolylines(box, fill ? null : skipPoints(L));
       var drawn = drawWall(wr, gw.lines, feed, rt);
       var ring = null;
       /* the brim, then a chamfer one loop narrower a layer (brim_chamfer_loops_num; none once the depth changes) */
@@ -1451,12 +1492,45 @@
       return { lines: wr.lines, start: start, end: [wr.x, wr.y], wipe: wipe, e: wr.e, slot: slot, drawn: drawn };
     };
 
+    /**
+     * finish_block: on a layer whose purges do not fill the tower's depth, the rest of the band - its rectangle and a sparse grid - so
+     * the purges of the layers above have something under them. null when the purges fill it. NSO prints it in the visit that carries
+     * the wall, just before the wall (Studio picks the visit by the band's filament: the same lines, maybe another visit).
+     */
+    T.blockFill = function (pj, slot) {
+      var L = layers[pj], first = pj === 0, ys = L.yShift;
+      if (!L.changes.length) return null;
+      var y0 = f32(w + ys + L.req), y1 = f32(w + ys + L.depth - w);
+      if (y1 - y0 <= 1e-3) return null;
+      var fb = [w, y0, f32(W - w), y1];
+      var start = T.ltr ? [fb[2], fb[3]] : [fb[0], fb[3]];
+      var wr = writerFor(L, slot, start[0], start[1]);
+      wr.lines = header(L).concat(['; WIPE_TOWER_START']);
+      var feed = feedFor(slot, wr.o.flow, first);
+      var cs = [[fb[0], fb[1]], [fb[2], fb[1]], [fb[2], fb[3]], [fb[0], fb[3]]], ic = 0;
+      if (wr.x - fb[0] > fb[2] - wr.x) ic = 1;
+      if (wr.y - fb[1] > fb[3] - wr.y) ic = ic === 0 ? 3 : 2;
+      for (var k = 1; k <= 4; k++) wr.extrude(cs[(ic + k) % 4][0], cs[(ic + k) % 4][1], feed);
+      var dy = f32(fb[3] - fb[1] - w), left = f32(fb[0] + 2 * w), right = f32(fb[2] - 2 * w);
+      if (dy > w) {
+        wr.travel(f32(fb[0] + 2 * w), fb[1]);
+        wr.lines.push(';--------------------', '; CP EMPTY GRID START', '; layer #' + (pj + 2));
+        wr.extrude(f32(fb[0] + 2 * w), fb[3], feed);
+        var nb = 1 + Math.floor((right - left) / 10), dxb = nb > 0 ? f32(f32(right - left) / nb) : 0;
+        for (var b = 1; b <= nb; b++) { var xb = f32(left + f32(dxb * b)); wr.travel(xb, wr.y); wr.extrude(xb, b % 2 ? fb[1] : fb[3]); }
+        wr.lines.push('; CP EMPTY GRID END', ';------------------', '', '', '', '', '', '');
+      }
+      wr.lines.push('; WIPE_TOWER_END');
+      return { lines: wr.lines, start: start, end: [wr.x, wr.y], wipe: [[wr.x, wr.y], [wr.x, fb[1]]], e: wr.e, slot: slot };
+    };
+
     /** get_next_pos: where the purge starts on this layer */
-    var purgeStart = function (L) {
-      var xl = w, xr = f32(W - w), y0 = f32(w + L.yShift), depth = L.req, first = L.pj === 0;
+    var purgeStart = function (L, k) {
+      var c = L.changes[k];
+      var xl = w, xr = f32(W - w), y0 = f32(w + L.yShift + c.at), depth = c.req, first = L.pj === 0;
       var dy = first ? w : f32(extra * w);
       var yOff = Math.max(0, f32(depth - dy));
-      var cnt = Math.max(1, Math.ceil(L.wipeLen / f32(xr - xl)));
+      var cnt = Math.max(1, Math.ceil(c.wipeLen / f32(xr - xl)));
       yOff = Math.min(f32((cnt - 1) * dy), yOff);
       var i = L.pj % 4;
       if (i === 0) return [xl, y0];
@@ -1464,19 +1538,19 @@
       if (i === 2) return [xr, y0];
       return [xl, f32(y0 + yOff)];
     };
-    T.purgeStart = function (pj) { return purgeStart(layers[pj]); };
+    T.purgeStart = function (pj, k) { return purgeStart(layers[pj], k); };
 
     /**
      * toolchange_wipe_new: the new filament primes across the tower, a line at a time (line ironing at the start of the first), slow at
      * first. Returns { lines (from the tag to the end of the change's text), start, end, wipe, e }.
      */
-    T.purge = function (pj, dry) {
-      var L = layers[pj], first = pj === 0, slot = L.change.to, start = purgeStart(L);
+    T.purge = function (pj, k, dry) {
+      var L = layers[pj], c = L.changes[k], first = pj === 0, slot = c.to, start = purgeStart(L, k);
       var wr = writerFor(L, slot, start[0], start[1]);
       wr.lines = ['; CP_TOOLCHANGE_WIPE CT0 FL' + (first ? 1 : 0)];
       if (first) wr.lines.push('; LINE_WIDTH: ' + T.lineTag);
-      var rt = retractOf(slot), xl = w, xr = f32(W - w), ld = f32(w + L.yShift), lu = f32(ld + L.req);
-      var dy = first ? w : f32(extra * w), xToWipe = L.wipeLen;
+      var rt = retractOf(slot), xl = w, xr = f32(W - w), ld = f32(w + L.yShift + c.at), lu = f32(ld + c.req);
+      var dy = first ? w : f32(extra * w), xToWipe = c.wipeLen;
       var target = feedFor(slot, wr.o.flow, first);
       var map = [f32(0.33 * target), f32(0.375 * target), f32(0.458 * target), f32(0.875 * target), Math.min(target, f32(f32(0.875 * target) + 50))];
       var ltr = (pj + 3) % 4 >= 2, fromUp = pj % 2 === 1, ws = map[0];
@@ -1500,6 +1574,8 @@
         ltr = !ltr;
       }
       var wipe = [[wr.x, wr.y], [!ltr ? W : 0, wr.y]];
+      /* the next thing on the tower goes the other way, unless this was the layer's last change */
+      if (k < L.changes.length - 1) ltr = !ltr;
       if (!dry) T.ltr = ltr;
       wr.lines.push('; WIPE_TOWER_END', 'M220 R');
       wr.feedrate(travelF);
@@ -1567,6 +1643,49 @@
     var t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den, u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den;
     if (t < 0 || t > 1 || u < 0 || u > 1) return null;
     return [a[0] + t * rx, a[1] + t * ry];
+  }
+
+  /**
+   * THE ORDER OF EACH LAYER'S FILAMENTS (Studio's ToolOrderUtils: reorder_filaments_for_minimum_flush_volume, get_extruders_order,
+   * solve_extruder_order_with_forcast): layer by layer, the order of its filaments that purges the least over it and the next layer
+   * together, from the one loaded - every order of both tried, the cheapest kept, a tie to the fewer changes, else the first found;
+   * a layer of one filament is that one. M: the purge table [from][to]; sets: each layer's filaments, ascending; start: the one loaded (or
+   * null). Returns each layer's order.
+   */
+  function orderColours(M, sets, start) {
+    var nextPerm = function (a) {
+      var i = a.length - 2; while (i >= 0 && a[i] >= a[i + 1]) i--;
+      if (i < 0) return false;
+      var j = a.length - 1; while (a[j] <= a[i]) j--;
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+      for (var l = i + 1, r = a.length - 1; l < r; l++, r--) { t = a[l]; a[l] = a[r]; a[r] = t; }
+      return true;
+    };
+    var forecast = function (cur, next, from) {
+      cur = cur.slice().sort(function (a, b) { return a - b; });
+      var best = Infinity, bestCh = Infinity, seq = null;
+      var changes = function (c, n2) { var k = 0, p = from; [c, n2].forEach(function (s) { s.forEach(function (e) { if (p != null && p !== e) k++; p = e; }); }); return k; };
+      do {
+        var p = from, cc = 0;
+        cur.forEach(function (e) { if (p != null) cc += M[p][e]; p = e; });
+        if (cc > best) continue;
+        var nx = next.slice().sort(function (a, b) { return a - b; });
+        do {
+          var p2 = p, t = cc;
+          nx.forEach(function (e) { if (p2 != null) t += M[p2][e]; p2 = e; });
+          var ch = changes(cur, nx);
+          if (t < best || (t === best && ch < bestCh)) { best = t; seq = cur.slice(); bestCh = ch; }
+        } while (nextPerm(nx));
+      } while (nextPerm(cur));
+      return seq;
+    };
+    var out = [], c = start;
+    sets.forEach(function (S0, i) {
+      var seq = S0.length < 2 ? S0.slice() : forecast(S0, sets[i + 1] || [], c);
+      out.push(seq);
+      if (seq.length) c = seq[seq.length - 1];
+    });
+    return out;
   }
 
   /** Studio's cooling buffer writes a G0 / G1's F only when it changes: the F of each such line that repeats the one in force is dropped
@@ -1929,7 +2048,8 @@
        the piece's paint). With more than one slot, or one that is not the first, the print changes filament the way Studio's does: its own
        change block (the template's change_filament_gcode) with the purge from its table, at the layer change or between two objects. */
     var usedSlots = {};
-    res.objects.forEach(function (ob) { ob.layers.forEach(function (L) { if (L && L.paths && L.paths.length) usedSlots[L.slot || 0] = 1; }); });
+    var slotsOf = function (L) { var o2 = {}; L.paths.forEach(function (p) { o2[p.slot != null ? p.slot : (L.slot || 0)] = 1; }); return Object.keys(o2).map(Number); };
+    res.objects.forEach(function (ob) { ob.layers.forEach(function (L) { if (L && L.paths && L.paths.length) slotsOf(L).forEach(function (k) { usedSlots[k] = 1; }); }); });
     var MC = (Object.keys(usedSlots).length > 1 || !usedSlots[0]) ? multiColour(opts.config, res, Pr, S) : null;
     if (MC && MC.error) return { ok: false, reason: MC.error };
     /* the extruder's offset (the P1S template's extruder_offset is 0x2): Studio writes every move of the print that far back, the bed-mesh box
@@ -1938,26 +2058,29 @@
     var gx = function (v) { return fx(v - OFF.x); }, gy = function (v) { return fx(v - OFF.y); };
     var hookAtStart = !!HOOK_AT_LAYER_START[Pr.id];
     /* THE PRIME TOWER (primeTower): when the project has it on and the plate changes filament; written for the P1S's layer change so far */
-    var TW = null, towerNote = null;
+    var TW = null, towerNote = null, colourPlan = null;
     if (MC) {
-      var layerSlot = [], mixedAt = -1;
-      printing.forEach(function (li0, pj0) {
+      /* THE ORDER OF THE COLOURS (Studio's reorder_filaments_for_minimum_flush_volume): each layer's filaments in the order that purges the
+         least over it and the next layer, from the one loaded - the owner's Gulf logo: white; white grey black; black grey white; white grey
+         black; black white grey; black grey, as Studio's */
+      var layerSets = printing.map(function (li0) {
         var seen = {};
-        res.objects.forEach(function (ob) { var Lr = ob.layers[li0]; if (Lr && Lr.paths && Lr.paths.length) seen[Lr.slot || 0] = 1; });
-        var ks = Object.keys(seen).map(Number);
-        if (ks.length > 1 && mixedAt < 0) mixedAt = pj0;
-        layerSlot.push(ks.length ? ks[0] : 0);
+        res.objects.forEach(function (ob) { var Lr = ob.layers[li0]; if (Lr && Lr.paths && Lr.paths.length) slotsOf(Lr).forEach(function (k) { seen[k] = 1; }); });
+        return Object.keys(seen).map(Number).sort(function (a, b) { return a - b; });
       });
+      colourPlan = orderColours(MC.flushMatrix, layerSets, null);
+      if (colourPlan[0] && colourPlan[0].length) MC.initial = colourPlan[0][0];
+      var curC = MC.initial; MC.total = 0;
+      colourPlan.forEach(function (sq) { sq.forEach(function (sl) { if (sl !== curC) { MC.total++; curC = sl; } }); });
       var objBoxes = res.objects.map(function (ob) {
         var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
         ob.layers.forEach(function (Lr) { if (Lr && Lr.paths) Lr.paths.forEach(function (p) { var hw = (p.width || 0.5) / 2; p.pts.forEach(function (q) {
           if (q[0] - hw < b.x0) b.x0 = q[0] - hw; if (q[0] + hw > b.x1) b.x1 = q[0] + hw; if (q[1] - hw < b.y0) b.y0 = q[1] - hw; if (q[1] + hw > b.y1) b.y1 = q[1] + hw; }); }); });
         return b;
       }).filter(function (b) { return isFinite(b.x0); });
-      var tw = primeTower(opts.config, S, MC, printing.map(function (li0) { return res.planes[li0]; }), layerSlot, objBoxes, bed, OFF);
+      var tw = primeTower(opts.config, S, MC, printing.map(function (li0) { return res.planes[li0]; }), colourPlan, objBoxes, bed, OFF);
       if (tw && tw.error) return { ok: false, reason: tw.error };
       if (tw && !hookAtStart) towerNote = 'the prime tower is written for the P1S so far: this ' + Pr.printer + ' plate changes filament without one';
-      else if (tw && mixedAt >= 0 && mixedAt <= tw.last) return { ok: false, reason: 'layer ' + (mixedAt + 1) + ' prints two filaments; with a prime tower NSO changes filament once a layer, at its start, so far' };
       else TW = tw;
     }
     if (TW) {
@@ -2107,39 +2230,85 @@
       return true;
     }
     /**
-     * THE TOWER'S PART OF A LAYER (primeTower), as Studio's append_tcr writes it at the start of the layer: the wall (and grid) in the loaded
-     * filament, the change with the new filament's purge across the tower, or the change first and the wall after; then the wipe along the
-     * last line, the retraction and the slow lift. Enters lifted and retracted after the layer change's hook; leaves lifted and retracted.
+     * The wipe of the path just printed before a filament change (Studio's retract(toolchange): the wipe pulls the change's own length, at
+     * the tower's speed), then the lift. Leaves the nozzle lifted and retracted by `len`.
      */
-    function towerVisit(pj, z, first) {
-      var L = TW.layers[pj], ch = L.change, pp = TW.post(), wallFirst = TW.wallFirst(pj);
+    function changeWipe(len, z) {
+      var pd = st.pending;
+      st.pending = null;
+      if (pd && R.wipe && R.wipeDistance > 0 && pd.lastPts.length > 1) {
+        var wF = TW.maxSpeed;
+        put('; WIPE_START');
+        put('G1 F' + fmt(wF, 3));
+        st.lastF = wF;
+        accel(S.accel.def);
+        var wp = pd.it.loop ? wipeForward(pd.lastPts[pd.lastPts.length - 1], pd.it.loop, R.wipeDistance) : wipePath(pd.lastPts, R.wipeDistance);
+        var wl = pathLength(wp), spent = 0;
+        for (var q = 1; q < wp.length; q++) {
+          var share = +fe(len * RETRACT_DURING_WIPE * dist(wp[q - 1], wp[q]) / wl);
+          put('G1 X' + gx(wp[q][0]) + ' Y' + gy(wp[q][1]) + (share > 0 ? ' E-' + fe(share) : ''));
+          spent += share;
+        }
+        put('; WIPE_END');
+        var tail = +(len - spent).toFixed(5);
+        if (tail > 0) put('G1 E-' + fe(tail) + ' F' + fmt(R.speed * 60, 0));
+      } else {
+        put('G1 E-' + fe(len) + ' F' + fmt(R.speed * 60, 0));
+      }
+      st.retracted = true; st.retractLen = len;
+      spiral(z + R.hop, false);
+    }
+    /**
+     * ONE VISIT TO THE TOWER (primeTower), as Studio's append_tcr writes it: on a layer with no change, the wall (and grid) at the start of
+     * the layer; else one visit a change (k), where the layer's filaments change - the wall in the old filament before the change, the
+     * change and the new filament's purge across the tower, or the wall after it (TW.wallAt). Then the wipe along the last line, the
+     * retraction and the slow lift. `entry`: 'start' (after the layer change's hook: lifted, retracted) or 'mid' (from the path just
+     * printed, its wipe not yet written). Leaves the nozzle lifted and retracted.
+     */
+    function towerVisit(pj, k, z, first, entry) {
+      var L = TW.layers[pj], ch = k >= 0 ? L.changes[k] : null, pp = TW.post(), wa = TW.wallAt(pj);
+      var finishBefore = !ch || (wa && wa.k === k && wa.before), finishAfter = !!(ch && wa && wa.k === k && !wa.before);
       var travelAcc = first ? S.accel.firstTravel : S.accel.travel;
       var fin = null, pur = null, lastPart = null, putE = function (e, slot) { st.bySlot[slot] = (st.bySlot[slot] || 0) + e; st.extruded += e; };
       /* the tower's lines go through Studio's cooling buffer too: an F the line before left in force is dropped */
       var fIn0 = null, towerPut = function (lines, f) { var d = dropRepeatedF(lines, f); d.lines.forEach(put); return d.f; };
-      if (wallFirst) {
-        fin = TW.finish(pj, !ch, st.slot);
-        var sp = TW.plate(fin.start);
+      var onTower = false;
+      if (finishBefore) {
+        fin = TW.finish(pj, !ch && !L.changes.length, st.slot);
+        var bf = ch ? TW.blockFill(pj, st.slot) : null;              /* the rest of a band the layer's purges leave, before the wall */
+        var sp = TW.plate((bf || fin).start);
         /* the way in: down onto the tower and the filament back (Studio's is_finish_first travel) */
-        if (first) { put('G1 X' + gx(sp[0]) + ' Y' + gy(sp[1])); put('M204 S' + fmt(travelAcc, 0)); }
+        if (entry === 'mid') {
+          flushRetract();
+          closeObject();
+          accel(travelA(first));
+          spiral(z + R.hop, first);
+          put('G1 X' + gx(sp[0]) + ' Y' + gy(sp[1]) + ' Z' + fx(z + R.hop));
+        } else if (first) { put('G1 X' + gx(sp[0]) + ' Y' + gy(sp[1])); put('M204 S' + fmt(travelAcc, 0)); }
         else { put('M204 S' + fmt(travelAcc, 0)); put('G1 X' + gx(sp[0]) + ' Y' + gy(sp[1])); }
         st.A = fmt(travelAcc, 0);
         put('G1 Z' + fx(z));
         deretract();
-        TW.reset(pp, fin.start);
-        fIn0 = towerPut(TW.rewrite(fin.lines, pp), R.deretractSpeed * 60);
+        TW.reset(pp, (bf || fin).start);
+        if (bf) { fIn0 = towerPut(TW.rewrite(bf.lines, pp), R.deretractSpeed * 60); putE(bf.e, st.slot); }
+        fIn0 = towerPut(TW.rewrite((bf ? [TW.mergeTravel(fin.start)] : []).concat(fin.lines), pp), bf ? fIn0 : R.deretractSpeed * 60);
         putE(fin.e, st.slot);
         lastPart = fin;
+        onTower = true;
       }
       if (ch) {
         var from = ch.from, to = ch.to, types = MC.types || [];
+        if (entry === 'mid' && !onTower) closeObject();
         TW.changeHead(pj, types[from] || 'PLA', types[to] || 'PLA').forEach(put);
-        /* [filament_end_gcode]: the retraction to the change's length, lifted if the nozzle is still down on the tower, the old end G-code */
-        var tcFrom = MC.toolchangeLength(from), fIn;
-        if (!st.retracted) put('G1 E-' + fe(tcFrom) + ' F' + fmt(R.speed * 60, 0));
-        else if (tcFrom - (st.retractLen != null ? st.retractLen : R.length) > 1e-9) put('G1 E-' + fe(tcFrom - (st.retractLen != null ? st.retractLen : R.length)) + ' F' + fmt(R.speed * 60, 0));
-        fIn = R.speed * 60;
-        if (wallFirst) { spiral(z + R.hop, false); fIn = travelV(false) * 60; }
+        /* [filament_end_gcode]: the retraction to the change's length (from the path just printed: wiped; on the tower: lifted after), the
+           old filament's end G-code */
+        var tcFrom = MC.toolchangeLength(from), fIn = R.speed * 60;
+        if (entry === 'mid' && !onTower) { changeWipe(tcFrom, z); fIn = travelV(false) * 60; }
+        else {
+          if (!st.retracted) put('G1 E-' + fe(tcFrom) + ' F' + fmt(R.speed * 60, 0));
+          else if (tcFrom - (st.retractLen != null ? st.retractLen : R.length) > 1e-9) put('G1 E-' + fe(tcFrom - (st.retractLen != null ? st.retractLen : R.length)) + ' F' + fmt(R.speed * 60, 0));
+          if (onTower) { spiral(z + R.hop, false); fIn = travelV(false) * 60; }
+        }
         st.retracted = true;
         MC.endLines(from).forEach(put);
         put('');
@@ -2160,7 +2329,7 @@
           var mx = /X(-?[\d.]+)/.exec(m[1]), my = /Y(-?[\d.]+)/.exec(m[1]);
           if (mx) lx = +mx[1]; if (my) ly = +my[1];
         });
-        var startT = TW.purgeStart(pj), startP = TW.plate(startT);
+        var startT = TW.purgeStart(pj, k), startP = TW.plate(startT);
         var path = TW.approach([(lx == null ? 0 : lx) + OFF.x, (ly == null ? 0 : ly) + OFF.y], startP);
         var hop = R.hop, lifted = false, at = null, slope = TW.slopeLen(hop);
         var go = function (p) {
@@ -2175,7 +2344,7 @@
         };
         if (path.length > 1) {
           put('G1 X' + gx(path[0][0]) + ' Y' + gy(path[0][1]) + ' F' + fmt(S.speed.travel * 60, 0));
-          if (!wallFirst) { put('M204 S' + fmt(travelAcc, 0)); st.A = fmt(travelAcc, 0); }
+          if (!onTower && entry === 'start') { put('M204 S' + fmt(travelAcc, 0)); st.A = fmt(travelAcc, 0); }
           put('G1 Z' + fx(z));
           at = path[0];
           for (var pi2 = 1; pi2 < path.length - 1; pi2++) go(path[pi2]);
@@ -2192,12 +2361,14 @@
         put('');
         put('G4 S0');
         st.slot = to;
-        pur = TW.purge(pj);
+        pur = TW.purge(pj, k);
         TW.reset(pp, pur.start);
         fIn0 = towerPut(TW.rewrite(pur.lines, pp), R.deretractSpeed * 60);
         putE(pur.e, to);
         lastPart = pur;
-        if (!wallFirst) {
+        if (finishAfter) {
+          var bf2 = TW.blockFill(pj, to);
+          if (bf2) { fIn0 = towerPut(TW.rewrite([TW.mergeTravel(bf2.start)].concat(bf2.lines), pp), fIn0); putE(bf2.e, to); }
           fin = TW.finish(pj, false, to);
           towerPut(TW.rewrite([TW.mergeTravel(fin.start)].concat(fin.lines), pp), fIn0);
           putE(fin.e, to);
@@ -2230,6 +2401,7 @@
       st.x = wp[wp.length - 1][0]; st.y = wp[wp.length - 1][1];
       st.A = null;                                   /* Studio forgets the acceleration after the tower: the next travel writes it */
       st.feature = null; st.lw = null;
+      st.objId = -1;
     }
     function emitHook(li, z) {
       var h = hookLines(Pr, layerNo, z, vals.cy, flags);
@@ -2265,10 +2437,9 @@
       if (MC) {
         /* a layer's filaments: the one loaded first, then the others in slot order (Studio's tool ordering keeps the last of a layer for the
            start of the next); a path before a change ends wiped and retracted */
-        var cur = st.slot;
+        var order = colourPlan[pj] || [];
         items = items.map(function (it, i) { return { it: it, i: i }; }).sort(function (a, b) {
-          var ka = a.it.slot === cur ? -1 : a.it.slot, kb = b.it.slot === cur ? -1 : b.it.slot;
-          return ka - kb || a.i - b.i;
+          return order.indexOf(a.it.slot) - order.indexOf(b.it.slot) || a.i - b.i;
         }).map(function (x) { return x.it; });
       }
       var endPos = planTravels(items, S, startPos, first ? true : R.onLayerChange);
@@ -2281,8 +2452,8 @@
       if (TW && pj <= TW.last) {
         /* the tower's part of the layer, timed with it (Studio's cooling counts the tower's moves in the layer's time) */
         var Lt = TW.layers[pj], tl = [];
-        if (TW.wallFirst(pj)) tl = tl.concat(TW.finish(pj, !Lt.change, st.slot).lines);
-        if (Lt.change) { tl = tl.concat(TW.purge(pj, true).lines); if (!TW.wallFirst(pj)) tl = tl.concat(TW.finish(pj, false, Lt.change.to).lines); }
+        tl = tl.concat(TW.finish(pj, !Lt.changes.length, st.slot).lines);
+        Lt.changes.forEach(function (c0, kk) { tl = tl.concat(TW.purge(pj, kk, true).lines); });
         changeSec += estimateLines(tl, { jerk: S.jerk, accel: S.accel.def }).seconds;
       }
       if (MC) {
@@ -2390,13 +2561,17 @@
           var lifted = R.hop > 0 && (first || R.onLayerChange);
           if (lifted) { if (first) put('G1 Z' + fx(st.z + R.hop) + ' F' + fmt(liftF, 0)); else spiral(st.z + R.hop, false); }
           emitHook(li, z);
-          if (TW && pj <= TW.last) {
-            /* the tower first (its change, if the layer has one), then the object, from the tower's slow lift */
-            towerVisit(pj, z, first);
+          var towerNow = TW && pj <= TW.last && (!TW.layers[pj].changes.length || it.slot !== st.slot);
+          if (towerNow) {
+            /* the tower first - on a layer with no change, or one that starts on another filament - then the object, from the tower's slow
+               lift; a layer that starts on the loaded filament goes to the tower at its first change */
+            towerVisit(pj, TW.layers[pj].changes.length ? 0 : -1, z, first, 'start');
+            st.towerK = TW.layers[pj].changes.length ? 1 : 0;
             openObject(it.obj);
             accel(travelA(first));
             put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(liftF, 0));
           } else {
+            st.towerK = 0;
             var changed = MC && it.slot !== st.slot ? changeFilament(it.slot, z, first) : false;
             openObject(it.obj);
             put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + (lifted && !changed ? '' : ' F' + fmt(liftF, 0)));
@@ -2426,6 +2601,15 @@
               put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' Z' + fx(z) + ' F' + fmt(S.speed.travel * 60, 0));
             }
           }
+          deretract();
+        } else if (MC && it.slot !== st.slot && TW && pj <= TW.last) {
+          /* a change between two paths of a layer, at the tower: from the path just printed to the tower and back to the next path */
+          towerVisit(pj, st.towerK, z, first, 'mid');
+          st.towerK++;
+          openObject(it.obj);
+          accel(travelA(first));
+          put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
+          put('G1 Z' + fx(z));
           deretract();
         } else if (MC && it.slot !== st.slot) {
           /* a change between two paths of a layer (two objects of different filaments): closed out, changed, and back down to the layer */

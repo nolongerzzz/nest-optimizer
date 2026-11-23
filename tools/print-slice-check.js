@@ -1034,6 +1034,75 @@ async function main() {
   }
 
   // ===========================================================================
+  section('5e. Colours on one layer: the owner\'s Gulf logo (painted, three filaments on a layer, a tower), against Studio\'s slice of it');
+  // ===========================================================================
+  {
+    const R3 = require(path.join(ROOT, 'nso-3mf-read.js')), PP = require(path.join(ROOT, 'nso_paint.js'));
+    const file = 'Gulf_Logo.3mf';
+    const st = await L.bambuSlice('fixtures/multicolor/gulf-logo.slim.gcode.3mf');      /* Studio's: its object moves dropped, its tower's kept */
+    const rd = await R3.parse3MF(new Uint8Array(fs.readFileSync(path.join(ROOT, 'fixtures/multicolor/gulf-logo.3mf'))), { name: file });
+    const o = rd.objects[0], soup = Float32Array.from(o.positions);
+    /* where Studio has it: its first layer's box, 52.48 - 209.50 x 53.15 - 195.80 */
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i < soup.length; i += 3) { x0 = Math.min(x0, soup[i]); x1 = Math.max(x1, soup[i]); y0 = Math.min(y0, soup[i + 1]); y1 = Math.max(y1, soup[i + 1]); }
+    for (let i = 0; i < soup.length; i += 3) { soup[i] += (52.48265 + 209.49997) / 2 - (x0 + x1) / 2 - p1sPrinter.bed.x / 2; soup[i + 1] += (53.15256 + 195.80158) / 2 - (y0 + y1) / 2 - p1sPrinter.bed.y / 2; }
+    const pieces = [{ name: 'Gulf Logo.stl', file, soup, sourceId: 1, paint: PP.make(o.paint.codes, o.paint.flip, o.paint.ext, o.paint.colours) }];
+    const was = global.nsoProjects;
+    global.nsoProjects = { [file]: { config: st.config, objects: [] } };
+    const assets = PRINT.withProjectFilaments({ config: p1sCfg, printer: p1sPrinter }, pieces);
+    const r = await PRINT.build(PRINT.pieceObjects(pieces, p1sPrinter.bed), assets, { settings: PRINT.settingsFromConfig(p1sCfg) });
+    check('the painted logo slices, its layers split by colour (it was refused before: three colours on a layer)', r.ok, r.reason);
+    if (r.ok) {
+      const g = L.text(await L.R.openZip(r.bytes).read('Metadata/plate_1.gcode'));
+      /* each layer: its colours in order, where the tower comes, where each change goes */
+      const plan = t => {
+        const out = []; let cur = null, row = null;
+        t.split('\n').forEach(l => {
+          let m = /^M620 S(\d+)A/.exec(l); if (m && cur == null) cur = +m[1];
+          if (/^; Z_HEIGHT: /.test(l)) { row = [l.slice(12)]; out.push(row); return; }
+          if (!row) return;
+          m = /^T(\d+)$/.exec(l); if (m && +m[1] < 255) { cur = +m[1]; row.push('>' + cur); return; }
+          const tag = /^; FEATURE: Prime tower/.test(l) ? 'tower' : /^; FEATURE: /.test(l) ? String(cur) : null;
+          if (tag && row[row.length - 1] !== tag) row.push(tag);
+        });
+        return out.map(rw => rw.join(' ')).join(' | ');
+      };
+      check('each layer prints its colours in Studio\'s order, at the tower where Studio\'s changes are (white; white grey black; black grey white; ' +
+        'white grey black; black white grey; black grey; grey) - the order that purges least over the layer and the next', plan(g) === plan(st.gcode), plan(g));
+      const head = k => ((new RegExp('^; ' + k + ': ?(.*)$', 'm').exec(g) || [])[1] || '');
+      check('ten changes, the tower 35 x 15.5 mm (two purges a layer), and each change marked with how many are still to come (M73 E9 ... E0)',
+        r.stats.changes === 10 && r.stats.tower && Math.abs(r.stats.tower.depth - 15.5) < 1e-3 &&
+          (g.match(/^M73 E\d+$/mg) || []).join(' ') === 'M73 E9 M73 E8 M73 E7 M73 E6 M73 E5 M73 E4 M73 E3 M73 E2 M73 E1 M73 E0', JSON.stringify([r.stats.changes, r.stats.tower]));
+      /* the tower's part of each layer, line for line: the numbers to 0.0011 (the way round the tower: 194.022 where Studio has 194.023);
+         not the object's own wipes (NSO's paths), the spiral, the fans, the first layer's speed */
+      const byLayer = t => { const out = {}; let zz = null; t.split('\n').forEach(l => { const m = /^; Z_HEIGHT: (.*)$/.exec(l); if (m) { zz = m[1]; out[zz] = []; } else if (zz != null && !/^M73 [PR]/.test(l)) out[zz].push(l); }); return out; };
+      const towerOf = (ls, zz) => {
+        const out = []; let on = false;
+        ls.forEach(l => {
+          if (l.startsWith('; LAYER_HEIGHT: 0.200000')) on = true;
+          if (l.startsWith('; OBJECT_ID')) on = false;
+          if (on && !/^(G3 |M106 S|G1 F[\d.]+$|G1 X[\d.]+ Y[\d.]+ E-|G1 X[\d.]+ Y[\d.]+ E[\d.])/.test(l) && !/^G1 E-\.\d+ F1800$/.test(l) && !/^M204 S10000$/.test(l))
+            out.push(zz === '0.2' ? l.replace(/ F(2400|3000)$/, ' F<first>') : l);
+        });
+        return out;
+      };
+      const same = (a, b) => {
+        if (a === b) return true;
+        const na = a.split(/(-?\d*\.?\d+)/), nb = b.split(/(-?\d*\.?\d+)/);
+        return na.length === nb.length && na.every((x, i) => i % 2 ? Math.abs(+x - +nb[i]) <= 0.0011 : x === nb[i]);
+      };
+      const A = byLayer(st.gcode), B = byLayer(g);
+      const diffs = ['0.2', '0.4', '0.6', '0.8', '1', '1.2'].map(zz => {
+        const x = towerOf(A[zz], zz), y = towerOf(B[zz] || [], zz), at = x.findIndex((l, j) => !same(l, y[j] || ''));
+        return at < 0 && x.length === y.length ? null : [zz, at, x[at], y[at], x.length, y.length];
+      }).filter(Boolean);
+      check('...and the tower\'s part of every layer is Studio\'s, line for line: two visits a layer, the wall with a gap for each purge, before ' +
+        'the first change or after the one that brings the wall\'s filament in, each purge in its own band', diffs.length === 0, JSON.stringify(diffs.slice(0, 2)));
+    }
+    global.nsoProjects = was;
+  }
+
+  // ===========================================================================
   section('5b. The slice worker\'s load: the files in a global with no DOM and no module');
   // ===========================================================================
   {

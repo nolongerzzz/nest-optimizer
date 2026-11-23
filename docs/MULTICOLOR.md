@@ -66,7 +66,52 @@ in its own filament (`decode` returns -1).
   a posed or turned piece shows its colours where they are.
 - On load the status line says which filaments a painted piece uses.
 
-## A layer's filament (step 2: app-print.js `layerSlots`)
+## Colours on one layer (nso_paint_segment.js; the slicer splits the piece)
+
+A painted piece is split, layer by layer, into one region a filament, as Studio's
+MultiMaterialSegmentation.cpp splits it, and each region is sliced as a part of its own -
+its own walls, its own fill - while what counts as a top or a bottom is still the whole
+piece (the slicer's `P.Sfull`). The regions come back as one object whose paths each
+carry their slot.
+
+1. **The sides**: each painted triangle crossing a layer's cutting plane colours the
+   outline where it lies (unpainted stretches: the piece's own filament); the layer goes
+   to the colours of its outline, each point to the nearest (Studio: a Voronoi diagram;
+   NSO: a 0.05 mm raster of each colour's distance, the boundary interpolated where two
+   are equal, cut back to the exact outline). An outline of one colour is that colour.
+2. **The tops and bottoms**: a top face (painted or not) colours the layer it caps and the
+   `top_color_penetration_layers` - 1 below it, each one (outer wall + spacing) further in
+   from the layer's outline; a bottom face the same upwards (`bottom_color_...`). A face the
+   next layer covers is no top / bottom. They win over the sides.
+3. What is left, and any sliver narrower than half a wall, is the piece's own filament.
+
+**The order of a layer's colours** (planner `orderColours`, Studio's
+`reorder_filaments_for_minimum_flush_volume`): layer by layer, every order of its
+filaments and the next layer's is tried from the one loaded; the cheapest purge over both
+wins (a tie to fewer changes). On the owner's Gulf logo: white; white grey black; black
+grey white; white grey black; black white grey; black grey; grey - Studio's, ten changes.
+
+**Several changes a layer on the tower**: each change is its own visit, where the layer's
+colours change; a layer that starts on the loaded filament goes to the tower at its
+first change. The tower is as deep as the most purges on a layer (the logo: two 45 mm^3
+purges, 15.5 mm); each purge has its own band, each band its gap in the wall; the wall
+goes before the first change when the old filament is the wall's, or after the last
+change that brings the wall's filament in (Studio makes it at each and keeps the last).
+`M73 E` after each `T` counts the changes still to come (the pyramid's 2, 1, 0 looked like
+slots).
+
+Checked in `print-slice-check` 5e on the owner's logo (`fixtures/multicolor/gulf-logo.3mf`
+and Studio's slice of it): each layer's colours, their order and where the tower comes
+are Studio's; every tower layer is Studio's line for line (to 0.0011 mm: the way round
+the tower ends at 194.022 where Studio's is 194.023); ten changes, `M73 E9` to `E0`.
+
+A layer whose purges do not fill the tower's depth (fewer changes than a layer above)
+gets the rest of its band filled - its rectangle and a sparse grid, Studio's
+`finish_block` - in the visit that carries the wall, just before it; Studio may put the
+same lines in another visit. Not checked against a Studio slice yet: every changing layer
+of the logo has two changes, the pyramid's one.
+
+## A layer's filament (step 2: app-print.js `layerSlots`, before colours on one layer)
 
 Each layer of a painted piece prints with the filament its paint has at the layer's
 mid-height, the plane Studio slices at: the leaves the plane crosses, weighed by the
