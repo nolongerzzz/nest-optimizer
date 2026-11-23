@@ -9,7 +9,7 @@ The way in, step by step, each checked against the owner's own Studio slices of 
    temperatures, which slot comes next - done, line for line with Studio's.
 4. **Each slot's length and weight** in the header and the plate info; the change time
    in the estimate - done.
-5. The prime tower.
+5. **The prime tower** - done, line for line with Studio's on every one of its 108 layers.
 
 Reference files: `fixtures/multicolor/pyramid-3colors.3mf` (the project's models and
 settings, slimmed). The owner's two slices of it (prime tower on, and off) are what
@@ -23,7 +23,7 @@ pyramid's own grey (state 0, the object's filament 1) to the top. Studio's slice
 changes filament three times after the first load, at layers 8.6, 15.4 and 21.6 -
 the first layer whose mid-height (8.5, 15.3, 21.5) is past each band's edge - and
 every layer prints whole in one filament, its infill too. With the prime tower on it
-is built on 111 of the 148 layers.
+is built on 108 of the 148 layers (Studio's 150).
 
 ## The paint (`nso_paint.js`)
 
@@ -136,8 +136,58 @@ filaments are the ones that print on it, ranges joined with `,` as Studio's), fo
 from it. Studio's per-slot totals differ from a recount of its own moves by about
 16 mm a slot; NSO's are its moves.
 
+## The prime tower (step 5: nso-print-planner.js `primeTower`, `towerVisit`)
+
+When the project has `enable_prime_tower` on and the plate changes filament, the P1S
+prints Studio 02.09's rectangular tower, written as Studio's WipeTower writes it
+(single precision, its moves rewritten into plate coordinates as Studio's
+post-processing rewrites them, an F the line before left in force dropped as its
+cooling buffer drops it). The project's tower settings come in with its filaments
+(`TOWER_KEYS` in app-print.js): the template's own tower is 35 mm with rib walls.
+
+- **Where and how big**: the project's `wipe_tower_x / y`, `prime_tower_width` wide; deep
+  enough for the biggest purge (`filament_prime_volume` as lines across the tower: 20 mm^3
+  at 0.2 mm is 25 lines, 12.5 mm, and the wall makes it 13), never shallower than
+  Studio's minimum for its height. When a piece covers that spot on NSO's plate the tower
+  goes to the clear spot nearest it (2 mm from every piece, with its brim), and the card
+  says so.
+- **On which layers**: from the first up to the last change (the pyramid: 108 of 148).
+  It prints first on its layer, after the layer change and the timelapse.
+- **A layer without a change**: the rectangle inside the wall, its sparse grid (two lines;
+  solid on the first layer), the outer wall; the first layer adds a 7-loop brim
+  (`prime_tower_brim_width` 3 mm), the next five a chamfer one loop narrower each. The
+  loops step out by the line spacing cut to 1e-5 mm, as Studio's `scaled()` cuts it.
+- **A change**: the outer wall with a gap of 2.5 lines either way of where the purge
+  starts, in the wall's filament (the one on the tower on most layers) - before the change
+  when the old filament is that one or neither is, after it when the new one is; then the
+  change (Studio's change block, the same as without a tower: its purge goes down the
+  chute), the way round the tower's box to the purge's start (lifted on a 3 degree slope),
+  and the new filament's purge: line by line across the tower, a 3 mm line ironed at the
+  start, at 33 / 37.5 / 45.8 / 87.5 % of the tower speed for its first lines. Which corner
+  it starts from, and which way, turns with the layer number, as Studio's does.
+- **Out**: the wipe back along the last line, the rest of the retraction, a slow lift
+  (`prime_tower_lift_speed`), then the object.
+- The bed-mesh box takes in the tower's brim (G29 from X56.5786, Studio's); the plate
+  info lists it as `wipe_tower` (id 1000), and a layer's filaments are its object's (the
+  tower's wall in the old filament does not count, as in Studio's).
+
+Not written: rib walls (refused in words), two materials Studio keeps apart on the tower,
+the side scrape, interface features, a tower on the A1 mini (its plate changes filament
+without one, and the card says so). A layer that prints two filaments is refused with a
+tower, as without one.
+
+Checked in `print-slice-check` 5d: every tower layer of the pyramid is Studio's line for
+line (but the spiral's radius, the object's id, the part fan, the wipe's speed - the speed
+of NSO's own last path - and the first layer's speed, the template's 40 mm/s where
+the owner's project has 50); the bed-mesh box, the plate info and the layer filament lists
+are Studio's; a rib-walled tower is refused; a tower spot under a piece moves.
+
+Also fixed on the way: the plate info's footprints are the plate's, not the nozzle's (the
+P1S's `extruder_offset` 0x2 is added back: 111.531, Studio's 111.5306).
+
 Not yet: NSO's own 3MF export and saved plates do not write the paint back, so a
-painted piece saved from NSO comes back plain.
+painted piece saved from NSO comes back plain. The tower is not drawn on NSO's plate
+before slicing.
 
 Checks: `npm run paint:test` (the code, the pyramid's bands, filament per part),
 `npm run paint:drive` (the real app: the pyramid opened, drawn in its three colours,

@@ -757,6 +757,8 @@
 
   /* the keys a painted project brings that are not a list of its filaments: the purge table and the colours' map */
   var MC_KEYS = /^(flush_volumes_matrix|flush_volumes_vector|flush_multiplier|filament_map)$/;
+  /* ...and its prime tower: on or off, where it stands, its size and its walls (the planner's primeTower) */
+  var TOWER_KEYS = /^(enable_prime_tower|prime_tower_\w+|wipe_tower_\w+|prime_volume_mode)$/;
   /**
    * MULTI-COLOUR (docs/MULTICOLOR.md): a plate whose painted pieces use more than one filament slices with their Studio project's filaments -
    * its slots' colours, types, temperatures and purge table - over the printer profile's template, which holds one filament (or two). The
@@ -784,7 +786,7 @@
       var v = proj[k], t = tpl[k];
       var perFil = Array.isArray(t) && (t.length === tn || t.length === 2 * tn) && Array.isArray(v) && (v.length === n || v.length === 2 * n) &&
                    (t.length === tn) === (v.length === n);
-      if (!perFil && !MC_KEYS.test(k)) return;
+      if (!perFil && !MC_KEYS.test(k) && !TOWER_KEYS.test(k)) return;
       cfg[k] = Array.isArray(v) ? v.slice() : v;
       /* the G-code's CONFIG_BLOCK lists a filament once: a key kept per extruder variant gives its standard nozzle's (Studio: nozzle_temperature
          = 220,220,220 where the project has six) */
@@ -824,7 +826,8 @@
         return {
           ok: true, reason: '', bytes: out.bytes, features: Object.keys(seen), objects: out.plan.labels.length,
           labels: out.plan.labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
-          stats: { layers: st.layers, seconds: st.seconds.total, startSeconds: st.seconds.start, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ, tempBands: st.tempBands || null, bridgeTemp: st.bridgeTemp || null },
+          stats: { layers: st.layers, seconds: st.seconds.total, startSeconds: st.seconds.start, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ, tempBands: st.tempBands || null, bridgeTemp: st.bridgeTemp || null,
+                   changes: st.changes ? st.changes.length : 0, tower: st.tower || null, towerNote: st.towerNote || null },
           tune: settings ? tuneWords(config, ex.hangSpeed) : null,                                                             // the bridge and retraction numbers it prints with
           filament: filamentWords(config, settings),                                                             // what it prints with, in words
           settings: settings, changed: Object.keys(over),                                                        // what was sliced with, and what differs from the profile
@@ -942,7 +945,14 @@
 
   /** The readout line: layers, estimated time, filament. */
   function describe(r) {
-    return r.stats.layers + ' layers - ' + fmtTime(r.stats.seconds) + ' - ' + r.stats.grams.toFixed(1) + ' g filament';
+    var s = r.stats, out = s.layers + ' layers - ' + fmtTime(s.seconds) + ' - ' + s.grams.toFixed(1) + ' g filament';
+    /* MULTI-COLOUR (docs/MULTICOLOR.md): the changes, and the prime tower - where it went when the project's spot was under a piece */
+    if (s.changes) {
+      out += ' - ' + s.changes + ' filament change' + (s.changes === 1 ? '' : 's');
+      if (s.tower) out += ', prime tower ' + (+s.tower.width.toFixed(1)) + ' x ' + (+s.tower.depth.toFixed(1)) + ' mm' + (s.tower.moved ? ' (moved clear of the pieces)' : '');
+      else if (s.towerNote) out += ' (' + s.towerNote + ')';
+    }
+    return out;
   }
 
   /** Worker entry (see the card): build, with the file's bytes moved rather than copied. */

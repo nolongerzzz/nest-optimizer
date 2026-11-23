@@ -970,6 +970,66 @@ async function main() {
     }
     const bad = PRINT.withProjectFilaments({ config: p1sCfg, printer: p1sPrinter }, [{ name: 'x', file: 'not-open.3mf', soup, paint: pieces[0].paint }]);
     check('a piece painted in three filaments whose project is not open is refused in words', !!bad.error && /not open/.test(bad.error), bad.error);
+
+    // -------------------------------------------------------------------------
+    // 5d. The prime tower: the same pyramid with the project's tower on, against Studio's slice of it (its tower's moves kept)
+    // -------------------------------------------------------------------------
+    const stT = await L.bambuSlice('fixtures/multicolor/pyramid-3colors-tower.slim.gcode.3mf');
+    global.nsoProjects = { [file]: { config: stT.config, objects: [] } };
+    const assetsT = PRINT.withProjectFilaments({ config: p1sCfg, printer: p1sPrinter }, pieces);
+    check('5d. with the project\'s prime tower on, its tower settings come with its filaments (10 mm wide at 59.78, 211; rib walls off)',
+      !assetsT.error && assetsT.config.enable_prime_tower === '1' && assetsT.config.prime_tower_width === '10' && assetsT.config.prime_tower_rib_wall === '0' &&
+        String(assetsT.config.wipe_tower_x) === '59.7781' && p1sCfg.prime_tower_width === '35', JSON.stringify([assetsT.error, assetsT.config.prime_tower_width, assetsT.config.wipe_tower_x]));
+    const rT = await PRINT.build(PRINT.pieceObjects(pieces, p1sPrinter.bed), assetsT, { settings: PRINT.settingsFromConfig(p1sCfg) });
+    check('...and slices', rT.ok, rT.reason);
+    if (rT.ok) {
+      const gT = L.text(await L.R.openZip(rT.bytes).read('Metadata/plate_1.gcode'));
+      const byLayer = t => { const out = {}; let zz = null; t.split('\n').forEach(l => { const m = /^; Z_HEIGHT: (.*)$/.exec(l); if (m) { zz = m[1]; out[zz] = []; } else if (zz != null && !/^M73 [PR]/.test(l)) out[zz].push(l); }); return out; };
+      /* a layer's tower: from the end of its timelapse to its object, less the lines that are NSO's own - the spiral's radius, the object's
+         id, the part fan, the wipe's speed (the speed of the last path before it, NSO's), the first layer's speed (the template's 40 mm/s,
+         Studio's project 50) */
+      const towerOf = (ls, zz) => {
+        let a = -1; ls.forEach((l, i) => { if (l.startsWith('; SKIPPABLE_END')) a = i; });
+        let b = ls.findIndex((l, i) => i > a && l.startsWith('; OBJECT_ID'));
+        return ls.slice(a + 1, b < 0 ? ls.length : b).filter(l => !/^(G3 |; OBJECT_ID|M106 S|G1 F[\d.]+$|G1 X[\d.]+ Y[\d.]+ E)/.test(l))     /* (the fixture's object moves, and the wipe's, are dropped) */
+          .map(l => zz === '0.2' ? l.replace(/ F(2400|3000)$/, ' F<first>') : l);
+      };
+      const A = byLayer(stT.gcode), B = byLayer(gT);
+      const towerLayers = o => Object.keys(o).filter(zz => o[zz].includes('; FEATURE: Prime tower'));
+      check('the tower stands on the layers Studio\'s does: 108, from the first to the last change (21.6)',
+        towerLayers(A).join(' ') === towerLayers(B).join(' ') && towerLayers(B).length === 108 && towerLayers(B).pop() === '21.6', towerLayers(B).length + ' ' + towerLayers(B).slice(-2));
+      const diffs = towerLayers(A).map(zz => {
+        const x = towerOf(A[zz], zz), y = towerOf(B[zz] || [], zz), at = x.findIndex((l, j) => l !== y[j]);
+        return at < 0 && x.length === y.length ? null : [zz, at, x[at], y[at]];
+      }).filter(Boolean);
+      const lens = ['0.2', '0.4', '8.6', '8.8', '15.4', '21.6'].map(zz => towerOf(A[zz], zz).length);
+      check('...every one of them written as Studio wrote it, line for line (' + lens.join(', ') + ' lines on 0.2, 0.4, 8.6, 8.8, 15.4, 21.6): the rectangle, ' +
+        'the grid (solid on the first layer), the wall, the brim and the chamfer; on a change the wall with its gap, the change, the way round the tower, ' +
+        'the purge line by line with its ironing and its speeds, the wall after it when the new filament is the wall\'s; the wipe and the slow lift',
+        diffs.length === 0, JSON.stringify(diffs.slice(0, 3)));
+      const zT = L.R.openZip(rT.bytes), pj = JSON.parse(L.text(await zT.read('Metadata/plate_1.json')));
+      const sj = JSON.parse(L.text(stT.parts['Metadata/plate_1.json'] || new Uint8Array(0)) || 'null');
+      const wt = pj.bbox_objects.find(o => o.name === 'wipe_tower'), swt = sj && sj.bbox_objects.find(o => o.name === 'wipe_tower');
+      check('the plate info lists the tower as Studio\'s does (wipe_tower, id 1000, its box with the brim: ' + (wt ? wt.bbox.map(v => v.toFixed(3)).join(', ') : '-') + '), the object\'s footprint in plate coordinates',
+        !!wt && wt.id === 1000 && (!swt || wt.bbox.every((v, k) => Math.abs(v - swt.bbox[k]) < 0.001)) && Math.abs(pj.bbox_objects[0].bbox[1] - 111.531) < 0.01, JSON.stringify([wt, swt && swt.bbox]));
+      const siT = L.text(await zT.read('Metadata/slice_info.config'));
+      const lflT = t => [...t.matchAll(/<layer_filament_list filament_list="([^"]*)" layer_ranges="([^"]*)"/g)].map(m => m[1] + ':' + m[2]).filter(x => !/^:/.test(x)).sort().join(' | ');
+      check('...and each layer\'s filaments are the object\'s, as Studio\'s: the tower\'s wall in the old filament does not count', lflT(siT) === lflT(L.text(stT.parts['Metadata/slice_info.config'])), lflT(siT));
+      const g29 = (/^\s*G29 A X([\d.]+)/m.exec(gT) || [])[1];
+      check('the bed-mesh box takes in the tower\'s brim, as Studio\'s: G29 from X' + g29, g29 === '56.5786');
+      const headT = k => ((new RegExp('^; ' + k + ': ?(.*)$', 'm').exec(gT) || [])[1] || '').split(',').map(Number);
+      const plain = headT('total filament length \\[mm\\] '), stud = ((new RegExp('^; total filament length \\[mm\\] : ?(.*)$', 'm').exec(stT.gcode) || [])[1] || '').split(',').map(Number);
+      check('each slot\'s length counts its tower (' + plain.join(', ') + ' mm; Studio\'s ' + stud.join(', ') + ')', plain.length === 3 && plain.every((v, k) => Math.abs(v - stud[k]) < 40), JSON.stringify([plain, stud]));
+    }
+    const ribbed = Object.assign({}, assetsT, { config: Object.assign({}, assetsT.config, { prime_tower_rib_wall: '1' }) });
+    const rR = await PRINT.build(PRINT.pieceObjects(pieces, p1sPrinter.bed), ribbed, { settings: PRINT.settingsFromConfig(p1sCfg) });
+    check('...a project whose tower has rib walls is refused in words (NSO writes the plain tower so far)', !rR.ok && /rib wall/i.test(rR.reason), rR.reason);
+    const moved = Object.assign({}, assetsT, { config: Object.assign({}, assetsT.config, { wipe_tower_x: ['130'], wipe_tower_y: ['110'] }) });
+    const rM = await PRINT.build(PRINT.pieceObjects(pieces, p1sPrinter.bed), moved, { settings: PRINT.settingsFromConfig(p1sCfg) });
+    const gM = rM.ok ? L.text(await L.R.openZip(rM.bytes).read('Metadata/plate_1.gcode')) : '';
+    const towerXs = gM.split('\n').filter(l => /^G1  X/.test(l)).map(l => +/X([\d.]+)/.exec(l)[1]), tb = rM.ok && rM.stats.tower ? rM.stats.tower.box : null;
+    check('...a tower spot the pieces cover is not used: the tower goes to the clear spot nearest it (its box with the brim ' + (tb ? tb.map(v => v.toFixed(1)).join(', ') : '-') + ', the pyramid 125.8-155.7 x 111.5-141.4)',
+      rM.ok && towerXs.length > 100 && rM.stats.tower.moved && (tb[2] < 125.7 || tb[0] > 155.8 || tb[3] < 111.4 || tb[1] > 141.5) && Math.hypot(tb[0] - 130, tb[1] - 110) < 40, rM.reason);
     global.nsoProjects = was;
   }
 
