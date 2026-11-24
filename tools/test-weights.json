@@ -248,6 +248,7 @@
     "page:manifest": {"weight":4800,"note":""},
     "paint:arming": {"weight":42350,"note":""},
     "paint:scope": {"weight":56,"note":""},
+    "paint:test": {"weight":300,"note":"node: Studio painted colours read from a 3MF; 12 checks, 0.24 s locally (2026-11-24), node start-up dominates"},
     "pan:drive": {"weight":81900,"note":""},
     "patch:test": {"weight":5550,"note":""},
     "pathsweep:canonical": {"weight":399,"note":""},
