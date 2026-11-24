@@ -261,6 +261,13 @@
       innerWallWidthMm: w,
       infillWidthMm: w,
       supportWidthMm: null,                // a support's plate (its interface and transition lines): support_line_width; null -> the infill's
+      topWidthMm: null,                    // the top surface's line (top_surface_line_width); null -> the infill's
+      solidWidthMm: null,                  // the internal solid infill's line (internal_solid_infill_line_width); null -> the infill's
+      firstLayerWidthMm: null,             // layer 0's walls (initial_layer_line_width, 0.5 in Bambu's profiles); null -> as any layer
+      firstLayerInfillWidthMm: null,       // layer 0's fill (initial_layer_infill_line_width); null -> as any layer
+      topDensity: 1,                       // top_surface_density: the top's lines spacing / density apart
+      gridOriginMm: null,                  // [x, y]: where the G-code's origin is in the slicer's frame (a monotonic line fill's grid); null -> [0, 0]
+      bottomDensity: 1,                    // bottom_surface_density
       wallLoops: BAMBU_PROFILE_06.wallLoops,
       topShellLayers: BAMBU_PROFILE_06.topShellLayers,
       bottomShellLayers: BAMBU_PROFILE_06.bottomShellLayers,
@@ -268,7 +275,7 @@
       bottomShellThicknessMm: 0,
       sparseDensity: BAMBU_PROFILE_06.sparseDensity,
       sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid' | 'cubic' | 'adaptivecubic' | 'honeycomb' | 'lightning'
-      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords' | 'hilbertcurve' | 'octagramspiral': the internal solid infill, and the surfaces unless they say
+      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'monotonic' | 'monotonicline' | 'lines' | 'concentric' | 'archimedeanchords' | 'hilbertcurve' | 'octagramspiral': the internal solid infill, and the surfaces unless they say
       topPattern: null,                    // the top surface's own pattern ('concentric'); null -> solidPattern
       bottomPattern: null,                 // the first layer's own pattern ('concentric'); null -> solidPattern
       infillDirectionDeg: BAMBU_PROFILE_06.infillDirectionDeg,
@@ -997,6 +1004,83 @@
       if (score < bestScore - 1e-9) { bestScore = score; best = i; }
     }
     return best ? pts.slice(best).concat(pts.slice(0, best)) : pts;
+  }
+
+  /* MONOTONIC AND MONOTONIC LINE (Studio's FillMonotonic / FillMonotonicLineWGapFill, FillRectilinear.cpp; docs/SLICER.md "Monotonic").
+     A monotonic fill lays its lines in order across the piece, each next to the one before - never a line laid with a gap beside it that a later
+     line fills from the other side (the ridge and the shine change where two sweeps meet). The piece is cut into monotonic regions: runs of
+     scan lines where each line's segment has one neighbour on the line before and one on the line after; a region is laid only once every region
+     it touches on its near side is down, the nearest such region next, and inside a region the lines go there and back.
+       'monotonic'      the lines of a region joined into one zig-zag (the connector laid along the edge) - Studio's bottom surface default
+       'monotonicline'  every line on its own: from one to the next is a move, nothing laid along the edge (path.glide when the two are within
+                        3 line widths - Studio's extrusion_entities_append_paths_with_wipe joins those without a retraction) - Studio's top default
+     segs: scanFill's segments of one piece -> [{ pts, glide? }] in print order. from: where the nozzle is. */
+  function monotonicRuns(segs, w, join, from, edge) {
+    if (!segs.length) return [];
+    var byLine = {}, lines = [];
+    segs.forEach(function (sg) { (byLine[sg.line] || (byLine[sg.line] = [], lines.push(sg.line), byLine[sg.line])).push(sg); });
+    lines.sort(function (a, b) { return a - b; });
+    /* the segments of a line, in order along it (a scan line's segments all run the same way: a is the low end) */
+    var dirX = segs[0].b[0] - segs[0].a[0], dirY = segs[0].b[1] - segs[0].a[1], dl = Math.hypot(dirX, dirY) || 1; dirX /= dl; dirY /= dl;
+    var t = function (p) { return p[0] * dirX + p[1] * dirY; };
+    lines.forEach(function (k) { byLine[k].forEach(function (sg) { sg.t0 = Math.min(t(sg.a), t(sg.b)); sg.t1 = Math.max(t(sg.a), t(sg.b)); }); byLine[k].sort(function (u, v) { return u.t0 - v.t0; }); });
+    /* two segments of neighbouring lines are joined when they overlap along the lines or come within 3 line widths (Studio links them round the
+       outline, connect_monotonic_regions; a thin band at a slant has its lines side by side without overlapping - the Gulf logo's rim) */
+    var tol = 3 * w;
+    var touch = function (u, v) { return u.t0 <= v.t1 + tol && v.t0 <= u.t1 + tol; };
+    /* neighbours on the next line and the line before */
+    lines.forEach(function (k, li) {
+      var nxt = li + 1 < lines.length && lines[li + 1] === k + 1 ? byLine[k + 1] : [];
+      byLine[k].forEach(function (sg) { sg.right = nxt.filter(function (q) { return touch(sg, q); }); sg.left = sg.left || []; sg.right.forEach(function (q) { (q.left = q.left || []).push(sg); }); });
+    });
+    /* regions: from a segment, on while it has one neighbour ahead and that one has one behind */
+    var regions = [];
+    lines.forEach(function (k) {
+      byLine[k].forEach(function (sg) {
+        if (sg.region != null) return;
+        var R = { segs: [], before: [], done: false, id: regions.length };
+        regions.push(R);
+        var cur = sg;
+        while (true) {
+          cur.region = R.id; R.segs.push(cur);
+          if (cur.right.length !== 1 || cur.right[0].left.length !== 1 || cur.right[0].region != null) break;
+          cur = cur.right[0];
+        }
+      });
+    });
+    /* a region waits for every region its first segment touches on the line before */
+    regions.forEach(function (R) { (R.segs[0].left || []).forEach(function (q) { if (R.before.indexOf(q.region) < 0 && q.region !== R.id) R.before.push(q.region); }); });
+    var out = [], here = from, left = regions.length, d2 = function (p, q) { var dx = p[0] - q[0], dy = p[1] - q[1]; return dx * dx + dy * dy; };
+    var lastEnd = null, run = null;
+    while (left > 0) {
+      var best = null, bd = Infinity, bflip = false;
+      regions.forEach(function (R) {
+        if (R.done || R.before.some(function (b) { return !regions[b].done; })) return;
+        var f = R.segs[0], da = here ? d2(here, f.a) : 0, db = here ? d2(here, f.b) : 0;
+        if (da < bd) { bd = da; best = R; bflip = false; }
+        if (db < bd) { bd = db; best = R; bflip = true; }
+      });
+      if (!best) best = regions.filter(function (R) { return !R.done; })[0];       /* a cycle (cannot be in a monotone decomposition): break it */
+      best.done = true; left--;
+      var flip = bflip;
+      best.segs.forEach(function (sg) {
+        var p0 = flip ? sg.b : sg.a, p1 = flip ? sg.a : sg.b;
+        var near = lastEnd && d2(lastEnd, p0) <= join * join;
+        if (join > 0 && run && near) run.pts.push(p0, p1);                         /* 'monotonic': the connector laid */
+        else {
+          run = { pts: [p0, p1] };
+          /* to the next line without a stop: within 3 line widths (Studio's join), or - a 'monotonic' fill, whose regions Studio joins round the
+             outline - any move under TOP_GLIDE_MM that stays inside the piece */
+          if (lastEnd && (d2(lastEnd, p0) <= 9 * w * w ||
+              (join > 0 && edge && d2(lastEnd, p0) <= TOP_GLIDE_MM * TOP_GLIDE_MM && inside(edge, (lastEnd[0] + p0[0]) / 2, (lastEnd[1] + p0[1]) / 2) && !crossesOutline(edge, lastEnd, p0)))) run.glide = true;
+          out.push(run);
+        }
+        if (join <= 0) run = null;
+        lastEnd = p1; flip = !flip;
+      });
+      here = lastEnd;
+    }
+    return out;
   }
 
   /* A TOP SURFACE, ONE RUN A PIECE WHERE IT CAN BE (the owner's Gulf logo, 2026-11-23). Every place a top run stops is a retraction, a wipe, a lift
@@ -2828,11 +2912,19 @@
           /* Arachne (o.wallGenerator): a part's walls fit to its thickness, thin features included - no Detect thin wall pass. A support and a
              brim keep the classic generator their export names. */
           var arachne = o.wallGenerator === 'arachne' && P.role === 'part';
-          var thin = P.thin && !arachne ? thinWalls(g, region, o) : null;
+          /* THE FIRST LAYER'S WIDTHS (Studio's initial_layer_line_width / initial_layer_infill_line_width: 0.5 at 0.4): a part's walls and fill on
+             layer 0 at their own width; null - the layer's widths as on any other */
+          var oW = oS;
+          if (i === 0 && P.role === 'part' && (o.firstLayerWidthMm > 0 || o.firstLayerInfillWidthMm > 0)) {
+            oW = Object.assign({}, oS);
+            if (o.firstLayerWidthMm > 0) { oW.outerWallWidthMm = o.firstLayerWidthMm; oW.innerWallWidthMm = o.firstLayerWidthMm; }
+            if (o.firstLayerInfillWidthMm > 0) { oW.infillWidthMm = o.firstLayerInfillWidthMm; oW.topWidthMm = null; oW.solidWidthMm = null; }
+          }
+          var thin = P.thin && !arachne ? thinWalls(g, region, oW) : null;
           /* a support has one loop and no top shell: the one-wall-on-top rule has no loop to drop there, and left to run it kept the fill out from under
              whatever stands on the layer - a pad with a pocket between its trunks printed hollow under every trunk, their second layer over air */
-          var per = arachne ? arachneWalls(g, region, h, oS, oS.onlyOneWallTop ? above : null)
-            : perimeters(g, thin ? thin.rest : region, h, oS, oS.onlyOneWallTop && P.role !== 'support' ? above : null);
+          var per = arachne ? arachneWalls(g, region, h, oW, oS.onlyOneWallTop ? above : null)
+            : perimeters(g, thin ? thin.rest : region, h, oW, oS.onlyOneWallTop && P.role !== 'support' ? above : null);
           if (arachne) {
             L.variableBeads = per.variableBeads;
             per.extra.forEach(function (pa) { L.paths.push(pa); });     /* the middle beads first: inner walls first, outer last */
@@ -2853,7 +2945,7 @@
           var seamOn = o.seamAligned !== false && P.role === 'part', seamsPrev = P._seamsPrev || [], seamsNow = [];
           per.loops.slice().reverse().forEach(function (lp) {     // inner walls first, outer last
             var feat = lp.depth === 0 ? 'Outer wall' : 'Inner wall';
-            var w = lp.width || (lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm);
+            var w = lp.width || (lp.depth === 0 ? oW.outerWallWidthMm : oW.innerWallWidthMm);
             var lpPolys = seamOn ? g.polys(lp.cs) : null;
             loopsOf(g, lp.cs).forEach(function (path) {
               if (seamOn) { path.pts = placeSeam(path.pts, lpPolys, seamsPrev, w); seamsNow.push(path.pts[0]); }
@@ -2909,7 +3001,7 @@
           }
           if (thin) {
             thin.paths.forEach(function (pa) {
-              L.paths.push({ feature: 'Outer wall', width: o.outerWallWidthMm, closed: pa.closed, pts: pa.pts, thinWall: true });
+              L.paths.push({ feature: 'Outer wall', width: oW.outerWallWidthMm, closed: pa.closed, pts: pa.pts, thinWall: true });
             });
             L.thinWalls = thin.paths.length;
             if (!L.wallCount) L.wallCount = 1;
@@ -2934,7 +3026,7 @@
           // supportwithinsupport's ribs) came out solid, 1.0 mm strips (over the
           // tabletop's leg arms) came out sparse; 1.7 x spacing = 0.944 mm at
           // 0.62 / 0.3 sits inside that bracket (docs/SLICER.md section 3).
-          var narrowR = (oS.narrowSparseMm != null ? oS.narrowSparseMm : 1.7 * spacingOf(o.infillWidthMm, h)) / 2;
+          var narrowR = (oS.narrowSparseMm != null ? oS.narrowSparseMm : 1.7 * spacingOf(oW.infillWidthMm, h)) / 2;
           if (narrowR > 0 && !g.isEmpty(sparse)) {
             var opened = g.offset(g.offset(sparse, -narrowR), narrowR);
             var narrow = g.diff(sparse, opened);
@@ -2943,7 +3035,7 @@
                the infill lines' centres (Erik's wall-thickness benchmark, the owner's walls-tester slices: three L legs, 1.31 / 0.91 / 0.52
                mm strips, all sparse, Arachne and Classic alike) */
             if (g.area(narrow) > 1e-6 && !g.isEmpty(solid)) {
-              var touch = g.inter(narrow, g.offset(solid, spacingOf(o.infillWidthMm, h)));
+              var touch = g.inter(narrow, g.offset(solid, spacingOf(oW.infillWidthMm, h)));
               narrow = g.unionAll(g.parts(narrow).filter(function (pc) { return !g.isEmpty(g.inter(pc, touch)); }));
             } else narrow = g.empty();
             if (g.area(narrow) > 1e-6) { solid = g.union(solid, narrow); sparse = g.diff(sparse, narrow); }
@@ -2957,7 +3049,7 @@
           var bottomOpen = below ? g.inter(solid, g.diff(region, below)) : solid;
           // internal bridge: solid laid straight onto the previous layer's sparse
           var bridgeInner = below ? g.inter(g.diff(solid, bottomOpen), sparsePrev) : g.empty();
-          var wInfB = o.infillWidthMm;
+          var wInfB = oW.infillWidthMm;
           // An internal bridge needs room to be one: over strips narrower than
           // two lines (the tabletop's 1.0 mm leg arms) Bambu printed plain
           // solid infill, over the 27 mm field under supportwithinsupport's
@@ -2998,7 +3090,7 @@
             bottom: g.area(bottomOpen), bridge: g.area(bridgeInner), internal: g.area(internal)
           };
 
-          var wInf = o.infillWidthMm, sInf = spacingOf(wInf, h);
+          var wInf = oW.infillWidthMm, sInf = spacingOf(wInf, h);
           var dirA = (o.infillDirectionDeg) * Math.PI / 180;
           var solidAngle = (i % 2 === 0) ? dirA : dirA + Math.PI / 2;
           var hull = g.polys(g.offset(inner, wInf / 2 + 1e-4));
@@ -3007,14 +3099,116 @@
              are laid from the beads' outer edge, and the reference's outermost ring lies 0.85 x the mean of the wall's spacing and its own from the
              last loop (0.333 at 0.45 / 0.42, 0.388 at the first layer's 0.5 / 0.5). So the region grows by the difference plus half a spacing -
              along the walls only: where a piece borders another fill of the same layer it keeps its edge. */
-          function ringRoom(cs, onTop) {
+          function ringRoom(cs, onTop, sF) {
             /* a top surface under one wall (onlyOneWallTop) lies along the outer wall, everything else along the last inner one */
-            var wWall = oS.wallLoops > 1 && !(onTop && oS.onlyOneWallTop) ? o.innerWallWidthMm : o.outerWallWidthMm;
-            var grow = sInf / 2 + (1 - o.infillWallOverlap) * (spacingOf(wWall, h) - sInf) / 2;
+            var wWall = oS.wallLoops > 1 && !(onTop && oS.onlyOneWallTop) ? oW.innerWallWidthMm : oW.outerWallWidthMm;
+            if (!(sF > 0)) sF = sInf;
+            var grow = sF / 2 + (1 - o.infillWallOverlap) * (spacingOf(wWall, h) - sF) / 2;
             return g.union(cs, g.inter(g.offset(cs, grow), g.diff(g.offset(inner, grow), inner)));
           }
           function solidFill(cs, feat, pattern) {
             if (g.isEmpty(cs)) return;
+            /* EACH FEATURE AT ITS OWN WIDTH (Studio's top_surface_line_width, internal_solid_infill_line_width; the first layer's infill width on
+               layer 0): null - the infill's, as before. A top or bottom surface at a density under 100 % (top_surface_density /
+               bottom_surface_density) has its lines that much further apart, as Studio's spacing / density. */
+            var wInf = feat === 'Top surface' && oW.topWidthMm > 0 ? oW.topWidthMm : feat === 'Internal solid infill' && oW.solidWidthMm > 0 ? oW.solidWidthMm : oW.infillWidthMm;
+            var sInf = spacingOf(wInf, h), solidJoin = o.solidPattern === 'lines' ? 0 : 3 * sInf;
+            var hull = g.polys(g.offset(inner, wInf / 2 + 1e-4));
+            var dens = feat === 'Top surface' && o.topDensity > 0 && o.topDensity < 1 ? o.topDensity : feat === 'Bottom surface' && o.bottomDensity > 0 && o.bottomDensity < 1 ? o.bottomDensity : 1;
+            if (pattern === 'monotonic' || pattern === 'monotonicline') {
+              var line = pattern === 'monotonicline', sM = sInf / dens, room = cs;
+              if (line) {
+                /* Studio lays a monotonic line fill in the area with no wall overlap (no_overlap_expolygons): to the wall's inner edge, half its spacing
+                   from its centre, the lines' centres 0.05 of their own spacing short of it (INFILL_OVERLAP_OVER_SPACING 0.45) - 0.207 from the outer
+                   wall's centre on the owner's Gulf logo, where NSO's fill region (bead centres, 0.85 x the wall's spacing in) stops at 0.320 */
+                var wWl = oS.wallLoops > 1 && !(feat === 'Top surface' && oS.onlyOneWallTop) ? oW.innerWallWidthMm : oW.outerWallWidthMm, sWl = spacingOf(wWl, h);
+                var dOut = (1 - o.infillWallOverlap) * sWl - sWl / 2 - 0.05 * sInf;
+                if (dOut > 1e-6) room = g.union(cs, g.inter(g.offset(cs, dOut), g.diff(g.offset(inner, dOut), inner)));
+              }
+              var lastOf = function (pa) { return pa.closed ? pa.pts[0] : pa.pts[pa.pts.length - 1]; };
+              var here = L.paths.length ? lastOf(L.paths[L.paths.length - 1]) : null;
+              /* the lines of a monotonic line fill sit half a spacing off the plate's grid (every Studio top measured: Gulf logo, PETG Supporttest) */
+              var ph = 0;
+              if (line) { var og = o.gridOriginMm || [0, 0]; ph = sM / 2 + (-og[0] * Math.sin(solidAngle) + og[1] * Math.cos(solidAngle)); }
+              /* a line is laid only where its scan line crosses the piece shrunk by a further 0.45 spacing (Studio's ExPolygonWithOffset: the line
+                 runs to the outer offset, but only a line that meets the inner one is a line) - the corner's stub of a stroke is not laid */
+              var pieces = g.parts(room).map(function (pc) {
+                var sg = scanFill(g.polys(pc), solidAngle, sM, ph), core = scanFill(g.polys(g.offset(pc, -0.45 * sM)), solidAngle, sM, ph), byK = {};
+                core.forEach(function (q) { (byK[q.line] || (byK[q.line] = [])).push(q); });
+                var ca = Math.cos(solidAngle), sa = Math.sin(solidAngle), tt = function (p) { return p[0] * ca + p[1] * sa; };
+                if (core.length) sg = sg.filter(function (q) {                    /* (a piece with no core at all - a sliver - keeps its lines) */
+                  var lo = Math.min(tt(q.a), tt(q.b)), hi = Math.max(tt(q.a), tt(q.b));
+                  return (byK[q.line] || []).some(function (c) { var l2 = Math.min(tt(c.a), tt(c.b)), h2 = Math.max(tt(c.a), tt(c.b)); return l2 <= hi && lo <= h2; });
+                });
+                sg.cs = pc; return sg;
+              }).filter(function (sg) { return sg.length; });
+              var laid = [], firstNew = L.paths.length;
+              while (pieces.length) {
+                var bi = 0, bd = Infinity;
+                pieces.forEach(function (sg, k) { [sg[0].a, sg[0].b, sg[sg.length - 1].a, sg[sg.length - 1].b].forEach(function (p) { var d = here ? Math.hypot(p[0] - here[0], p[1] - here[1]) : 0; if (d < bd) { bd = d; bi = k; } }); });
+                var runs = monotonicRuns(pieces[bi], wInf, line ? 0 : 3 * sM, here, line ? null : g.polys(g.offset(pieces[bi].cs, sM / 2)));
+                laid.push(pieces[bi].cs);
+                pieces.splice(bi, 1);
+                runs.forEach(function (r) { var pa = { feature: feat, width: wInf, closed: false, pts: r.pts }; if (r.glide) pa.glide = true; L.paths.push(pa); });
+                if (runs.length) { var lr = runs[runs.length - 1].pts; here = lr[lr.length - 1]; }
+              }
+              /* ...and what its lines leave of the area is gap fill (Studio's FillMonotonicLineWGapFill: the unfilled strips 0.2 - 2 spacings wide,
+                 down their middles) - the top's 111 mm of Gap infill on the Gulf logo that NSO had none of */
+              if (line && dens >= 1 && o.gapFill !== false) {
+                /* what the lines cover: each a band one spacing wide (Studio's polygons_covered_by_spacing) */
+                var quads = [];
+                L.paths.forEach(function (pa) {
+                  if (pa.feature !== feat || pa.closed) return;
+                  for (var q = 1; q < pa.pts.length; q++) {
+                    var A = pa.pts[q - 1], B = pa.pts[q], dx = B[0] - A[0], dy = B[1] - A[1], ln = Math.hypot(dx, dy);
+                    if (ln < 1e-6) continue;
+                    var ux = dx / ln * sM / 2, uy = dy / ln * sM / 2;
+                    quads.push([[A[0] - ux + uy, A[1] - uy - ux], [B[0] + ux + uy, B[1] + uy - ux], [B[0] + ux - uy, B[1] + uy + ux], [A[0] - ux - uy, A[1] - uy + ux]]);
+                  }
+                });
+                if (quads.length) {
+                  var covered = g.of(quads, 'NonZero');
+                  var area = g.offset(room, 0.05 * sM), un = g.diff(area, covered), mn = 0.2 * sM, mx = 2 * sM;
+                  var gaps = g.diff(g.offset(g.offset(un, -mn / 2), mn / 2), g.offset(g.offset(un, -mx / 2), mx / 2 + 1e-4));
+                  var gp = g.isEmpty(gaps) ? [] : gapPaths(g, gaps, gaps, h, Object.assign({}, o, { innerWallWidthMm: wInf }));
+                  /* WOVEN IN (Studio's plan_monotonic_route): after each line, a gap piece that starts within 3 line widths of where the nozzle is
+                     goes next, stepped to without a stop - so the gaps fill on the way and the lines stay joined (the Gulf logo's rim: line, 0.08 mm
+                     step, gap, line); what is left goes after the lines, nearest first */
+                  if (gp.length) {
+                    var tail = L.paths.splice(firstNew), lim2 = 9 * wInf * wInf, used = gp.map(function () { return false; });
+                    var dd = function (p, q) { var dx = p[0] - q[0], dy = p[1] - q[1]; return dx * dx + dy * dy; };
+                    var weave = function (at) {
+                      for (;;) {
+                        var bk = -1, bdd = lim2, flip = false;
+                        gp.forEach(function (q, k) { if (used[k]) return; var a = dd(at, q.pts[0]), b = dd(at, q.pts[q.pts.length - 1]); if (a < bdd) { bdd = a; bk = k; flip = false; } if (b < bdd) { bdd = b; bk = k; flip = true; } });
+                        if (bk < 0) return at;
+                        used[bk] = true;
+                        var q = gp[bk]; if (flip) q.pts = q.pts.slice().reverse();
+                        q.glide = true; L.paths.push(q); at = q.pts[q.pts.length - 1];
+                      }
+                    };
+                    tail.forEach(function (pa, k) {
+                      if (k && pa.glide !== true) { /* a line the nozzle came to from afar: its gaps on the way */ }
+                      L.paths.push(pa);
+                      var end = weave(pa.pts[pa.pts.length - 1]);
+                      var nx = tail[k + 1];
+                      if (nx && end !== pa.pts[pa.pts.length - 1]) nx.glide = dd(end, nx.pts[0]) <= lim2 ? true : nx.glide && false;
+                    });
+                    var at2 = L.paths.length ? L.paths[L.paths.length - 1].pts[L.paths[L.paths.length - 1].pts.length - 1] : null;
+                    for (;;) {
+                      var bk2 = -1, bd2 = Infinity, fl2 = false;
+                      gp.forEach(function (q, k) { if (used[k]) return; var a = at2 ? dd(at2, q.pts[0]) : 0, b = at2 ? dd(at2, q.pts[q.pts.length - 1]) : 0; if (a < bd2) { bd2 = a; bk2 = k; fl2 = false; } if (b < bd2) { bd2 = b; bk2 = k; fl2 = true; } });
+                      if (bk2 < 0) break;
+                      used[bk2] = true;
+                      var q2 = gp[bk2]; if (fl2) q2.pts = q2.pts.slice().reverse();
+                      if (at2 && bd2 <= lim2) q2.glide = true;
+                      L.paths.push(q2); at2 = q2.pts[q2.pts.length - 1];
+                    }
+                  }
+                }
+              }
+              return;
+            }
             if (pattern === 'hilbertcurve') {
               g.parts(cs).forEach(function (pc) {
                 hilbertFill(g.polys(pc), sInf, solidJoin, (1 - o.infillWallOverlap) * (spacingOf(oS.wallLoops > 1 && !(feat === 'Top surface' && oS.onlyOneWallTop) ? o.innerWallWidthMm : o.outerWallWidthMm, h) - sInf) / 2).forEach(function (pth) {
@@ -3035,7 +3229,7 @@
             }
             if (pattern === 'concentric') {
               var lastP = L.paths.length ? L.paths[L.paths.length - 1] : null;
-              concentricFill(g, ringRoom(cs, feat === 'Top surface'), wInf, h, sInf, true, lastP ? (lastP.closed ? lastP.pts[0] : lastP.pts[lastP.pts.length - 1]) : null).forEach(function (pth) {
+              concentricFill(g, ringRoom(cs, feat === 'Top surface', sInf), wInf, h, sInf, true, lastP ? (lastP.closed ? lastP.pts[0] : lastP.pts[lastP.pts.length - 1]) : null).forEach(function (pth) {
                 L.paths.push({ feature: feat, width: pth.width, closed: pth.closed, pts: pth.pts });
               });
               return;
@@ -3066,7 +3260,7 @@
               return;
             }
             /* a support's first layer at its own density (Bambu's Initial layer density): the lines that much further apart */
-            var sFill = P.role === 'support' && i === 0 && o.supportFirstLayerDensity > 0 && o.supportFirstLayerDensity < 1 ? sInf / Math.max(0.2, o.supportFirstLayerDensity) : sInf;
+            var sFill = P.role === 'support' && i === 0 && o.supportFirstLayerDensity > 0 && o.supportFirstLayerDensity < 1 ? sInf / Math.max(0.2, o.supportFirstLayerDensity) : sInf / dens;
             if (feat === 'Top surface') { topRuns(g, cs, solidAngle, sFill, solidJoin, hull, L).forEach(function (pth) { var pa = { feature: feat, width: wInf, closed: false, pts: pth.pts }; if (pth.glide) pa.glide = true; L.paths.push(pa); }); return; }
             connect(scanFill(polys, solidAngle, sFill, 0), sFill > sInf ? 3 * sFill : solidJoin, hull).forEach(function (pth) {
               L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });

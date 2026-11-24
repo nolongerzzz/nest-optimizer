@@ -266,18 +266,34 @@
    */
   /* the project's pattern names the engine draws as themselves; every other one is its lines (zigzag) */
   var ENGINE_PATTERNS = { grid: 'grid', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid', cubic: 'cubic', adaptivecubic: 'adaptivecubic', honeycomb: 'honeycomb', lightning: 'lightning' };
-  var ENGINE_SURFACES = { concentric: 'concentric', archimedeanchords: 'archimedeanchords', hilbertcurve: 'hilbertcurve', octagramspiral: 'octagramspiral' };
+  var ENGINE_SURFACES = { concentric: 'concentric', archimedeanchords: 'archimedeanchords', hilbertcurve: 'hilbertcurve', octagramspiral: 'octagramspiral',
+                         monotonic: 'monotonic', monotonicline: 'monotonicline' };
 
+  /* a line width key: its own value, 0 / absent the profile's line_width, absent too: null (the slicer's own) */
+  function lw(config, key) {
+    var v = num(config, key, 0);
+    if (!(v > 0)) v = num(config, 'line_width', 0);
+    return v > 0 ? v : null;
+  }
   function engineOptions(config) {
     var pct = function (key, def) { var v = num(config, key, def * 100); return v / 100; };
     var nozzle = num(config, 'nozzle_diameter', 0.4);
     var over = {
       layerMm: num(config, 'layer_height', 0.2),
       firstLayerMm: num(config, 'initial_layer_print_height', 0.2),
-      outerWallWidthMm: num(config, 'outer_wall_line_width', 0.42),
-      innerWallWidthMm: num(config, 'inner_wall_line_width', 0.42),
-      infillWidthMm: num(config, 'sparse_infill_line_width', 0.42),
-      supportWidthMm: num(config, 'support_line_width', 0.42),
+      outerWallWidthMm: lw(config, 'outer_wall_line_width') || 0.42,
+      innerWallWidthMm: lw(config, 'inner_wall_line_width') || 0.42,
+      infillWidthMm: lw(config, 'sparse_infill_line_width') || 0.42,
+      supportWidthMm: lw(config, 'support_line_width') || 0.42,
+      /* every line the profile sizes (Studio's Line width section; 0 there is the profile's line_width) */
+      topWidthMm: lw(config, 'top_surface_line_width'),
+      solidWidthMm: lw(config, 'internal_solid_infill_line_width'),
+      firstLayerWidthMm: lw(config, 'initial_layer_line_width'),
+      firstLayerInfillWidthMm: lw(config, 'initial_layer_infill_line_width'),
+      topDensity: pct('top_surface_density', 1),
+      bottomDensity: pct('bottom_surface_density', 1),
+      topColorPenetrationLayers: raw(config, 'top_color_penetration_layers') !== '' ? num(config, 'top_color_penetration_layers', 5) : undefined,
+      bottomColorPenetrationLayers: raw(config, 'bottom_color_penetration_layers') !== '' ? num(config, 'bottom_color_penetration_layers', 3) : undefined,
       wallLoops: num(config, 'wall_loops', 2),
       topShellLayers: num(config, 'top_shell_layers', 3),
       bottomShellLayers: num(config, 'bottom_shell_layers', 3),
@@ -311,6 +327,14 @@
       supportAngleDeg: num(config, 'support_angle', 0),
       bridgeAngleDeg: num(config, 'bridge_angle', 0)
     };
+    /* where the G-code's origin is in the slicer's frame: the pieces are placed about the bed's middle (printable_area), the G-code is the plate
+       less the extruder offset - a monotonic line top lies on Studio's grid of the G-code itself (docs/SLICER.md "Monotonic") */
+    var paRaw = config ? config.printable_area : null;
+    var pa = (Array.isArray(paRaw) ? paRaw : String(paRaw || '').split(',')).map(function (q) { var m = /(-?[\d.]+)\s*x\s*(-?[\d.]+)/.exec(q); return m ? [+m[1], +m[2]] : null; }).filter(Boolean);
+    if (pa.length >= 3) {
+      var bx = Math.max.apply(null, pa.map(function (q) { return q[0]; })), by = Math.max.apply(null, pa.map(function (q) { return q[1]; })), eo = extruderOffset(config);
+      over.gridOriginMm = [eo.x - bx / 2, eo.y - by / 2];
+    }
     /* a surface or the solid infill the project draws in rings (the other patterns are the engine's lines) */
     var own = function (key) { return ENGINE_SURFACES[raw(config, key)] || null; };
     if (own('internal_solid_infill_pattern')) over.solidPattern = own('internal_solid_infill_pattern');
@@ -683,7 +707,7 @@
       else if (prev && !sameObj) retract = true;            // from one object to another: always
       else if (d < S.retract.minTravel - EPS) retract = false;
       else if (sameObj && travelInside(it.rings, pos, start)) retract = false;
-      else if (sameObj && it.glide && prev.feature === 'Top surface') retract = false;   /* run to run inside one top piece (the slicer's path.glide) */
+      else if (sameObj && it.glide) retract = false;   /* run to run inside one fill piece (the slicer's path.glide: a top run, a monotonic line, a gap woven in) */
       else retract = true;
       it.travel = { from: pos, d: d, retract: retract, hop: retract && S.retract.hop > 0 };
       if (prev) prev.retractAfter = retract;
@@ -2548,7 +2572,7 @@
       if (hookAt === -1) emitHook(li, z);
 
       items.forEach(function (it, k) {
-        var t = it.travel;
+        var t = it.travel, glided = false;
         var pt = it.pts[0];
         var tFirst = first;
         var prev = k ? items[k - 1] : null;
@@ -2649,6 +2673,11 @@
             else put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
             if (atHop || t.hop) put('G1 Z' + fx(z));
             deretract();
+          } else if (it.glide && !atHop) {
+            /* a monotonic line's step to its next line (the slicer's path.glide): Studio's ExtrusionMultiPath writes it as a bare move at the line's
+               own speed and acceleration - "G1 X Y", no F, no M204 - so the nozzle steps across and goes on */
+            put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]));
+            glided = true;
           } else {
             accel(t.d < 2 ? S.accel.short : travelA(first));
             put('G1 X' + gx(pt[0]) + ' Y' + gy(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
@@ -2666,7 +2695,7 @@
           S.cooling.enable_overhang_bridge_fan && pj >= S.fan.closeFirst;
         var fanNow = bridgeFan ? Math.max(layerFan, Math.round(S.cooling.overhang_fan_speed * 255) / 100) : layerFan;
         if (fanNow !== st.fan) { put(fanLine(fanNow)); st.fan = fanNow; }
-        put('G1 F' + fmt(it.v * 60, 3));
+        if (!(glided && Math.abs(st.lastF - it.v * 60) < 1e-6)) put('G1 F' + fmt(it.v * 60, 3));
         st.lastF = it.v * 60;
         accel(it.a);
         var x = pt[0], y = pt[1];
@@ -2855,6 +2884,7 @@
   return {
     settingsFrom: settingsFrom,
     engineOptions: engineOptions,
+    extruderOffset: extruderOffset,
     coolingValues: coolingValues,
     featureSpeed: featureSpeed,
     beadOf: beadOf,

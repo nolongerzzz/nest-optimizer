@@ -1257,7 +1257,10 @@ var NSO_SUPPORTS_CARD = (function () {
   var PRESET_FIELDS = ['sup-on', 'sup-angle', 'sup-style', 'sup-size', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip',
     'sup-rest', 'sup-small', 'sup-interface', 'slice-set-iface-angle', 'slice-set-raft', 'slice-set-raft-gap',
     /* the Print card's slice rows: quality, strength, adhesion, the filament (not the printer or its nozzle: a saved setting goes with any printer) */
-    'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-surface', 'slice-set-brim',
+    'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-brim',
+    /* the surfaces, their densities and paint penetration, the line widths (app-print.js EXTRA_ROWS) */
+    'slice-set-top-pattern', 'slice-set-top-density', 'slice-set-top-pen', 'slice-set-bottom-pattern', 'slice-set-bottom-density', 'slice-set-bottom-pen', 'slice-set-solid-pattern',
+    'slice-set-lw-default', 'slice-set-lw-first', 'slice-set-lw-first-infill', 'slice-set-lw-outer', 'slice-set-lw-inner', 'slice-set-lw-top', 'slice-set-lw-sparse', 'slice-set-lw-solid', 'slice-set-lw-support',
     'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band',
     /* tuning: the bridge's speed and flow, the filament's flow ratio, retraction and z-hop (docs/FILAMENTS.md "Bridges and stringing") */
     'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-hang-speed', 'slice-set-bridge-temp', 'slice-set-bridge-temp-from', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-retract-before', 'slice-set-zhop',

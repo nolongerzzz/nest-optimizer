@@ -134,6 +134,7 @@
                            /* TOP / BOTTOM SHELLS (Strength), Studio's four: the layers, and a thickness that adds layers to a count of one or more
                               (0 layers is none: the owner's TPU feet as pure 3D honeycomb - no walls, no shells) */
                            topLayers: 5, topThick: 1, botLayers: 3, botThick: 0,
+                           /* (the surfaces, their densities and paint penetration, the line widths: EXTRA_ROWS, filled in below) */
                            /* THE PROJECT (plateProject): a Studio project's own process changes, { file, keys }, when the plate's parts are its - every
                               key goes into the slice as the project has it (the rows show the ones they have); null: the printer profile alone */
                            project: null };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
@@ -144,7 +145,47 @@
   var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid', cubic: 'cubic', adaptivecubic: 'adaptivecubic', honeycomb: 'honeycomb', lightning: 'lightning', rectilinear: 'zigzag' };
   /* the surfaces row: the top, the bottom and the solid infill as one choice (Bambu's three rows); zigzag is its Rectilinear and what any
      other pattern of a template (monotonic...) is sliced as */
-  var SURFACE_TO_CONFIG = { zigzag: 'zig-zag', concentric: 'concentric', archimedeanchords: 'archimedeanchords', hilbertcurve: 'hilbertcurve', octagramspiral: 'octagramspiral' };
+  var SURFACE_TO_CONFIG = { zigzag: 'zig-zag', monotonic: 'monotonic', monotonicline: 'monotonicline', concentric: 'concentric', archimedeanchords: 'archimedeanchords', hilbertcurve: 'hilbertcurve', octagramspiral: 'octagramspiral' };
+  /* a surface pattern as a profile names it -> the card's (Studio's Aligned Rectilinear is drawn as its Rectilinear) */
+  var SURFACE_FROM_CONFIG = { 'zig-zag': 'zigzag', zigzag: 'zigzag', rectilinear: 'zigzag', alignedrectilinear: 'zigzag', monotonic: 'monotonic', monotonicline: 'monotonicline',
+                              concentric: 'concentric', archimedeanchords: 'archimedeanchords', hilbertcurve: 'hilbertcurve', octagramspiral: 'octagramspiral' };
+  /* STUDIO'S STRENGTH AND LINE WIDTH ROWS (the owner, 2026-11-24: "add the rest of these levers"), one table: the setting, its row, Studio's key,
+     what it is, its range and Bambu's default. Each starts at the profile's value and is written only when moved off it (configOverlay).
+       surface  a pattern of the top, the bottom or the solid infill (SURFACE_TO_CONFIG)
+       pct      a percentage (written 'N%')        int   a count        mm   a line width, 0 = the profile's Default (line_width), as Studio's */
+  var EXTRA_ROWS = [
+    { key: 'topSurf', id: 'slice-set-top-pattern', cfg: 'top_surface_pattern', kind: 'surface', def: 'monotonicline' },
+    { key: 'topDens', id: 'slice-set-top-density', cfg: 'top_surface_density', kind: 'pct', lo: 10, hi: 100, def: 100 },
+    { key: 'topPen', id: 'slice-set-top-pen', cfg: 'top_color_penetration_layers', kind: 'int', lo: 1, hi: 30, def: 5 },
+    { key: 'botSurf', id: 'slice-set-bottom-pattern', cfg: 'bottom_surface_pattern', kind: 'surface', def: 'monotonic' },
+    { key: 'botDens', id: 'slice-set-bottom-density', cfg: 'bottom_surface_density', kind: 'pct', lo: 10, hi: 100, def: 100 },
+    { key: 'botPen', id: 'slice-set-bottom-pen', cfg: 'bottom_color_penetration_layers', kind: 'int', lo: 1, hi: 30, def: 3 },
+    { key: 'solidSurf', id: 'slice-set-solid-pattern', cfg: 'internal_solid_infill_pattern', kind: 'surface', def: 'zigzag' },
+    { key: 'lwDefault', id: 'slice-set-lw-default', cfg: 'line_width', kind: 'mm', def: 0.42 },
+    { key: 'lwFirst', id: 'slice-set-lw-first', cfg: 'initial_layer_line_width', kind: 'mm', def: 0.5 },
+    { key: 'lwFirstInfill', id: 'slice-set-lw-first-infill', cfg: 'initial_layer_infill_line_width', kind: 'mm', def: 0.5 },
+    { key: 'lwOuter', id: 'slice-set-lw-outer', cfg: 'outer_wall_line_width', kind: 'mm', def: 0.42 },
+    { key: 'lwInner', id: 'slice-set-lw-inner', cfg: 'inner_wall_line_width', kind: 'mm', def: 0.45 },
+    { key: 'lwTop', id: 'slice-set-lw-top', cfg: 'top_surface_line_width', kind: 'mm', def: 0.42 },
+    { key: 'lwSparse', id: 'slice-set-lw-sparse', cfg: 'sparse_infill_line_width', kind: 'mm', def: 0.45 },
+    { key: 'lwSolid', id: 'slice-set-lw-solid', cfg: 'internal_solid_infill_line_width', kind: 'mm', def: 0.42 },
+    { key: 'lwSupport', id: 'slice-set-lw-support', cfg: 'support_line_width', kind: 'mm', def: 0.42 }
+  ];
+  EXTRA_ROWS.forEach(function (R) { SETTINGS_DEFAULT[R.key] = R.def; });
+  function extraFromConfig(config, R) {
+    var v = cfgRaw(config, R.cfg);
+    if (R.kind === 'surface') return SURFACE_FROM_CONFIG[v] || R.def;
+    if (R.kind === 'pct') return pctOf(v, R.def);
+    return numOf(v, R.def);
+  }
+  function extraClean(R, v, d) {
+    if (R.kind === 'surface') return v === 'rectilinear' ? 'zigzag' : SURFACE_TO_CONFIG[v] ? v : d;
+    var x = parseFloat(v);
+    if (!isFinite(x)) return d;
+    if (R.kind === 'mm') return Math.round(Math.max(0, Math.min(2, x)) * 1000) / 1000;
+    return Math.round(Math.max(R.lo, Math.min(R.hi, x)));
+  }
+  function extraWrite(R, v) { return R.kind === 'surface' ? SURFACE_TO_CONFIG[v] : R.kind === 'pct' ? v + '%' : String(v); }
   var SURFACE_KEYS = ['top_surface_pattern', 'bottom_surface_pattern', 'internal_solid_infill_pattern'];
   var PATTERN_LABEL = { zigzag: 'rectilinear', archimedeanchords: 'archimedean chords', hilbertcurve: 'hilbert curve', octagramspiral: 'octagram spiral', '3dhoneycomb': '3D honeycomb', adaptivecubic: 'adaptive cubic' };
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
@@ -297,7 +338,7 @@
     var PL = lazy('nso-print-planner.js', 'NSOPrintPlanner');
     if (!config || !PL) return Object.assign({}, SETTINGS_DEFAULT);
     var eng = PL.engineOptions(config), o = eng.over, D0 = SETTINGS_DEFAULT;
-    return {
+    return Object.assign({
       nozzle: eng.nozzleMm, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
       pattern: PATTERN_FROM_CONFIG[cfgRaw(config, 'sparse_infill_pattern')] || o.sparsePattern,
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
@@ -324,7 +365,7 @@
       minWall: pctOf(cfgRaw(config, 'min_bead_width'), D0.minWall), minFeature: pctOf(cfgRaw(config, 'min_feature_size'), D0.minFeature),
       topLayers: o.topShellLayers, topThick: o.topShellThicknessMm, botLayers: o.bottomShellLayers, botThick: o.bottomShellThicknessMm,
       project: null
-    };
+    }, EXTRA_ROWS.reduce(function (m, R) { m[R.key] = extraFromConfig(config, R); return m; }, {}));
   }
 
   /** A project's changes as the settings carry them: { file, keys: { key: 'value' } } (each value a string, a list's first), or null. */
@@ -375,7 +416,7 @@
     /* a filament row: a number in its range, or null (empty: the filament's own value) */
     var opt = function (v, lo, hi, dp) { v = parseFloat(v); if (!isFinite(v)) return null; var k = Math.pow(10, dp); return Math.round(Math.max(lo, Math.min(hi, v)) * k) / k; };
     var D = SETTINGS_DEFAULT, r2 = function (v) { return Math.round(v * 100) / 100; };
-    return {
+    return Object.assign({
       nozzle: n(s.nozzle, D.nozzle, 0.1, 2),
       layer: Math.round(n(s.layer, D.layer, 0.05, 0.3) * 1000) / 1000,
       walls: Math.round(n(s.walls, D.walls, 0, 10)),   /* 0: no walls, the infill to the outline (Studio's wall_loops = 0) */
@@ -421,7 +462,12 @@
       topLayers: Math.round(n(s.topLayers, D.topLayers, 0, 100)), topThick: r2(n(s.topThick, D.topThick, 0, 20)),
       botLayers: Math.round(n(s.botLayers, D.botLayers, 0, 100)), botThick: r2(n(s.botThick, D.botThick, 0, 20)),
       project: projectOf(s.project)
-    };
+    }, EXTRA_ROWS.reduce(function (m, R) {
+      /* (a setting saved before the three surface rows had one, surface, for all three) */
+      var v = s[R.key] != null && s[R.key] !== '' ? s[R.key] : R.kind === 'surface' && s.surface ? s.surface : null;
+      m[R.key] = extraClean(R, v, D[R.key]);
+      return m;
+    }, {}));
   }
 
   /**
@@ -443,7 +489,8 @@
     if (s.pattern !== base.pattern) {
       out.sparse_infill_pattern = PATTERN_TO_CONFIG[s.pattern];
     }
-    if (s.surface !== base.surface) SURFACE_KEYS.forEach(function (k) { out[k] = SURFACE_TO_CONFIG[s.surface]; });
+    /* the surfaces, their densities and paint penetration, the line widths: each by its Studio key, when moved off the profile's */
+    EXTRA_ROWS.forEach(function (R) { var a = s[R.key], b = base[R.key]; if (R.kind === 'mm' ? Math.abs(a - b) > 1e-6 : a !== b) out[R.cfg] = extraWrite(R, a); });
     if (s.angle !== base.angle) out.support_threshold_angle = String(s.angle);
     if (s.brim !== base.brim) out.brim_type = BRIM_TO_CONFIG[s.brim];
     if (s.raft !== base.raft) out.raft_layers = String(s.raft);
@@ -939,7 +986,7 @@
 
   /** The settings in a few words, for the readout: "0.12 mm layers, 3 walls, 20 % grid, support below 30°, brim auto". */
   function settingsWords(st) {
-    return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + (PATTERN_LABEL[st.pattern] || st.pattern) + (st.surface && st.surface !== 'zigzag' ? ', ' + (PATTERN_LABEL[st.surface] || st.surface) + ' surfaces' : '') +
+    return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + (PATTERN_LABEL[st.pattern] || st.pattern) + (st.topSurf && st.topSurf !== 'monotonicline' ? ', ' + (PATTERN_LABEL[st.topSurf] || st.topSurf) + ' top' : '') +
       ', support below ' + st.angle + '°, ' + (st.raft > 0 ? 'raft ' + st.raft + ' layer' + (st.raft === 1 ? '' : 's') + ' (no brim)' : 'brim ' + st.brim);
   }
 
@@ -1031,7 +1078,7 @@
 
   // ---- the card's Slice settings -----------------------------------------------
 
-  var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-surface',
+  var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern'].concat(EXTRA_ROWS.map(function (R) { return R.id; })).concat([
                  'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface-angle', 'slice-set-iface',
                  'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow',
                  'slice-set-temp-step', 'slice-set-temp-band',
@@ -1043,7 +1090,7 @@
                  /* the wall generator and Arachne's levers (Quality) */
                  'slice-set-wall-gen', 'slice-set-wall-angle', 'slice-set-wall-filter', 'slice-set-wall-translen', 'slice-set-wall-dist', 'slice-set-min-wall', 'slice-set-min-feature',
                  /* the top / bottom shells (Strength) */
-                 'slice-set-top-layers', 'slice-set-top-thick', 'slice-set-bot-layers', 'slice-set-bot-thick'];
+                 'slice-set-top-layers', 'slice-set-top-thick', 'slice-set-bot-layers', 'slice-set-bot-thick']);
   /* the wall generator's rows: the row, and its name in the settings */
   var WALL_ROWS = [['slice-set-wall-gen', 'wallGen'], ['slice-set-wall-angle', 'wallAngle'], ['slice-set-wall-filter', 'wallFilter'], ['slice-set-wall-translen', 'wallTransLen'],
                    ['slice-set-wall-dist', 'wallDist'], ['slice-set-min-wall', 'minWall'], ['slice-set-min-feature', 'minFeature'],
@@ -1126,9 +1173,10 @@
   function readSettings() {
     var v = function (id) { var el = $(id); return el ? (el.type === 'checkbox' ? !!el.checked : el.value) : undefined; };
     var sup = {}; SUP_ROWS.concat(WALL_ROWS).forEach(function (r) { sup[r[1]] = v(r[0]); });
+    EXTRA_ROWS.forEach(function (R) { if ($(R.id)) sup[R.key] = v(R.id); });
     return cleanSettings(Object.assign(sup, {
       nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
-      pattern: v('slice-set-pattern'), surface: v('slice-set-surface'), angle: $('slice-set-angle') ? v('slice-set-angle') : v('sup-angle'), brim: v('slice-set-brim'),   /* ONE angle: with no row of its own, the Print card's */
+      pattern: v('slice-set-pattern'), angle: $('slice-set-angle') ? v('slice-set-angle') : v('sup-angle'), brim: v('slice-set-brim'),   /* ONE angle: with no row of its own, the Print card's */
       raft: v('slice-set-raft'), raftGap: v('slice-set-raft-gap'), ifaceAngle: v('slice-set-iface-angle'),
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
@@ -1143,9 +1191,10 @@
   function showSettings(st) {
     var set = function (id, val) { var el = $(id); if (!el || val == null) return; if (el.type === 'checkbox') el.checked = !!val; else el.value = String(val); };
     var full = cleanSettings(st); SUP_ROWS.concat(WALL_ROWS).forEach(function (r) { set(r[0], full[r[1]]); });
+    EXTRA_ROWS.forEach(function (R) { set(R.id, full[R.key]); });
     wallRows();
     set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
-    set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-surface', st.surface); set('slice-set-angle', st.angle);
+    set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-angle', st.angle);
     /* ONE angle: the Print card's Angle starts at the profile's support threshold too (the card reads its areas again at it). The rows are
        seeded more than once - when the page opens, and again when the printer's template has been fetched - so an angle changed since the
        last seed is the owner's and is left alone: only Profile values (S.seedForce) lays the profile's over it. */

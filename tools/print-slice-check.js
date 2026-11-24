@@ -220,7 +220,11 @@ async function main() {
         /* the wall generator: the template's classic, and Studio's Arachne defaults (docs/SLICER.md "Arachne") */
         wallGen: 'classic', wallAngle: 10, wallFilter: 25, wallTransLen: 100, wallDist: 1, minWall: 85, minFeature: 25,
         /* the shells: the template's 5 top (1 mm) and 3 bottom */
-        topLayers: 5, topThick: 1, botLayers: 3, botThick: 0, project: null }), JSON.stringify(base));
+        topLayers: 5, topThick: 1, botLayers: 3, botThick: 0, project: null,
+        /* Studio's Strength and Line width rows (2026-11-24): the top in monotonic lines, the bottom monotonic, the solid infill rectilinear, both
+           surfaces 100 %, paint 5 down and 3 up; the lines 0.42, the first layer 0.5, the inner wall and the sparse infill 0.45 */
+        topSurf: 'monotonicline', topDens: 100, topPen: 5, botSurf: 'monotonic', botDens: 100, botPen: 3, solidSurf: 'zigzag',
+        lwDefault: 0.42, lwFirst: 0.5, lwFirstInfill: 0.5, lwOuter: 0.42, lwInner: 0.45, lwTop: 0.42, lwSparse: 0.45, lwSolid: 0.42, lwSupport: 0.42 }), JSON.stringify(base));
     const rov = PRINT.configOverlay(tpl, Object.assign({}, base, { raft: 10 }));
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));
@@ -267,10 +271,23 @@ async function main() {
     const SURF = ['internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern'];
     const ringOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: 'concentric' }));
     check('the infill row is the sparse infill\'s alone: concentric changes sparse_infill_pattern and nothing else', ringOver.sparse_infill_pattern === 'concentric' && Object.keys(ringOver).length === 1, JSON.stringify(ringOver));
-    const surfOver = PRINT.configOverlay(tpl, Object.assign({}, base, { surface: 'hilbertcurve' }));
-    check('the surfaces row is the top, the bottom and the solid infill as one: hilbertcurve in all three keys, the sparse infill untouched',
+    const all3 = v => ({ topSurf: v, botSurf: v, solidSurf: v });
+    const surfOver = PRINT.configOverlay(tpl, Object.assign({}, base, all3('hilbertcurve')));
+    check('the three surface rows (top, bottom, solid infill) are their three keys: hilbertcurve in all three, the sparse infill untouched',
       SURF.every(k => surfOver[k] === 'hilbertcurve') && Object.keys(surfOver).length === 3, JSON.stringify(surfOver));
-    const bothOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: '3dhoneycomb', surface: 'archimedeanchords' }));
+    const oneOver = PRINT.configOverlay(tpl, Object.assign({}, base, { topSurf: 'zigzag' }));
+    check('...each on its own: the top alone in rectilinear is top_surface_pattern = zig-zag and nothing else', JSON.stringify(oneOver) === JSON.stringify({ top_surface_pattern: 'zig-zag' }), JSON.stringify(oneOver));
+    const legacy = PRINT.cleanSettings({ surface: 'concentric' });
+    check('...and a setting saved before them (one surface for all three) is all three', legacy.topSurf === 'concentric' && legacy.botSurf === 'concentric' && legacy.solidSurf === 'concentric', JSON.stringify([legacy.topSurf, legacy.botSurf, legacy.solidSurf]));
+    const lwOver = PRINT.configOverlay(tpl, Object.assign({}, base, { lwTop: 0.38, lwFirst: 0.55, topDens: 90, topPen: 3 }));
+    check('the line width, density and paint rows are Studio\'s keys: top_surface_line_width 0.38, initial_layer_line_width 0.55, top_surface_density 90%, top_color_penetration_layers 3',
+      JSON.stringify(lwOver) === JSON.stringify({ top_surface_density: '90%', top_color_penetration_layers: '3', initial_layer_line_width: '0.55', top_surface_line_width: '0.38' }), JSON.stringify(lwOver));
+    {
+      const eo2 = PL.engineOptions(PRINT.withOverlay(tpl, lwOver)).over;
+      check('...and the planner hands them to the engine (the top 0.38, the first layer 0.55, 90 %, 3 layers of paint)', eo2.topWidthMm === 0.38 && eo2.firstLayerWidthMm === 0.55 && Math.abs(eo2.topDensity - 0.9) < 1e-9 && eo2.topColorPenetrationLayers === 3,
+        JSON.stringify([eo2.topWidthMm, eo2.firstLayerWidthMm, eo2.topDensity, eo2.topColorPenetrationLayers]));
+    }
+    const bothOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: '3dhoneycomb' }, all3('archimedeanchords')));
     check('the two rows together, by Bambu\'s own names: 3dhoneycomb inside, archimedeanchords on the surfaces',
       bothOver.sparse_infill_pattern === '3dhoneycomb' && SURF.every(k => bothOver[k] === 'archimedeanchords') && Object.keys(bothOver).length === 4, JSON.stringify(bothOver));
     {
@@ -278,11 +295,12 @@ async function main() {
       check('...and the planner hands the engine each of them', eo.sparsePattern === '3dhoneycomb' && eo.solidPattern === 'archimedeanchords' && eo.topPattern === 'archimedeanchords' && eo.bottomPattern === 'archimedeanchords',
         [eo.sparsePattern, eo.solidPattern, eo.topPattern, eo.bottomPattern].join(' '));
       const plainO = PL.engineOptions(tpl).over;
-      check('...while the template\'s own patterns stay the engine\'s lines (no surface pattern handed over)', plainO.solidPattern === undefined && plainO.topPattern === undefined && plainO.bottomPattern === undefined, [plainO.sparsePattern, plainO.solidPattern, plainO.topPattern].join(' '));
+      check('...and the template\'s own surfaces are Studio\'s: the top in monotonic lines, the bottom monotonic, the solid infill the engine\'s lines (zig-zag) (docs/SLICER.md "Monotonic")',
+        plainO.solidPattern === undefined && plainO.topPattern === 'monotonicline' && plainO.bottomPattern === 'monotonic', [plainO.sparsePattern, plainO.solidPattern, plainO.topPattern, plainO.bottomPattern].join(' '));
       const back = PRINT.settingsFromConfig ? PRINT.settingsFromConfig(PRINT.withOverlay(tpl, bothOver)) : null;
-      check('...and a template that names them shows them on the card\'s rows', !back || (back.pattern === '3dhoneycomb' && back.surface === 'archimedeanchords'), back && back.pattern + ' / ' + back.surface);
-      const cl2 = PRINT.cleanSettings({ pattern: 'rectilinear', surface: 'gyroid' });
-      check('...rectilinear is taken for zigzag, an unknown surface is the default', cl2.pattern === 'zigzag' && cl2.surface === 'zigzag', cl2.pattern + ' / ' + cl2.surface);
+      check('...and a template that names them shows them on the card\'s rows', !back || (back.pattern === '3dhoneycomb' && back.topSurf === 'archimedeanchords' && back.solidSurf === 'archimedeanchords'), back && back.pattern + ' / ' + back.topSurf);
+      const cl2 = PRINT.cleanSettings({ pattern: 'rectilinear', topSurf: 'gyroid', botSurf: 'rectilinear' });
+      check('...rectilinear is taken for zigzag, an unknown surface is the default (the top\'s monotonic line)', cl2.pattern === 'zigzag' && cl2.topSurf === 'monotonicline' && cl2.botSurf === 'zigzag', cl2.pattern + ' / ' + cl2.topSurf + ' / ' + cl2.botSurf);
     }
 
     const two = objs.slice(0, 2);
@@ -296,7 +314,7 @@ async function main() {
       const SLr = require(path.join(ROOT, 'nso_slicer.js')), runR = SLr.run;
       SLr.run = function (ob, o) { ringOpts = o; return runR.apply(this, arguments); };
       let rings;
-      try { rings = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { pattern: 'concentric', surface: 'concentric' }) }); } finally { SLr.run = runR; }
+      try { rings = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { pattern: 'concentric' }, all3('concentric')) }); } finally { SLr.run = runR; }
       check('concentric on both rows slices to a file, the slicer told rings for the sparse infill, the solid infill and both surfaces', rings.ok && ringOpts &&
         ringOpts.sparsePattern === 'concentric' && ringOpts.solidPattern === 'concentric' && ringOpts.topPattern === 'concentric' && ringOpts.bottomPattern === 'concentric', rings.reason);
       if (rings.ok) {
@@ -1126,7 +1144,12 @@ async function main() {
       /* every stop on a top face is a mark (retract, wipe, lift, prime): each piece of the top is filled on its own from an end, and a concave one goes
          run to run inside itself without a stop - 14 stops on the top layer where the layer's top filled as one lot stopped 40 (Studio's: 28) */
       const topStops = (() => { let z = '', f = '', n = 0; g.split('\n').forEach(l => { if (/^; Z_HEIGHT: /.test(l)) z = l.slice(12); else if (/^; FEATURE: /.test(l)) f = l.slice(11); else if (z === '1.8' && f === 'Top surface' && /^; WIPE_START/.test(l)) n++; }); return n; })();
-      check('the top layer\'s face stops 14 times (Studio\'s 28): a piece of the top is one run where it can be, and a concave one glides run to run inside itself', topStops <= 14, String(topStops));
+      /* (the top in monotonic lines, Studio's: its stops are Studio's kind - 43 on the top surface and 33 in its gap fill where Studio's are 28 and 74) */
+      const gapStops = (() => { let z = '', f = '', n = 0; g.split('\n').forEach(l => { if (/^; Z_HEIGHT: /.test(l)) z = l.slice(12); else if (/^; FEATURE: /.test(l)) f = l.slice(11); else if (z === '1.8' && f === 'Gap infill' && /^; WIPE_START/.test(l)) n++; }); return n; })();
+      check('the top layer, in Studio\'s monotonic lines, stops no more than Studio\'s does (its top and its gap fill: 102): a line steps to the next, the gaps woven in', topStops + gapStops <= 102 && topStops <= 50, topStops + ' + ' + gapStops);
+      const topLen = (() => { let z = '', f = '', x = 0, y = 0, n = 0; g.split('\n').forEach(l => { if (/^; Z_HEIGHT: /.test(l)) { z = l.slice(12); return; } if (/^; FEATURE: /.test(l)) { f = l.slice(11); return; } if (!/^G1 /.test(l)) return;
+        const mx = / X(-?[\d.]+)/.exec(l), my = / Y(-?[\d.]+)/.exec(l), nx = mx ? +mx[1] : x, ny = my ? +my[1] : y; if (z === '1.8' && f === 'Top surface' && / E[\d.]/.test(l)) n += Math.hypot(nx - x, ny - y); x = nx; y = ny; }); return n; })();
+      check('...and lays what Studio\'s does: the top layer\'s top surface 8366 mm in Studio\'s slice, NSO\'s within 1 %', Math.abs(topLen - 8366) < 84, topLen.toFixed(0));
       check('no walled crumbs: no outer wall smaller than 2.5 mm across on any layer (the colour split hands its slivers to the region beside them)', crumbs.length === 0, crumbs.join(' '));
       /* the tower's part of each layer, line for line: the numbers to 0.0011 (the way round the tower: 194.022 where Studio has 194.023);
          not the object's own wipes (NSO's paths), the spiral, the fans, the first layer's speed */

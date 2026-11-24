@@ -521,8 +521,12 @@ async function main() {
   check('PINNED, engine not planner: the arc has no supports in this plan, so its slope is Overhang wall in NSO (' + rb.rows['Overhang wall'].n + ' layers) where Studio holds it up with trees; Gap infill on ' +
     rb.rows['Gap infill'].both + ' of Studio\'s ' + (rb.rows['Gap infill'].both + rb.rows['Gap infill'].b) + ' layers (' + rb.rows['Gap infill'].n + ' of NSO\'s own); no Floating vertical shell (' + rb.rows['Floating vertical shell'].b + ')',
     rb.rows['Gap infill'].both >= 80 && rb.rows['Gap infill'].n <= 40 && rb.rows['Floating vertical shell'].n === 0 && rb.rows['Overhang wall'].n >= 15, 'gap ' + JSON.stringify(rb.rows['Gap infill']));   // 50 and over while a wall was overhang once its centre hung; 23 now it is overhang where its whole width does (Bambu's)
-  check('the same arc, A1 and P1S: the engine gives one toolpath (the two plans have the same features on every layer), the printers differ in the blocks and speeds only',
-    JSON.stringify(results[refs[1].name].rows) === JSON.stringify(results[refs[2].name].rows));
+  /* (a monotonic line top lies on the G-code's own grid, as Studio's does - the P1S's extruder offset moves it a quarter of a line - so a top sliver
+     the width of a line can come out on one printer and not the other: the rows may differ by a layer or two of Top surface / Gap infill) */
+  const rowDiff = (a, b) => Object.keys(Object.assign({}, a, b)).reduce((n, f) => { const x = a[f] || { both: 0, b: 0, n: 0 }, y = b[f] || { both: 0, b: 0, n: 0 }; return n + Math.abs(x.both - y.both) + Math.abs(x.n - y.n); }, 0);
+  const archDiff = rowDiff(results[refs[1].name].rows, results[refs[2].name].rows);
+  check('the same arc, A1 and P1S: the engine gives one toolpath (the same features on every layer but for a top sliver or two on the printers\' own line grids, ' + archDiff + '), the printers differ in the blocks and speeds only',
+    archDiff <= 4, JSON.stringify([results[refs[1].name].rows['Top surface'], results[refs[2].name].rows['Top surface'], results[refs[1].name].rows['Gap infill'], results[refs[2].name].rows['Gap infill']]));
 
   // ---- speeds: the table
   const topF = (gc, side) => {

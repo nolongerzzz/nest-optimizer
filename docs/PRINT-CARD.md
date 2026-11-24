@@ -21,8 +21,8 @@ There is one now. The card kept its file and its ids (`sup-*`, `slice-set-*`), s
 | **Preview** | `#btn-sup-slice`: opens that slice in G-scope |
 | **Export** | `#btn-slice-export`: saves it as `.gcode.3mf` |
 | Printer and filament | nozzle, temperatures, max flow, flow ratio, retraction length and speed, z-hop, temperature steps |
-| Quality | layer height, wall generator (Classic / Arachne, and Arachne's six levers when it is picked - [SLICER.md "Arachne"](SLICER.md#arachne-wallgenerator-arachne-2026-11-16)), bridge speed, bridge flow, bridge temp |
-| Strength | walls (0: none, the infill to the outline), infill density and pattern, surface pattern, top shell layers and thickness, bottom shell layers and thickness (0 layers: no shell - the thickness adds layers only to 1 or more) |
+| Quality | layer height, **line width** (Studio's nine: Default, Initial layer, Initial layer infill, Outer wall, Inner wall, Top surface, Sparse infill, Internal solid infill, Support - 0 is the Default), wall generator (Classic / Arachne, and Arachne's six levers when it is picked - [SLICER.md "Arachne"](SLICER.md#arachne-wallgenerator-arachne-2026-11-16)), bridge speed, bridge flow, bridge temp |
+| Strength | walls (0: none, the infill to the outline), infill density and pattern; Studio's surface rows in its order: **top surface pattern** and **density**, top shell layers and thickness, **top paint penetration layers**, **bottom surface pattern** and **density**, bottom shell layers and thickness, **bottom paint penetration layers**, **internal solid infill pattern** (0 layers: no shell - the thickness adds layers only to 1 or more) |
 | Supports (section) | Auto / Assisted / Custom, Paint, Supports Blocker, Angle, Type, Size, May rest on the part, Exclude small overhangs, Interface angle, Tree settings, Advanced (Bambu's 17 rows), Tree planner |
 | Adhesion | Brim, Raft layers, Raft contact - outside the part the tick greys, so a raft is set with or without supports |
 
@@ -154,3 +154,15 @@ The owner: *"Printer and filament are the two main first choices on the card, wi
 enable supports or not, slice, print ... and have a happy outcome. Also have all of the levers needed."* So the card opens with **Printer**,
 **Filament** and the **Supports** tick, then Slice; every lever is still in the sections below them, unchanged. A filament carries what was
 found to print it cleanly on each printer (docs/FILAMENTS.md "A printer and a filament").
+
+## Studio's Strength and Line width rows (2026-11-24)
+
+The owner: *"add the rest of these levers to the quality and strength settings"* (Studio's Strength tab and its Line width section). One table
+in `app-print.js` (`EXTRA_ROWS`) holds them - the setting, its row, Studio's key, its kind and Bambu's default - and every step reads it:
+the profile's value is where a row starts (`settingsFromConfig`), the card's row is the setting (`readSettings` / `showSettings`), a row moved
+off the profile's value is written under Studio's key (`configOverlay`), and the planner hands it to the engine (`engineOptions`). The one
+surface row before them (`surface`, the three surfaces as one) is gone; a saved setting that has it gives it to all three.
+
+The surfaces take Monotonic line, Monotonic, Rectilinear, Concentric, Archimedean chords, Hilbert curve, Octagram spiral (Studio's Aligned
+Rectilinear is drawn as Rectilinear). Bambu's profiles: the top Monotonic line, the bottom Monotonic, the solid infill Rectilinear - and
+those are now sliced as themselves ([SLICER.md "Monotonic"](SLICER.md)); before, every surface was NSO's rectilinear.

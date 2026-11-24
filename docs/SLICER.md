@@ -1333,7 +1333,7 @@ mm from the nearest seam on the layer below (to 10 mm), so a loop with no corner
 where the one below was. A gap line whose ends meet is a ring and begins the same way, beside the
 walls' seams. The box's seam stays on one corner, the cylinder's in one line, all the way up.
 
-### A top face stops as little as it can (`topRuns`, path.glide, 2026-11-23)
+### A top face stops as little as it can (`topRuns`, path.glide, 2026-11-23) - a Rectilinear top
 
 Every place a top run stops is a retraction, a wipe, a lift and a prime on the finished face - a
 mark. The layer's top was filled as one lot, the nearest free line next, so the nozzle came into a
@@ -1355,3 +1355,33 @@ top layer: 14 stops.
 Fill lines were joined by a straight connector when its midpoint lay inside the fill; an 18 mm
 sparse connector on the logo jumped the G's open counter and stayed bare on the top. A connector
 that crosses the fill's outline is now a travel.
+
+
+### Monotonic and Monotonic line (`monotonicRuns`, 2026-11-24)
+
+Bambu's profiles lay the top in **Monotonic line** and the bottom in **Monotonic**; NSO drew both as its rectilinear until the owner asked
+for a closer look (they are Studio's `FillMonotonicLineWGapFill` and `FillMonotonic`, FillRectilinear.cpp, 02.09.01.70 - not a reordering
+of rectilinear). Measured on the owner's Studio slices (the Gulf logo's top layer, the PETG Supporttest, the overhang arc):
+
+| | Studio's Monotonic line | NSO's rectilinear top before |
+|---|---|---|
+| the lines | in one sweep across each piece, each beside the last (monotonic regions, laid in order) | nearest line next: two sweeps can meet |
+| line to line | a step, nothing laid (`G1 X Y` at the line's speed, no retraction, within 3 line widths: `extrusion_entities_append_paths_with_wipe`) | a connector laid along the wall |
+| where a line ends | 0.207 from the outer wall's centre: the area with no wall overlap (half the wall's spacing in), less 0.05 of its own spacing | 0.320 (0.85 x the wall's spacing) |
+| the line | the top's own width (`top_surface_line_width` 0.42: spacing 0.377) | the sparse infill's 0.45 |
+| the grid | half a spacing off the G-code's own origin (every Studio top measured; the P1S's extruder offset counts) | NSO's frame, phase 0 |
+| a scan line | laid only where it crosses the piece shrunk by a further 0.45 spacing (`ExPolygonWithOffset`'s inner contour) | every crossing |
+| the gaps | what the lines leave, 0.2 - 2 spacings wide, filled down their middles and woven into the lines (`plan_monotonic_route`) | none |
+
+**Monotonic** is the same sweep with each region's lines joined into one zig-zag, the connector laid; from one region to the next is a
+step when it stays inside the piece (Studio joins them round the outline).
+
+Against Studio's slice of the Gulf logo (`print-slice-check` 5e): the top layer's top surface 8364 mm (Studio's 8366), its first line
+(168.299, 105.639) -> (167.644, 104.985) where Studio's is (168.3, 105.66) -> (167.62, 104.98), the lines 0.013 mm off Studio's grid; the
+1.2 layer 18347 mm (18356) with 10 stops (9); the first layer 35762 mm (35614) with 2 stops (2). On the top layer NSO stops 43 times on the top
+and 33 in its gap fill, Studio 28 and 74. Not matched yet: Studio chains its regions with an ant-colony search (`chain_monotonic_regions`)
+where NSO takes the nearest region whose neighbours are down; and the 0.6 layer's split between top and solid differs (15827 / 23115 mm
+against Studio's 18762 / 19378 - the top detection, not the pattern).
+
+The engine also takes each feature's own line width now (`topWidthMm`, `solidWidthMm`, `firstLayerWidthMm`, `firstLayerInfillWidthMm`;
+null: as before) and the surfaces' densities (`topDensity`, `bottomDensity`: the lines spacing / density apart).

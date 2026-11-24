@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=c00d6d51" />
+  <link rel="stylesheet" href="styles.css?v=43ab7ec2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -272,10 +272,38 @@
                 </div>
               </details>
               <details class="vp-sec print-sec" id="print-sec-quality">
-                <summary class="vp-sec-head" title="Layer height, the wall generator (Classic or Arachne), and how a bridge is printed. The first layer stays the profile's.">Quality</summary>
+                <summary class="vp-sec-head" title="Layer height, the line widths, the wall generator (Classic or Arachne), and how a bridge is printed.">Quality</summary>
                 <div class="vp-sec-body">
                   <label class="vp-bend-field" for="slice-set-layer">Layer height
                     <input type="number" id="slice-set-layer" value="0.2" min="0.05" max="0.3" step="0.05" title="Layer height, mm. The first layer stays the profile's." autocomplete="off"><span>mm</span></label>
+                  <div class="slice-subhead" title="Studio's Line width section: each line's width, mm. A line's width sets its spacing and how much it lays; 0 is the Default.">Line width</div>
+                    <label class="vp-bend-field" for="slice-set-lw-default">Default
+                      <input type="number" id="slice-set-lw-default" value="0.42" min="0" max="2" step="0.01" inputmode="decimal"
+                             title="The width of a line whose own row is 0. 0: the Default line width." autocomplete="off"><span>mm</span></label>
+                    <label class="vp-bend-field" for="slice-set-lw-first">Initial layer
+                      <input type="number" id="slice-set-lw-first" value="0.5" min="0" max="2" step="0.01" inputmode="decimal"
+                             title="The first layer's walls: wider presses more plastic onto the plate - it holds better. 0: the Default line width." autocomplete="off"><span>mm</span></label>
+                    <label class="vp-bend-field" for="slice-set-lw-first-infill">Initial layer infill
+                      <input type="number" id="slice-set-lw-first-infill" value="0.5" min="0" max="2" step="0.01" inputmode="decimal"
+                             title="The first layer's fill and bottom surface. 0: the Default line width." autocomplete="off"><span>mm</span></label>
+                    <label class="vp-bend-field" for="slice-set-lw-outer">Outer wall
+                      <input type="number" id="slice-set-lw-outer" value="0.42" min="0" max="2" step="0.01" inputmode="decimal"
+                             title="The outermost wall - the face you see. 0: the Default line width." autocomplete="off"><span>mm</span></label>
+                    <label class="vp-bend-field" for="slice-set-lw-inner">Inner wall
+                      <input type="number" id="slice-set-lw-inner" value="0.45" min="0" max="2" step="0.01" inputmode="decimal"
+                             title="The walls inside the outer one. 0: the Default line width." autocomplete="off"><span>mm</span></label>
+                    <label class="vp-bend-field" for="slice-set-lw-top">Top surface
+                      <input type="number" id="slice-set-lw-top" value="0.42" min="0" max="2" step="0.01" inputmode="decimal"
+                             title="The top surface's lines: narrower gives a finer, smoother top. 0: the Default line width." autocomplete="off"><span>mm</span></label>
+                    <label class="vp-bend-field" for="slice-set-lw-sparse">Sparse infill
+                      <input type="number" id="slice-set-lw-sparse" value="0.45" min="0" max="2" step="0.01" inputmode="decimal"
+                             title="The sparse infill. 0: the Default line width." autocomplete="off"><span>mm</span></label>
+                    <label class="vp-bend-field" for="slice-set-lw-solid">Internal solid infill
+                      <input type="number" id="slice-set-lw-solid" value="0.42" min="0" max="2" step="0.01" inputmode="decimal"
+                             title="The solid layers under a top and over a bottom. 0: the Default line width." autocomplete="off"><span>mm</span></label>
+                    <label class="vp-bend-field" for="slice-set-lw-support">Support
+                      <input type="number" id="slice-set-lw-support" value="0.42" min="0" max="2" step="0.01" inputmode="decimal"
+                             title="The supports' lines. 0: the Default line width." autocomplete="off"><span>mm</span></label>
                   <label class="vp-bend-field" for="slice-set-wall-gen">Wall generator
                     <select class="vp-select" id="slice-set-wall-gen" title="How the walls are laid. Classic: every wall one width, a fixed spacing apart - a part that is not a whole number of walls thick gets a gap down its middle, and a feature thinner than a wall prints nothing. Arachne: the walls' count and width fitted to the part's thickness, so thin ribs, fins and text are filled wall to wall. The supports always slice Classic." autocomplete="off">
                       <option value="classic" selected>Classic</option>
@@ -320,7 +348,7 @@
                 </div>
               </details>
               <details class="vp-sec print-sec" id="print-sec-strength">
-                <summary class="vp-sec-head" title="Walls, the sparse infill, the pattern of the surfaces, and the top and bottom shells.">Strength</summary>
+                <summary class="vp-sec-head" title="Walls, the sparse infill, the top and bottom surfaces and shells, and the solid infill.">Strength</summary>
                 <div class="vp-sec-body">
                   <label class="vp-bend-field" for="slice-set-walls">Wall loops
                     <input type="number" id="slice-set-walls" value="2" min="0" max="10" step="1" title="Wall loops. 0: no walls - the infill alone, out to the outline (a TPU part printed as pure 3D honeycomb)." autocomplete="off"></label>
@@ -340,26 +368,60 @@
                       <option value="adaptivecubic" title="Adaptive cubic: the cubic's lines at 0, 60 and 120 degrees, wider apart, about the part's own middle (every cell the finest: Bambu's coarser cells deep inside a large part are not done)">adaptive cubic</option>
                       <option value="lightning" title="Lightning: only what holds the top up - lines under every roof, shorter with every layer down, none below (combs where Bambu draws trees)">lightning</option>
                     </select></label>
-                  <label class="vp-bend-field" for="slice-set-surface">Surface pattern
-                    <select class="vp-select" id="slice-set-surface" title="The pattern of the top and bottom surfaces and the solid infill" autocomplete="off">
-                        <option value="zigzag" selected title="Lines at 45 and 135 degrees, turning with every layer (Bambu's Rectilinear; its Monotonic is the same lines in another order)">rectilinear</option>
-                        <option value="concentric" title="Rings that follow the walls, from the middle outward">concentric</option>
-                        <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward">archimedean chords</option>
-                        <option value="hilbertcurve" title="Hilbert curve: one square space-filling line, a spacing apart, at 45 degrees">hilbert curve</option>
-                        <option value="octagramspiral" title="Octagram spiral: eight-pointed stars, one inside the next, drawn as one line from the middle outward">octagram spiral</option>
-                      </select></label>
+                  <label class="vp-bend-field" for="slice-set-top-pattern">Top surface pattern
+                    <select class="vp-select" id="slice-set-top-pattern" title="The pattern of every top surface." autocomplete="off">
+                      <option value="monotonicline" selected title="Monotonic line: every line laid beside the last, in one sweep across the piece, each on its own - from one to the next a step, nothing laid along the edge; the gaps it leaves filled on the way. Studio's top default: the smoothest, most even top.">Monotonic line</option>
+                      <option value="monotonic" title="Monotonic: the same sweep, its lines joined into one zig-zag along the edge. Studio's bottom default.">Monotonic</option>
+                      <option value="zigzag" title="Rectilinear: lines at 45 and 135 degrees, turning with every layer, joined at their ends - laid nearest line first, so two sweeps can meet in the middle">Rectilinear</option>
+                      <option value="concentric" title="Rings that follow the walls, from the middle outward">Concentric</option>
+                      <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward">Archimedean chords</option>
+                      <option value="hilbertcurve" title="Hilbert curve: one square space-filling line, a spacing apart, at 45 degrees">Hilbert curve</option>
+                      <option value="octagramspiral" title="Octagram spiral: eight-pointed stars, one inside the next, drawn as one line from the middle outward">Octagram spiral</option>
+                    </select></label>
+                  <label class="vp-bend-field" for="slice-set-top-density">Top surface density
+                    <input type="number" id="slice-set-top-density" value="100" min="10" max="100" step="5" inputmode="numeric"
+                           title="How full the top surface is: under 100 % its lines are that much further apart." autocomplete="off"><span>%</span></label>
                   <label class="vp-bend-field" for="slice-set-top-layers">Top shell layers
                     <input type="number" id="slice-set-top-layers" value="5" min="0" max="100" step="1" inputmode="numeric"
                            title="Solid layers under every top surface. 0: no top at all (the Top shell thickness then adds none)." autocomplete="off"></label>
                   <label class="vp-bend-field" for="slice-set-top-thick">Top shell thickness
                     <input type="number" id="slice-set-top-thick" value="1" min="0" max="20" step="0.1" inputmode="decimal"
                            title="More top layers when the layers above are thinner than this, mm. Adds to a count of 1 or more only: with 0 top layers there is no top." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-top-pen">Top paint penetration layers
+                    <input type="number" id="slice-set-top-pen" value="5" min="1" max="30" step="1" inputmode="numeric"
+                           title="A painted top colours this many layers down from it (a painted part on the AMS)." autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-bottom-pattern">Bottom surface pattern
+                    <select class="vp-select" id="slice-set-bottom-pattern" title="The pattern of the first layer's bottom surface." autocomplete="off">
+                      <option value="monotonicline" title="Monotonic line: every line laid beside the last, in one sweep across the piece, each on its own - from one to the next a step, nothing laid along the edge; the gaps it leaves filled on the way. Studio's top default: the smoothest, most even top.">Monotonic line</option>
+                      <option value="monotonic" selected title="Monotonic: the same sweep, its lines joined into one zig-zag along the edge. Studio's bottom default.">Monotonic</option>
+                      <option value="zigzag" title="Rectilinear: lines at 45 and 135 degrees, turning with every layer, joined at their ends - laid nearest line first, so two sweeps can meet in the middle">Rectilinear</option>
+                      <option value="concentric" title="Rings that follow the walls, from the middle outward">Concentric</option>
+                      <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward">Archimedean chords</option>
+                      <option value="hilbertcurve" title="Hilbert curve: one square space-filling line, a spacing apart, at 45 degrees">Hilbert curve</option>
+                      <option value="octagramspiral" title="Octagram spiral: eight-pointed stars, one inside the next, drawn as one line from the middle outward">Octagram spiral</option>
+                    </select></label>
+                  <label class="vp-bend-field" for="slice-set-bottom-density">Bottom surface density
+                    <input type="number" id="slice-set-bottom-density" value="100" min="10" max="100" step="5" inputmode="numeric"
+                           title="How full the bottom surface is: under 100 % its lines are that much further apart." autocomplete="off"><span>%</span></label>
                   <label class="vp-bend-field" for="slice-set-bot-layers">Bottom shell layers
                     <input type="number" id="slice-set-bot-layers" value="3" min="0" max="100" step="1" inputmode="numeric"
                            title="Solid layers over every bottom surface. 0: no bottom - the first layer is infill too (a TPU foot printed as pure 3D honeycomb)." autocomplete="off"></label>
                   <label class="vp-bend-field" for="slice-set-bot-thick">Bottom shell thickness
                     <input type="number" id="slice-set-bot-thick" value="0" min="0" max="20" step="0.1" inputmode="decimal"
                            title="More bottom layers when the layers below are thinner than this, mm. Adds to a count of 1 or more only." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-bottom-pen">Bottom paint penetration layers
+                    <input type="number" id="slice-set-bottom-pen" value="3" min="1" max="30" step="1" inputmode="numeric"
+                           title="A painted bottom colours this many layers up from it." autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-solid-pattern">Internal solid infill pattern
+                    <select class="vp-select" id="slice-set-solid-pattern" title="The pattern of the solid layers inside the part, under its tops and over its bottoms." autocomplete="off">
+                      <option value="monotonicline" title="Monotonic line: every line laid beside the last, in one sweep across the piece, each on its own - from one to the next a step, nothing laid along the edge; the gaps it leaves filled on the way. Studio's top default: the smoothest, most even top.">Monotonic line</option>
+                      <option value="monotonic" title="Monotonic: the same sweep, its lines joined into one zig-zag along the edge. Studio's bottom default.">Monotonic</option>
+                      <option value="zigzag" selected title="Rectilinear: lines at 45 and 135 degrees, turning with every layer, joined at their ends - laid nearest line first, so two sweeps can meet in the middle">Rectilinear</option>
+                      <option value="concentric" title="Rings that follow the walls, from the middle outward">Concentric</option>
+                      <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward">Archimedean chords</option>
+                      <option value="hilbertcurve" title="Hilbert curve: one square space-filling line, a spacing apart, at 45 degrees">Hilbert curve</option>
+                      <option value="octagramspiral" title="Octagram spiral: eight-pointed stars, one inside the next, drawn as one line from the middle outward">Octagram spiral</option>
+                    </select></label>
                 </div>
               </details>
               <details class="vp-sec print-sec" id="print-sec-supports" open>
@@ -3295,7 +3357,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=d0014c09"></script>
+  <script src="nso_slicer.js?v=900a2f67"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3513,7 +3575,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=b01359dc"></script>
+  <script src="app-supports-card.js?v=be9ef05a"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3521,9 +3583,9 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=87d36c50"></script>
+  <script src="nso-print-planner.js?v=be87b4fd"></script>
   <script src="nso-gcode3mf-write.js?v=bd4593c7"></script>
-  <script src="app-print.js?v=86f9c446"></script>
+  <script src="app-print.js?v=59b60043"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
