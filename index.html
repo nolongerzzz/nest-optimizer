@@ -192,6 +192,14 @@
               <label class="vp-bend-field print-printer" for="print-printer">Printer
                 <select id="print-printer" class="vp-select" autocomplete="off"
                         title="The plate's printer and size: the same choice as the Plate panel's. The settings below start at this printer's profile."></select></label>
+              <label class="vp-bend-field print-printer print-filament" for="slice-set-filament">Filament
+                <select class="vp-select" id="slice-set-filament" title="The filament the plate prints with. Profile is the printer profile's own (PLA). Another filament brings its own temperatures, max flow, retraction, fan and start G-code, and the file names it so the printer knows what is loaded. Its own settings fill the rows under Printer and filament (and the support's top gap); a number typed there wins." autocomplete="off">
+                    <option value="profile" selected>Profile (PLA)</option>
+                    <option value="cr-tpu">Creality CR-TPU 95A</option>
+                    <option value="elegoo-petg">ELEGOO PETG</option>
+                  </select></label>
+              <label class="vp-check print-on print-first" for="sup-on" title="On: Slice builds the supports first (again, when a setting, the piece or its tips changed) and slices the plate with them - laid by the Supports section below. Off: Slice takes the plate's supports off and slices the pieces alone. One Undo puts them back.">
+                <input type="checkbox" id="sup-on" checked autocomplete="off"> Supports</label>
               <p id="slice-profile" class="bend-readout slice-profile" title="The printer profile the plate is sliced for.">&nbsp;</p>
               <div id="slice-project" class="slice-project" hidden>
                 <p id="slice-project-note" class="slice-settings-note"></p>
@@ -226,12 +234,6 @@
                     <select class="vp-select" id="slice-set-nozzle" title="The printer profile's nozzle. A 0.6 nozzle needs its own profile (start and end G-code), which this printer does not have yet." autocomplete="off">
                         <option value="0.4" selected>0.4</option>
                         <option value="0.6" disabled>0.6</option>
-                      </select></label>
-                  <label class="vp-bend-field" for="slice-set-filament">Filament
-                    <select class="vp-select" id="slice-set-filament" title="The filament the plate prints with. Profile is the printer profile's own (PLA). Another filament brings its own temperatures, max flow, retraction, fan and start G-code, and the file names it so the printer knows what is loaded." autocomplete="off">
-                        <option value="profile" selected>Profile (PLA)</option>
-                        <option value="cr-tpu">Creality CR-TPU 95A</option>
-                        <option value="elegoo-petg">ELEGOO PETG</option>
                       </select></label>
                   <label class="vp-bend-field" for="slice-set-nozzle-temp">Nozzle temp
                     <input type="number" id="slice-set-nozzle-temp" min="170" max="300" step="5" placeholder="auto" inputmode="numeric"
@@ -363,8 +365,6 @@
               <details class="vp-sec print-sec" id="print-sec-supports" open>
                 <summary class="vp-sec-head" title="Whether the plate is sliced with supports, and everything they are built and laid by.">Supports</summary>
                 <div class="vp-sec-body">
-                  <label class="vp-check print-on" for="sup-on" title="On: Slice builds the supports first (again, when a setting, the piece or its tips changed) and slices the plate with them. Off: Slice takes the plate's supports off and slices the pieces alone. One Undo puts them back.">
-                    <input type="checkbox" id="sup-on" checked autocomplete="off"> Supports</label>
                   <div id="print-sup-body">
                   <div class="sup-modes" role="group" aria-label="Where the supports start">
                     <button id="sup-mode-auto" class="sup-seg is-on" type="button" aria-pressed="true"
@@ -3523,7 +3523,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=87d36c50"></script>
   <script src="nso-gcode3mf-write.js?v=bd4593c7"></script>
-  <script src="app-print.js?v=c835a0a4"></script>
+  <script src="app-print.js?v=86f9c446"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

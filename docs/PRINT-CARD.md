@@ -15,13 +15,15 @@ There is one now. The card kept its file and its ids (`sup-*`, `slice-set-*`), s
 |---|---|
 | Saved settings | the row at the top: every lever of the card under a name (section 5) |
 | Printer | `#print-printer`: the Plate panel's choice (`#plate-select`), shown here too. Either one changes the plate; the other follows |
+| Filament | `#slice-set-filament`, right under Printer (2026-11-23): the second of the two first choices. It fills the filament's rows (under Printer and filament) and the support rows it holds (PETG: Top Z distance 0.33) |
+| Supports | the **Supports** tick (`#sup-on`), under Filament: on, Slice builds them first; off, the plate is sliced bare |
 | **Slice** | `#btn-sup-all`: the one button that makes the plate's slice (section 2) |
 | **Preview** | `#btn-sup-slice`: opens that slice in G-scope |
 | **Export** | `#btn-slice-export`: saves it as `.gcode.3mf` |
-| Printer and filament | nozzle, filament, temperatures, max flow, flow ratio, retraction length and speed, z-hop, temperature steps |
+| Printer and filament | nozzle, temperatures, max flow, flow ratio, retraction length and speed, z-hop, temperature steps |
 | Quality | layer height, wall generator (Classic / Arachne, and Arachne's six levers when it is picked - [SLICER.md "Arachne"](SLICER.md#arachne-wallgenerator-arachne-2026-11-16)), bridge speed, bridge flow, bridge temp |
 | Strength | walls (0: none, the infill to the outline), infill density and pattern, surface pattern, top shell layers and thickness, bottom shell layers and thickness (0 layers: no shell - the thickness adds layers only to 1 or more) |
-| Supports | the **Supports** tick (`#sup-on`), then Auto / Assisted / Custom, Paint, Supports Blocker, Angle, Type, Size, May rest on the part, Exclude small overhangs, Interface angle, Tree settings, Advanced (Bambu's 17 rows), Tree planner |
+| Supports (section) | Auto / Assisted / Custom, Paint, Supports Blocker, Angle, Type, Size, May rest on the part, Exclude small overhangs, Interface angle, Tree settings, Advanced (Bambu's 17 rows), Tree planner |
 | Adhesion | Brim, Raft layers, Raft contact - outside the part the tick greys, so a raft is set with or without supports |
 
 Slice, Preview and Export are the only buttons. Gone: Generate, None, Remove, the Slice section's own Slice button, the second support angle,
@@ -145,3 +147,10 @@ Held by `print:slice` 3e:
   of Studio's length.
 
 And by `support:settings-drive`: `Supporttest.3mf`'s three support changes, and a saved setting over them.
+
+## The first choices (2026-11-23)
+
+The owner: *"Printer and filament are the two main first choices on the card, without going into settings ... click on the printer/filament,
+enable supports or not, slice, print ... and have a happy outcome. Also have all of the levers needed."* So the card opens with **Printer**,
+**Filament** and the **Supports** tick, then Slice; every lever is still in the sections below them, unchanged. A filament carries what was
+found to print it cleanly on each printer (docs/FILAMENTS.md "A printer and a filament").

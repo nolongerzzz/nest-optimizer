@@ -238,6 +238,11 @@
       },
       cooling: { overhang_fan_threshold: '10%', overhang_fan_speed: '90', fan_min_speed: '40', fan_cooling_layer_time: '30', fan_max_speed: '90',
                  slow_down_layer_time: '12', slow_down_min_speed: '20' },
+      /* ITS OWN DIALS: the support's top gap 0.33 mm - two layers of air under the part at 0.2 mm layers. The owner's Supporttest in PETG on the
+         A1 mini (Bambu's slice at 0.33, 2026-11-23: every support broke off cleanly or fell off; fixtures/supports/supporttest_petg_a1m*,
+         npm run support:gate-petg - NSO at 0.33 is Bambu's interface, two layers of air under all of it). The profile's 0.2 leaves one, and
+         PETG welds to itself where PLA lets go. */
+      tune: function () { return { supTopZ: 0.33 }; },
       printerKeys: function (config) {
         /* the A1 mini: the owner's ELEGOO-PETG-A1mini preset; the P1S: Generic PETG as it is */
         return isA1Mini(config) ? { nozzle_temperature: '245', nozzle_temperature_initial_layer: '245', filament_max_volumetric_speed: '10' } : {};
@@ -274,7 +279,9 @@
              rangeLow: S.temp.rangeLow, rangeHigh: S.temp.rangeHigh,
              flowRatio: S.filament.flow, retractLen: S.retract.length, retractSpeed: S.retract.speed, retractBefore: Math.round(S.retract.beforeWipe * 100), zHop: S.retract.hop,
              /* the bridge's rows: the profile's speed and flow, no bridge temperature - unless the filament brings its own (tune) */
-             bridgeSpeed: S.speed.bridge, bridgeFlow: S.filament.bridgeFlow, hangSpeed: null, bridgeTemp: null }, f.tune ? f.tune(config) : {});
+             bridgeSpeed: S.speed.bridge, bridgeFlow: S.filament.bridgeFlow, hangSpeed: null, bridgeTemp: null,
+             /* the support's top gap: the profile's, unless the filament brings its own (tune: PETG's 0.33) */
+             supTopZ: numOf(cfgRaw(config, 'support_top_z_distance'), SETTINGS_DEFAULT.supTopZ) }, f.tune ? f.tune(config) : {});
   }
 
   function cfgRaw(config, key) {
@@ -1053,6 +1060,7 @@
                   ['slice-set-sup-xy', 'supXy'], ['slice-set-sup-zover', 'supZOverXy'], ['slice-set-sup-first-gap', 'supFirstGap'], ['slice-set-sup-bridge', 'supBridge'],
                   ['slice-set-sup-indep', 'supIndep']];
   /* the four rows that are a filament's own numbers: the row, and its name in the settings */
+  var FILAMENT_SUP_ROWS = [['slice-set-sup-topz', 'supTopZ']];
   var FILAMENT_ROWS = [['slice-set-nozzle-temp', 'nozzleTemp'], ['slice-set-first-temp', 'firstTemp'], ['slice-set-bed-temp', 'bedTemp'], ['slice-set-max-flow', 'maxFlow'],
                        ['slice-set-flow-ratio', 'flowRatio'], ['slice-set-retract-len', 'retractLen'], ['slice-set-retract-speed', 'retractSpeed'], ['slice-set-retract-before', 'retractBefore'], ['slice-set-zhop', 'zHop'],
                        ['slice-set-bridge-speed', 'bridgeSpeed'], ['slice-set-bridge-flow', 'bridgeFlow'], ['slice-set-hang-speed', 'hangSpeed'], ['slice-set-bridge-temp', 'bridgeTemp']];
@@ -1085,6 +1093,8 @@
   function showFilamentRows() {
     var sel = $('slice-set-filament'), base = filamentBase(knownConfig(), sel ? sel.value : 'profile');
     FILAMENT_ROWS.forEach(function (r) { var el = $(r[0]); if (el) el.value = base && base[r[1]] != null ? String(base[r[1]]) : ''; });
+    /* the support rows a filament holds (its tune): picking it puts its value in the row - a number typed there afterwards wins */
+    FILAMENT_SUP_ROWS.forEach(function (r) { var el = $(r[0]); if (el && base && base[r[1]] != null) el.value = String(base[r[1]]); });
   }
 
   /** The line under the filament rows: what the picked filament needs of the owner, and the temperature steps as they will be written. */

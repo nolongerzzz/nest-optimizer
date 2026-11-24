@@ -4,11 +4,11 @@ The printer templates (`fixtures/bambu-templates/<printer>`) are PLA projects, a
 plate could only be sliced as PLA: 220 C, and a volumetric limit of 12 mm^3/s (A1 mini) or 21 (P1S).
 The Slice card now has a filament and the numbers a filament is tuned by.
 
-## The rows (Supports > Slice > Slice settings)
+## The rows (the Print card: Filament under Printer, the rest under Printer and filament)
 
 | Row | What it sets | Empty means |
 | --- | --- | --- |
-| **filament** | which filament: `Profile (PLA)` or one of `FILAMENTS` in `app-print.js` | - |
+| **filament** | which filament: `Profile (PLA)` or one of `FILAMENTS` in `app-print.js` - at the top of the card, under Printer | - |
 | **temp** | `nozzle_temperature` (every layer after the first) | the filament's own |
 | **first layer** | `nozzle_temperature_initial_layer` | the filament's own |
 | **bed** | the plate type's bed temperature, both layers | the filament's own |
@@ -325,6 +325,27 @@ same at the slot over the cone. The slicer's `bridgeFirst` lays a layer's open-a
 walls (`nso_slicer.js`, before `islandOrder`), so the bridge is anchored on what holds it and touches
 nothing, and the hanging walls are laid against a sheet. Off by default (walls first, as Studio);
 settings `bridgeFirst: true` turns it on. Not on the card or in any filament yet: one print decides.
+
+## A printer and a filament (the goal, 2026-11-23)
+
+The owner: find clean print settings for every filament tested, on each printer, and save them as NSO's defaults - support settings
+included - so that picking the printer and the filament, ticking Supports or not, and pressing Slice prints well. What a filament has been
+proven to need on a printer goes into its entry (`keys`, `printerKeys`, `cooling`, `tune`), with the print it came from beside it.
+
+| | A1 mini | P1S |
+|---|---|---|
+| Profile (PLA) | the template, printed often | the template, printed often; the owner's projects set Top Z 0.33 too |
+| CR-TPU 95A | 215 / 235 C, bed 30, slicer rules (temperature tower, string test, roofs) | the owner's preset: 220 C, bed 30, fan 40 - 65 % |
+| ELEGOO PETG | the owner's preset 245 C, 10 mm^3/s; **supports: Top Z 0.33** (Supporttest, 2026-11-23) | Generic PETG 255 C, 12 mm^3/s (desk hanger); supports: Top Z 0.33 |
+
+Still open: supports for PLA and CR-TPU against a print each, and the PETG Supporttest printed from NSO's own slice.
+
+### PETG's support gap (`tune`: `supTopZ` 0.33)
+
+The owner's Supporttest in PETG on the A1 mini, from Bambu's slice at a 0.33 mm top gap: every support broke off cleanly or fell off.
+NSO's gate on the same piece (`npm run support:gate-petg`, docs/SUPPORT-FLOW.md 4b'): at 0.33 NSO's interface is Bambu's - two layers of
+air under all of the contact; at the profile's 0.2 most of it had one, which PETG welds to. A filament's `tune` may now hold support rows
+(`FILAMENT_SUP_ROWS`, the Top Z distance so far): picking the filament puts its value in the row, and a number typed there afterwards wins.
 
 ## Adding a filament
 

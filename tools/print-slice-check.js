@@ -390,6 +390,10 @@ async function main() {
     check('the profile\'s filament is the template\'s PLA: 220 / 220 C, bed 65, 12 mm^3/s; CR-TPU is 215 / 235 C (first layer), bed 30 (Studio: the A1 mini TPU bed), 3.2 mm^3/s, printable 200 - 250 C',
       fb.nozzleTemp === 220 && fb.firstTemp === 220 && fb.bedTemp === 65 && fb.maxFlow === 12 &&
         tb.nozzleTemp === 215 && tb.firstTemp === 235 && tb.bedTemp === 30 && tb.maxFlow === 3.2 && tb.rangeLow === 200 && tb.rangeHigh === 250, JSON.stringify([fb, tb]));
+    const pb = PRINT.filamentBase(tpl, 'elegoo-petg');
+    check('PETG brings its own support top gap, 0.33 mm (two layers of air: the owner\'s Supporttest, support:gate-petg); PLA and CR-TPU keep the profile\'s',
+      pb.supTopZ === 0.33 && fb.supTopZ === base.supTopZ && tb.supTopZ === base.supTopZ &&
+        PRINT.configOverlay(tpl, Object.assign({}, base, { filament: 'elegoo-petg', supTopZ: pb.supTopZ })).support_top_z_distance === '0.33', JSON.stringify([pb.supTopZ, fb.supTopZ, base.supTopZ]));
     check('the four rows at the filament\'s own values change nothing (the card shows them filled in)',
       Object.keys(PRINT.configOverlay(tpl, Object.assign({}, base, { nozzleTemp: 220, firstTemp: 220, bedTemp: 65, maxFlow: 12 }))).length === 0);
     const rows = PRINT.configOverlay(tpl, Object.assign({}, base, { nozzleTemp: 210, bedTemp: 60, maxFlow: 8 }));
@@ -820,7 +824,7 @@ async function main() {
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu', bridgeTemp: 212 }) });
     check('a bridge temperature on the P1S is refused: its park and wipe moves are not written yet', !p1sBt.ok && /written for the A1 mini only so far/.test(p1sBt.reason), p1sBt.reason);
     check('...the card\'s CR-TPU on the P1S is the owner\'s own P1S preset (fixtures/print-planner/p1s-0.4/studio-owner-cr-tpu-squishy): 220 C, first layer too, bed 30, 3 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 220, firstTemp: 220, bedTemp: 30, maxFlow: 3, rangeLow: 200, rangeHigh: 250,
-      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0.4, bridgeSpeed: 50, bridgeFlow: 1, hangSpeed: null, bridgeTemp: null }));
+      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0.4, bridgeSpeed: 50, bridgeFlow: 1, hangSpeed: null, bridgeTemp: null, supTopZ: PRINT.settingsFromConfig(p1sCfg).supTopZ }), JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')));
     const p1sOwn = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu' }) });
     check('...and CR-TPU with every row empty slices for the P1S: the filament asks for no bridge temperature where the printer has no park (only a number typed in the row is refused)', p1sOwn.ok && p1sOwn.stats.bridgeTemp === null, p1sOwn.reason);
@@ -1185,7 +1189,7 @@ async function main() {
   check('...and G-scope is not first in the column (Scale is)', col.indexOf('id="menu-scale"') < col.indexOf('id="btn-microscope"') && col.indexOf('id="menu-scale"') > 0);
   check('G-scope\'s button is the same button: its id, class, label and its file input beside it',
     /<button id="btn-microscope" class="vp-bar-btn btn-gscope" type="button"\s+aria-label="G-scope"\s+title="G-scope: put the plate under the lens[^"]*">G-scope<\/button>\s*<input type="file" id="ms-input" accept="\.stl,\.3mf" class="hidden-quiet" \/>/.test(html));
-  check('the Print card (docs/PRINT-CARD.md) is the one card: Slice, Preview and Export its only buttons, a Supports tick, and every slice row in its own sections - printer, quality, strength, supports, adhesion',
+  check('the Print card (docs/PRINT-CARD.md) is the one card: Printer, Filament and the Supports tick first, Slice, Preview and Export its only buttons, and every other slice row in its own sections - printer, quality, strength, supports, adhesion',
     (() => { const m = /<details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">[\s\S]*?<\/details>\s*<!-- ADD/.exec(html);
       if (!m) return false;
       const c = m[0], has = id => c.includes('id="' + id + '"'), from = id => { const i = c.indexOf('id="' + id + '"'); return i < 0 ? '' : c.slice(i); };
@@ -1202,7 +1206,9 @@ async function main() {
         /* ...and nothing of the cards it took the place of: no second Slice button, no None, no Remove, no second angle, no interface rule */
         ['btn-slice-go', 'btn-sup-none', 'btn-sup-remove', 'slice-set-angle', 'slice-set-iface', 'slice-settings-toggle', 'btn-slice-preview', 'sup-plate'].every(id => !html.includes('id="' + id + '"')) &&
         c.indexOf('id="btn-sup-all"') < c.indexOf('id="btn-sup-slice"') && c.indexOf('id="btn-sup-slice"') < c.indexOf('id="btn-slice-export"') && c.indexOf('id="btn-slice-export"') < c.indexOf('id="sup-style"') &&
-        sec('print-sec-printer').includes('id="slice-set-filament"') && sec('print-sec-quality').includes('id="slice-set-layer"') && sec('print-sec-strength').includes('id="slice-set-walls"') &&
+        /* the first choices, at the top: Printer, Filament, the Supports tick, then Slice - the rest is in the sections (the owner, 2026-11-23) */
+        c.indexOf('id="print-printer"') < c.indexOf('id="slice-set-filament"') && c.indexOf('id="slice-set-filament"') < c.indexOf('id="sup-on"') &&
+        c.indexOf('id="sup-on"') < c.indexOf('id="btn-sup-all"') && !sec('print-sec-printer').includes('id="slice-set-filament"') && sec('print-sec-quality').includes('id="slice-set-layer"') && sec('print-sec-strength').includes('id="slice-set-walls"') &&
         /* the raft is adhesion's: reached with Supports unticked (it is outside the body the tick greys) */
         sec('print-sec-adhesion').includes('id="slice-set-raft"') && sec('print-sec-adhesion').includes('id="slice-set-brim"') && !sec('print-sec-supports').includes('id="slice-set-raft"') &&
         c.indexOf('id="print-sup-body"') < c.indexOf('id="sup-style"') &&
