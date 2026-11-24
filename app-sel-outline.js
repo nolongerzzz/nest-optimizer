@@ -52,16 +52,35 @@
     const k = line && line.userData && line.userData.nsoEdgesOf, pos = positionOf(g);
     return !!(k && pos && k.uuid === g.uuid && k.arr === pos.array && k.version === pos.version && k.count === pos.count);
   }
-  function selected(p) { return typeof state !== 'undefined' && !!state && !!state.placed && state.placed[state.selectedIndex] === p; }
+  /* the selected piece, or one of a group drawn as selected (Select all, the Supports card's lit plate) */
+  function selected(p) {
+    if (typeof state === 'undefined' || !state || !state.placed) return false;
+    if (typeof nsoLooksSelected === 'function') return nsoLooksSelected(p);
+    return state.placed[state.selectedIndex] === p;
+  }
 
   /* true when this geometry's edges go to the worker: the outline's own threshold, or (`now`: a caller that wants the
      line on screen before it returns - the Supports card lighting every piece) the old rule, the BVH's big piece */
   function useWorker(g, now) {
     const pos = positionOf(g);
     if (!pos || g.index) return false;
+    if (g.userData && typeof g.userData.nsoEdges === 'function') return false;    // its own lines are cheap: no worker
     if (!(window.NSO_Work && window.NSO_Edges && window.NSO_Work.canRun(['nso_edges.js']))) return false;
     const tris = pos.count / 3;
     return tris >= (now ? (window.NSO_BVH ? window.NSO_BVH.BIG_TRIS : Infinity) : OUTLINE_WORKER_TRIS);
+  }
+
+  /* The line's depth taken from its point pulled toward the eye by OUTLINE_NEARER of its distance; x and y as drawn. */
+  const OUTLINE_NEARER = 0.002;
+  function outlineNearer(mat) {
+    mat.onBeforeCompile = function (shader) {
+      shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>',
+        '#include <project_vertex>\n' +
+        '  { vec4 nsoNear = projectionMatrix * vec4(mvPosition.xyz * ' + (1 - OUTLINE_NEARER).toFixed(4) + ', 1.0);\n' +
+        '    gl_Position.z = nsoNear.z / nsoNear.w * gl_Position.w; }');
+    };
+    mat.customProgramCacheKey = function () { return 'nsoOutlineNearer'; };
+    return mat;
   }
 
   function drawOutline(p, g, edges) {
@@ -71,10 +90,16 @@
     // depth check, so writing depth would leave a hidden edge's z sitting
     // in front of the face it crosses and reject whatever is drawn after
     // it - which is how this outline was cutting holes in the paint.
+    /* Only the edges that can be SEEN. Drawn through everything (depthTest off) the outline showed every crease of
+       the piece at once - the far end's, the inner walls' behind the face in view - and close up on a long piece they
+       fell across the very faces being looked at as stray diagonals ("confused on the rounded edges"). Depth-tested,
+       an edge on a face z-fights that face and comes out dotted, so each line is drawn a hair nearer the camera than
+       it is (outlineNearer): 0.2 % of its distance, along the view ray - nothing moves on screen. */
     const mat = new THREE.LineBasicMaterial({
-      color: 0xffffff, depthTest: false, depthWrite: false,
+      color: 0xffffff, depthTest: true, depthWrite: false,
       transparent: true, opacity: 1
     });
+    outlineNearer(mat);
     const line = new THREE.LineSegments(geo, mat);
     line.renderOrder = 12;
     line.name = 'selOutline';
@@ -85,10 +110,29 @@
     p.outline = line;
   }
 
+  /* A geometry may bring its OWN edge lines: `g.userData.nsoEdges(g)` returns a Float32Array of line segments in the
+     geometry's own frame. The 15-degree crease rule finds nothing at all on a smooth piece (a thrown ball, disc or
+     bowl has no edge sharper than that), which left the selected piece with no white edge exactly when it was most
+     needed; the Pottery Wheel (app-wheel.js, NSO_wheelGuideLines) draws its profile's own rings and meridians instead.
+     Everything else - the cache, selection, Undo - is the house path, unchanged. A function on userData is copied by
+     reference when a geometry is cloned, so an Undo's restored geometry keeps it. */
   function buildHere(g) {
-    const eg = new THREE.EdgesGeometry(g, 15);
-    const edges = eg.attributes.position.array;
-    eg.dispose();
+    let edges = null;
+    const own = g && g.userData && g.userData.nsoEdges;           // the geometry's own lines, if it brings them
+    if (typeof own === 'function') {
+      try { const e = own(g); if (e && e.length) edges = e; }
+      catch (err) { console.warn('refreshOutline: the geometry\'s own edges failed', err); }
+    }
+    // the house outline: the 15 degree creases and the tangent edges where a flat face runs into a rounded one
+    // (nso_edges.js featureEdges); three's EdgesGeometry where that file is not loaded (a lifted copy in a check)
+    if (!edges && window.NSO_Edges && window.NSO_Edges.featureEdges && !g.index) {
+      edges = window.NSO_Edges.featureEdges(positionOf(g).array, 15);
+    }
+    if (!edges) {
+      const eg = new THREE.EdgesGeometry(g, 15);
+      edges = eg.attributes.position.array;
+      eg.dispose();
+    }
     cachePut(g, edges);
     return edges;
   }
@@ -98,7 +142,7 @@
     const live = jobs.get(p);
     if (live && live.uuid === g.uuid && live.arr === arr && live.version === version) return;   // already on its way
     if (live) live.job.cancel();
-    const job = window.NSO_Work.run('edges', ['nso_edges.js'], 'NSO_Edges.edgesOfTransfer', [arr, 15]);
+    const job = window.NSO_Work.run('edges', ['nso_edges.js'], 'NSO_Edges.featureEdgesTransfer', [arr, 15]);
     const rec = { uuid: g.uuid, arr: arr, version: version, job: job };
     jobs.set(p, rec);
     function stillMine() {
@@ -178,6 +222,7 @@
   window.NSO_Outline = {
     WORKER_TRIS: OUTLINE_WORKER_TRIS,
     cached: function (g) { return !!cacheGet(g); },
+    forget: function (g) { edgeCache.delete(g); },
     forgetAll: function () { edgeCache = new WeakMap(); }
   };
 

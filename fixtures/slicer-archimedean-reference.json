@@ -1,0 +1,166 @@
+{
+ "source": "archimedeanchords.gcode.3mf - the plate of slicer-concentric-reference.json (its outlines are the parts), 9.8 mm tall, cut by Bambu Studio 02.09.01.70 with every surface, the solid infill and the sparse infill (15 %, 0.45 wide) Archimedean chords. solid / sparse: the second and fourth layers' fill - its paths, the length laid, where the spiral starts (the path end furthest from the walls; on the right triangle's sparse layer the centre lies outside the part), the line's width.",
+ "shapes": [
+  {
+   "name": "hexagon",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 31,
+    "length": 1481.8,
+    "start": [
+     130.139,
+     114.637
+    ],
+    "width": 0.42
+   },
+   "sparse": {
+    "feature": "Sparse infill",
+    "paths": 1,
+    "length": 234.4,
+    "start": [
+     130.139,
+     114.637
+    ],
+    "width": 0.45
+   }
+  },
+  {
+   "name": "octagon",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 23,
+    "length": 1627.8,
+    "start": [
+     42.728,
+     116.411
+    ],
+    "width": 0.42
+   },
+   "sparse": {
+    "feature": "Sparse infill",
+    "paths": 1,
+    "length": 242.3,
+    "start": [
+     42.728,
+     116.411
+    ],
+    "width": 0.45
+   }
+  },
+  {
+   "name": "pentagon",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 38,
+    "length": 1341.2,
+    "start": [
+     85.796,
+     114.872
+    ],
+    "width": 0.42
+   },
+   "sparse": {
+    "feature": "Sparse infill",
+    "paths": 1,
+    "length": 228.2,
+    "start": [
+     88.297,
+     114.872
+    ],
+    "width": 0.45
+   }
+  },
+  {
+   "name": "rectangle",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 71,
+    "length": 1634.7,
+    "start": [
+     87.205,
+     82.134
+    ],
+    "width": 0.42
+   },
+   "sparse": {
+    "feature": "Sparse infill",
+    "paths": 3,
+    "length": 258.4,
+    "start": [
+     87.205,
+     82.134
+    ],
+    "width": 0.45
+   }
+  },
+  {
+   "name": "square",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 50,
+    "length": 1395.8,
+    "start": [
+     42.683,
+     152.886
+    ],
+    "width": 0.42
+   },
+   "sparse": {
+    "feature": "Sparse infill",
+    "paths": 4,
+    "length": 220.2,
+    "start": [
+     42.683,
+     152.886
+    ],
+    "width": 0.45
+   }
+  },
+  {
+   "name": "triangle_eq",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 62,
+    "length": 819.1,
+    "start": [
+     131.363,
+     146.363
+    ],
+    "width": 0.42
+   },
+   "sparse": {
+    "feature": "Sparse infill",
+    "paths": 4,
+    "length": 146.4,
+    "start": [
+     131.363,
+     153.512
+    ],
+    "width": 0.45
+   }
+  },
+  {
+   "name": "triangle_right",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 61,
+    "length": 593.9,
+    "start": [
+     128.161,
+     78.226
+    ],
+    "width": 0.42
+   },
+   "sparse": {
+    "feature": "Sparse infill",
+    "paths": 3,
+    "length": 111.9,
+    "start": [
+     135.011,
+     81.935
+    ],
+    "width": 0.45
+   }
+  }
+ ]
+}

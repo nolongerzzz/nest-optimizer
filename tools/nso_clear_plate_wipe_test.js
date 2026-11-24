@@ -69,11 +69,16 @@ const ctx = {
 ctx.clearFacePick = () => { calls.push('clearFacePick'); };
 ctx.nsoHelpers = { teardown: (why) => { calls.push('teardown:' + why + ':models=' + ctx.state.models.length); } };
 ctx.window = ctx;      // a browser's global is its window
+// the fresh start: leaveTool (app-input-mode.js) is only counted here; the plates in play come from NSO_BEDS.info()
+const left = [];
+ctx.leaveTool = () => { left.push('leaveTool:models=' + ctx.state.models.length); return []; };
+let bedRows = [{ number: 1, models: 2, placed: 2 }];     // the rows info() returns; one plate holding the pieces by default
+ctx.NSO_BEDS = { info: () => bedRows, count: () => bedRows.length, stashedRoots: () => [] };
 ctx.NSO_SUPPORTS_CARD = { forgetAll: () => { calls.push('forgetAll:models=' + ctx.state.models.length); } };
 vm.createContext(ctx);
 vm.runInContext([
   'const UNDO_MAX = 40;',
-  ...['updateUndoBtn', 'nsoGeometriesNamed', 'nsoReleaseGeometries', 'modelIsOnPlate', 'modelsOnPlate', 'clearPlaced', 'clearPlateOnly']
+  ...['updateUndoBtn', 'nsoPlatesInPlay', 'nsoGeometriesNamed', 'nsoReleaseGeometries', 'modelIsOnPlate', 'modelsOnPlate', 'clearPlaced', 'clearPlateOnly']
     .map(n => fnSource(core, n, 'app-core.js')),
   fnSource(join, 'clearJoinSlots', 'app-join.js'),
   'this.__app = { clearPlateOnly, clearPlaced, modelsOnPlate, modelIsOnPlate, nsoReleaseGeometries };'
@@ -188,6 +193,26 @@ app.clearPlateOnly();
 P.state.models.push({ id: 4, name: 'a', geometry: geo('A2'), quantity: 1, size: { x: 1, y: 1, z: 1 } });
 check('one model, not two', P.state.models.length === 1 && P.state.models[0].name === 'a');
 check('its id is not one of the wiped models\'', !P.ids.includes(P.state.models[0].id));
+
+console.log('10. a fresh start only when one plate is in play');
+const row = (n, placed) => ({ number: n, models: placed, placed });
+function clearWith(rows) {
+  P = plate(); left.length = 0; bedRows = rows;
+  app.clearPlateOnly();
+  return left.slice();
+}
+let ran = clearWith([row(1, 2)]);
+check('one plate with pieces: every tool and card is closed, before the wipe', ran.length === 1 && ran[0] === 'leaveTool:models=2', ran.join());
+ran = clearWith([row(1, 2), row(2, 0), row(3, 0)]);
+check('three plates, pieces on one: still a fresh start', ran.length === 1, ran.join());
+ran = clearWith([row(1, 2), row(2, 1)]);
+check('pieces on two plates: Clear plate stays as it was (no leave-tool)', ran.length === 0, ran.join());
+check('... and still wipes this plate', P.state.models.length === 0 && P.state.placed.length === 0);
+ran = clearWith([row(1, 2), row(2, 1), row(3, 4)]);
+check('pieces on three plates: as it was', ran.length === 0, ran.join());
+ctx.NSO_BEDS = undefined; P = plate(); left.length = 0;
+app.clearPlateOnly();
+check('no beds module: the one plate counts, a fresh start', left.length === 1, left.join());
 
 console.log(fails ? '\n' + fails + ' check(s) FAILED' : '\nall clear-plate-wipe checks passed');
 process.exit(fails ? 1 : 0);

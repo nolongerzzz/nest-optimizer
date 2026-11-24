@@ -428,6 +428,35 @@ console.log('\n=== 9. a shaped tube: Flare, Neck - refused in the reader\'s word
   }
 }
 
+console.log('\n=== 10. several ring fields as ONE move (the Scale card stages them together) ===');
+{
+  // The report: a Ø40.6 / Ø30.5 tube taken down to Ø30.2 / Ø12.4 - the outer
+  // typed below where the bore stood, with a smaller bore typed beside it.
+  // One field at a time, Outer ran first against the OLD bore and was refused.
+  const made = S.make({ shape: 'tube', height: 40 });
+  const soup = made.soup, b = NSO_sectionRead(soup);
+  const D = b.outer.diameterMm, d = b.bore.diameterMm;
+  console.log('     tube: Ø' + f6(D) + ' / Ø' + f6(d) + ', wall ' + f6(b.wallMm));
+  const lone = NSO_ringApplyRaw(soup, 'outer', d - 4);
+  check('Outer alone below the bore is still refused (Outer holds the bore)', !lone.ok && /^outer would reach the bore/.test(lone.reason), lone.reason);
+  const r1 = NSO_ringApplyRaw(soup, 'ring', { outer: d - 4, bore: 12, wall: null });
+  holds('ring {Outer ' + f3(d - 4) + ', Bore 12}: the outer passes the old bore', soup, r1, { outer: d - 4, bore: 12, wall: (d - 4 - 12) / 2 }, 1e-4);
+  rowOf('Stock tube', 'Outer + Bore', f3(d - 4) + ' / 12', r1, 'Ø' + f3(d - 4) + ' / Ø12, wall ' + f3((d - 4 - 12) / 2));
+  const r2 = NSO_ringApplyRaw(soup, 'ring', { outer: d - 4, bore: null, wall: 5 });
+  holds('ring {Outer ' + f3(d - 4) + ', Wall 5}: the wall measured off the NEW outer', soup, r2, { outer: d - 4, bore: d - 14, wall: 5 }, 1e-4);
+  const r3 = NSO_ringApplyRaw(soup, 'ring', { outer: D + 20, bore: D + 10, wall: null });
+  holds('ring {Outer +20, Bore past the old outer}: the bore grows through where the outer stood', soup, r3, { outer: D + 20, bore: D + 10, wall: 5 }, 1e-4);
+  const r4 = NSO_ringApplyRaw(soup, 'ring', { outer: 20, bore: 24, wall: null });
+  check('ring: the final faces crossing is refused and blames the Outer that came in', !r4.ok && r4.tris === soup && r4.blame === 'outer' &&
+    r4.reason === 'outer would reach the bore - Ø20 outer against a Ø24 bore', r4.reason + ' [' + r4.blame + ']');
+  const r5 = NSO_ringApplyRaw(soup, 'ring', { outer: 20, bore: 19.6, wall: null });
+  check('ring: under the floor on the final ring is refused, blaming the outer', !r5.ok && r5.blame === 'outer' && /under the .* mm floor$/.test(r5.reason), r5.reason + ' [' + r5.blame + ']');
+  const r6 = NSO_ringApplyRaw(soup, 'ring', { outer: 20, bore: null, wall: 12 });
+  check('ring: a wall that closes the bore blames the Wall', !r6.ok && r6.blame === 'wall' && /^bore would close up/.test(r6.reason), r6.reason + ' [' + r6.blame + ']');
+  const r7 = NSO_ringApplyRaw(soup, 'ring', { outer: D, bore: d, wall: null });
+  check('ring: the size it already is changes nothing', !r7.ok && /nothing to change/.test(r7.reason), r7.reason);
+}
+
 console.log('\n=== the verb x fixture table ===');
 console.log('| fixture | verb | ask | result (by the reader) | truth |');
 console.log('|---|---|---|---|---|');

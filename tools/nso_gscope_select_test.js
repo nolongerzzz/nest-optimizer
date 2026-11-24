@@ -950,6 +950,10 @@ withApp(async (page, logs) => {
     const re = await page.evaluate(() => ({ side: NSO_MICROSCOPE.cardSide(), mode: NSO_MICROSCOPE.mode(), n: NSO_MICROSCOPE.getDoc().segments.length,
       folded: document.getElementById('ms-slice-settings').hidden }));
     check('...and G-scope opens again on the imported slice, a fresh visit (Slice side, the piece, the settings folded)', re.side === 'slice' && re.mode === 'piece' && re.n === 51 && re.folded, J(re));
+    // a close keeps the plates now (docs/GSCOPE.md item 3): plate 2's pieces from the sections before are emptied here,
+    // so the sections after start with plate 2 empty, as a close used to leave it
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.showPlate('take'); document.getElementById('ms-btn-take-clear').click(); M.showPlate('lens'); });
+    await frames(page);
     dest = await bedPoints();
   }
 
@@ -1229,8 +1233,12 @@ withApp(async (page, logs) => {
       return d.segments.filter(g => sup.has(g.mv.objectId)).every(g => /^Support/.test(g.feature));
     }));
     const read = await page.evaluate(() => document.getElementById('ms-slice-read').textContent);
-    check('the readout credits the host - the covering support named - and each support says what it holds',
-      sups.every(n => read.includes('covered by ' + n.replace(/^.* - /, '').replace(/\s*\([^)]*\)$/, '') + ',')) &&
+    /* the host credited (slicer:supports pins the words): a region left partly uncovered names its covering support; with nothing
+       uncovered the line says how many supports cover it */
+    const label = n => n.replace(/^.* - /, '').replace(/\s*\([^)]*\)$/, '');
+    check('the readout credits the host - each covering support named, or all of them counted when nothing is left uncovered - and each support says what it holds',
+      (sups.every(n => read.includes('covered by ' + label(n) + ',') || read.includes(', ' + label(n) + ')')) ||
+       read.includes('no support needed (' + sups.length + ' supports cover ')) &&
       (read.match(/: support for /g) || []).length === 2, read);
     /* a line type's home is the Features list: just Support interface checked, the view click takes all of it */
     await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.setSelectionMoves([]); if (M.isIsolated()) M.back(); M.setMode('piece'); });

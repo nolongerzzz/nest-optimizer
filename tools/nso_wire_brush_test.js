@@ -68,8 +68,12 @@ const hitsPiece = (page, pt) => page.evaluate(([cx, cy]) => {
   return state.raycaster.intersectObjects(state.modelGroup.children, true).length > 0;
 }, [pt.x, pt.y]);
 
+/* The Brush's select offers Emboss and Smooth only (Carve is its own arm in Sculpt), but the
+   engine's push-in mode is still what these strokes are checked against, so the option is added
+   here when a test asks for it. */
 const setCtl = (page, id, value) => page.evaluate(([i, v]) => {
   const e = document.getElementById(i);
+  if (i === 'sel-brush-mode' && v === 'carve' && !Array.from(e.options).some(o => o.value === 'carve')) e.add(new Option('Carve', 'carve'));
   if (e.type === 'checkbox') e.checked = !!v; else e.value = String(v);
   e.dispatchEvent(new Event('input', { bubbles: true }));
   e.dispatchEvent(new Event('change', { bubbles: true }));
@@ -117,7 +121,7 @@ withApp(async (page, logs) => {
     };
   });
   check('#btn-brush present', ui.button, ui.label ? 'label "' + ui.label + '"' : 'missing');
-  check('three modes on the toggle', JSON.stringify(ui.modes) === '["carve","emboss","smooth"]',
+  check('two modes on the toggle: Emboss and Smooth (Carve is its own arm)', JSON.stringify(ui.modes) === '["emboss","smooth"]',
         JSON.stringify(ui.modes));
   check('size slider is 1-50mm', ui.size && ui.size.type === 'range' && ui.size.min === '1' && ui.size.max === '50',
         JSON.stringify(ui.size));
@@ -382,7 +386,9 @@ withApp(async (page, logs) => {
      actionable, and that the piece is untouched, which were always the three
      things that mattered. */
   console.log('\n=== 10. THE GATE, through a real drag on a real thin wall ===');
-  await page.click('#btn-brush');                 // disarm before switching piece
+  /* disarm before switching piece - if it is still armed: section 9 opened the Paint menu, which
+     shuts Sculpt (one panel at a time), and shutting Sculpt puts the Brush away on its own */
+  await page.evaluate(() => { if (window.nsoBrushArmed()) document.getElementById('btn-brush').click(); });
   const lidId = await loadSTL(page, fx('lid_blank.stl'));
   await selectModel(page, lidId);
   await page.evaluate(id => {
@@ -488,6 +494,34 @@ withApp(async (page, logs) => {
   check('and arming the Brush disarms Measure',
         afterReArm.brush === true && afterMeasure.brush === false && !afterReArm.measure,
         JSON.stringify(afterReArm));
+  await page.click('#btn-brush');
+
+  console.log('\n=== 13. shutting the Sculpt card puts the Brush and Carve away ===');
+  const shut = () => page.evaluate(() => new Promise(r => {
+    document.getElementById('menu-sculpt').open = false;
+    setTimeout(r, 50);                 // the observer runs as a microtask; a beat is plenty
+  }));
+  await page.click('#btn-brush');
+  const brushOn = await armState();
+  await shut();
+  const brushOff = await armState();
+  check('shutting the card disarms the Brush', brushOn.brush === true && brushOff.brush === false,
+        JSON.stringify({ brushOn, brushOff }));
+  const brushPressed = await page.evaluate(() => document.getElementById('btn-brush').classList.contains('is-armed'));
+  check('...and the button stops reading as armed', brushPressed === false);
+  await page.click('#btn-carve');
+  const carveOn = await armState();
+  await shut();
+  const carveOff = await armState();
+  check('shutting the card disarms Carve', carveOn.carve === true && carveOff.carve === false,
+        JSON.stringify({ carveOn, carveOff }));
+  const carvePressed = await page.evaluate(() => document.getElementById('btn-carve').getAttribute('aria-pressed'));
+  check('...and its button follows', carvePressed === 'false', carvePressed);
+  await page.click('#btn-carve');                         // the card opens again for the click
+  await page.click('#btn-brush');
+  const swap = await armState();
+  check('arming the Brush while Carve is armed swaps them (one tool at a time)',
+        swap.brush === true && swap.carve === false, JSON.stringify(swap));
   await page.click('#btn-brush');
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

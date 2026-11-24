@@ -37,13 +37,21 @@ close it.
   centre is not (measured: `pin.stl`, `hinge_knuckle_box.stl`) is refused with the
   card's own message and left alone; centred or on a clean grid it holds (box, cylinder,
   prism, tape, `lid_blank`). Nothing snaps the plane.
-- **Select all** (`nsoSelectAllOnPlate`, `app-core.js`) lights every piece on the active plate
-  (the selected piece's red glow) and holds them as a group, `state.multiSel`, with
-  `selectedIndex = -1` so no single-piece verb lands on an arbitrary piece. The app still has
-  ONE selection; the group answers **Delete** (menu item reads "Delete N pieces", the Delete key
-  too; one Undo step per piece) and Clear plate. A right click on a piece of the group keeps it
-  and greys Split / Clone / Mirror / Export selected; anything that selects (`clearSelectionOutline`),
-  a plate switch or a delete ends it.
+- **Select all** (`nsoSelectAllOnPlate`, `app-core.js`) draws every piece on the active plate
+  exactly as one selected piece is drawn - the rose body and the white outline (`nsoPaintSelLook`;
+  `refreshOutline` draws for any piece `nsoLooksSelected` says) - lights every row of the Pieces
+  card, and holds them as a group, `state.multiSel`, with `selectedIndex = -1` so no single-piece
+  verb lands on an arbitrary piece. The app still has ONE selection; the group answers **Delete**
+  (menu item reads "Delete N pieces", the Delete key too; one Undo step per piece), Clear plate,
+  the **Scale card's Whole x** (the card shows that one row; every piece scaled about its own
+  centre where it stands, one preview, ONE Undo - a `stepGroup` of the pieces' scale steps), and a
+  **drag on any of its pieces**: every piece moves by the held piece's step (one Undo,
+  `groupMovePlaced`), and let go over another plate the whole group goes there
+  (`NSO_BEDS.moveGroup`, one Undo; see docs/BEDS.md), still selected. A plain click on a piece of
+  the group selects that piece alone. A right click on a piece of the group keeps it and greys
+  Split / Clone / Mirror / Export selected; anything that selects (`clearSelectionOutline`), a
+  plate switch or a delete ends it. The Supports card's "Generate for plate" lights its pieces in
+  the same look through `state.litSel`. `npm run select:all` drives all of it.
 - **Split to parts** calls `NSO_SPLIT_PARTS.split()` (the Subtract card's verb) on the piece the
   menu opened on; a one-part piece is refused with the reason in the status line. One Undo.
 - **Export selected as... / Export plate** open the Export card (`#menu-export`, the

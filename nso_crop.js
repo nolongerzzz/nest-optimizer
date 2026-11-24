@@ -49,6 +49,16 @@
      outline   { kind: 'outline', source, mode, tri, d1, d2, z1, z2 }
                the footprint of a chosen piece, extruded between heights z1 and
                z2 (omitted: right through the piece being cropped)
+     loop      { kind: 'loop', tris: [triangle indices of the piece's own rawTris] }
+               the triangles inside a loop of edges round a bump (from bumpLoops): copied exactly as they are, the underside
+               closed by Lift's own fill, which continues the base's curve across the loop (nso_lift_curved.js)
+     wall      { kind: 'wall', o: [x,y,z], n: [..], u: [..], ring: [[a,b], ...], off, reach? }
+               one flat wall of the piece (from wallFace) and a line parallel to it, `off` mm
+               out from it: the copy is what stands outside the line, over the wall's outline
+     lasso     { kind: 'lasso', eye: [x,y,z], dirs: [[dx,dy,dz], ...], near?, far? }
+               a loop drawn on the screen: the cone of rays from the eye through
+               its points, between depths near and far along the view (omitted:
+               just short of the piece to just past it)
    yaw is degrees about the vertical, through the centre, counter-clockwise
    seen from above. `source` is a plate-frame soup, or a piece-like object
    ({ rawTris, toRaw }), which may be the very piece being cropped.
@@ -124,9 +134,10 @@
     shortMm: 2e-4,       // an edge under this is a sliver: twice the weld radius
     creaseDeg: 30,       // a rim's face ends where edges bend more than this
     weldQ: 1e4,          // 0.1 micron buckets, as NSO_edgeStats welds
+    wallNudgeMm: 0.0005, // a wall's line is kept this far outside where it was set (below)
     cleanTol: [2e-4, 5e-4, 1e-3]   // the simplify tolerances tried, in turn, on a result with slivers
   };
-  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline'];
+  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline', 'lasso', 'wall', 'loop'];
 
   var IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
@@ -597,7 +608,256 @@
       if ((shape.z1 != null) !== (shape.z2 != null)) return 'give both heights z1 and z2, or neither';
       if (shape.z1 != null && !(isNum(shape.z1) && isNum(shape.z2) && shape.z2 > shape.z1)) return 'the outline heights need z1 below z2';
     }
+    else if (kind === 'loop') {
+      if (!shape.tris || typeof shape.tris.length !== 'number' || shape.tris.length < 1) return 'the loop needs the triangles inside it, tris: [index, ...]';
+    } else if (kind === 'wall') {
+      if (!vec3(shape.o) || !vec3(shape.n) || !vec3(shape.u)) return 'the wall needs a point on it, o, its outward normal, n, and a direction along it, u';
+      if (!(Math.hypot(shape.n[0], shape.n[1], shape.n[2]) > 1e-9) || !(Math.hypot(shape.u[0], shape.u[1], shape.u[2]) > 1e-9)) return 'the wall normal and direction are not directions';
+      if (!shape.ring || typeof shape.ring.length !== 'number' || shape.ring.length < 3) return 'the wall needs its outline, ring: at least 3 points [a, b] on the wall';
+      for (var ri = 0; ri < shape.ring.length; ri++) if (!(shape.ring[ri] && isNum(shape.ring[ri][0]) && isNum(shape.ring[ri][1]))) return 'every wall outline point is two numbers';
+      if (shape.off != null && !isNum(shape.off)) return 'the wall line distance, off, is a number of mm';
+      if (shape.reach != null && !(isNum(shape.reach) && shape.reach > 0)) return 'the wall reach is a distance above 0';
+    } else if (kind === 'lasso') {
+      if (!vec3(shape.eye)) return 'the lasso needs the eye it was drawn from, eye: [x, y, z]';
+      if (!Array.isArray(shape.dirs) && !(shape.dirs && typeof shape.dirs.length === 'number')) return 'the lasso needs the rays of its loop, dirs: [[dx, dy, dz], ...]';
+      if (shape.dirs.length < 3) return 'a lasso loop needs at least 3 points';
+      for (var di = 0; di < shape.dirs.length; di++) if (!vec3(shape.dirs[di])) return 'every lasso ray is three numbers';
+      if ((shape.near != null) !== (shape.far != null)) return 'give both depths near and far, or neither';
+      if (shape.near != null && !(isNum(shape.near) && isNum(shape.far) && shape.near > 0 && shape.far > shape.near)) return 'the lasso depths need 0 < near < far';
+    }
     return '';
+  }
+
+  /* A wall and its line, in the frame of the wall: u along it, w up it (w = n x u, so u x w = n), n out of it.
+     The outline is in (u, w) about the point `o`; the cutter is that outline extruded along n from the line
+     (off) to `reach`, which is just past the piece's farthest point out along n unless it is given.
+     -> { poly, basis, off, reach, note } or { reason }. */
+  function wallFrame(shape, pieceP) {
+    var n = shape.n, nl = Math.hypot(n[0], n[1], n[2]);
+    n = [n[0] / nl, n[1] / nl, n[2] / nl];
+    var u = shape.u, ud = u[0] * n[0] + u[1] * n[1] + u[2] * n[2];
+    u = [u[0] - ud * n[0], u[1] - ud * n[1], u[2] - ud * n[2]];             // square to n
+    var ul = Math.hypot(u[0], u[1], u[2]);
+    if (!(ul > 1e-9)) return { reason: 'the wall direction runs along its normal' };
+    u = [u[0] / ul, u[1] / ul, u[2] / ul];
+    var w = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
+    /* The line is kept 0.5 micron outside where it was set. A line AT the wall is the commonest one, and a plane that
+       close to the wall's own face - to within the noise of a rotated float32 mesh, a millionth of a mm - leaves the
+       kernel a film of no thickness that the sliver clean-up then folds into the copy. Half a micron clear of it
+       the answer is the bump and nothing else; no printer can see it. */
+    var off = (shape.off == null ? 0 : shape.off) + DEFAULTS.wallNudgeMm, reach = shape.reach;
+    if (reach == null) {
+      if (!pieceP) return { reason: 'the wall needs a reach' };
+      reach = -Infinity;
+      for (var k = 0; k < 8; k++) {
+        var q = [(k & 1 ? pieceP.hi : pieceP.lo)[0] - shape.o[0], (k & 2 ? pieceP.hi : pieceP.lo)[1] - shape.o[1], (k & 4 ? pieceP.hi : pieceP.lo)[2] - shape.o[2]];
+        reach = Math.max(reach, q[0] * n[0] + q[1] * n[1] + q[2] * n[2]);
+      }
+      reach += DEFAULTS.marginMm;
+    }
+    if (!(reach > off + 1e-3)) return { reason: 'the line is out past everything - nothing of the piece stands outside it' };
+    var poly = Array.prototype.slice.call(shape.ring).map(function (p) { return { x: p[0], y: p[1] }; });
+    var area = 0;
+    for (var j = 0; j < poly.length; j++) { var a = poly[j], b = poly[(j + 1) % poly.length]; area += a.x * b.y - b.x * a.y; }
+    if (area < 0) poly.reverse();
+    return { poly: poly, off: off, reach: reach, note: 'the line ' + f2(off - DEFAULTS.wallNudgeMm) + ' mm out from the wall',
+             basis: [u[0], u[1], u[2], 0, w[0], w[1], w[2], 0, n[0], n[1], n[2], 0, 0, 0, 0, 1] };
+  }
+
+  /* The flat wall a triangle is on. soupP is the piece in P, tri an index into it. The wall is every triangle joined to
+     it by an edge that lies in the same plane (within tolMm), however it is tessellated; its outline is the outermost
+     loop of that patch, so whatever stands on the wall - a bump whose base is a hole in it - is inside the outline.
+     -> { o, n, u, w, d, ring: [[a, b], ...] (about o, in u, w, counter-clockwise), ring3, areaMm2, size: [width, height],
+          share (the patch's part of the whole surface), tris, holes } or { reason }. n points out of the piece (the soup's winding). */
+  function wallFace(soupP, triIdx, tolMm) {
+    var Q = DEFAULTS.weldQ, nT = (soupP.length / 9) | 0, tol = isNum(tolMm) ? tolMm : 0.02;
+    if (!(triIdx >= 0 && triIdx < nT) || triIdx !== Math.floor(triIdx)) return { reason: 'triangle ' + triIdx + ' is not a triangle of that piece (it has ' + nT + ')' };
+    var vmap = new Map(), pts = [], tris = [], nrm = [], slot = new Array(nT);
+    function vid(x, y, z) {
+      var k = Math.round(x * Q) + '_' + Math.round(y * Q) + '_' + Math.round(z * Q);
+      var i = vmap.get(k);
+      if (i === undefined) { i = pts.length; pts.push([x, y, z]); vmap.set(k, i); }
+      return i;
+    }
+    for (var t = 0; t < nT; t++) {
+      var o9 = t * 9;
+      var a = vid(soupP[o9], soupP[o9 + 1], soupP[o9 + 2]), b = vid(soupP[o9 + 3], soupP[o9 + 4], soupP[o9 + 5]), c = vid(soupP[o9 + 6], soupP[o9 + 7], soupP[o9 + 8]);
+      slot[t] = -1;
+      if (a === b || b === c || a === c) continue;
+      var ux = soupP[o9 + 3] - soupP[o9], uy = soupP[o9 + 4] - soupP[o9 + 1], uz = soupP[o9 + 5] - soupP[o9 + 2];
+      var vx = soupP[o9 + 6] - soupP[o9], vy = soupP[o9 + 7] - soupP[o9 + 1], vz = soupP[o9 + 8] - soupP[o9 + 2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, L = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (!(L > 1e-12)) continue;
+      slot[t] = tris.length;
+      tris.push([a, b, c]);
+      nrm.push([nx / L, ny / L, nz / L]);
+    }
+    var t0 = slot[triIdx];
+    if (t0 < 0) return { reason: 'that triangle has no area, so it is on no wall' };
+    var n0 = nrm[t0], p0 = pts[tris[t0][0]], d0 = n0[0] * p0[0] + n0[1] * p0[1] + n0[2] * p0[2];
+    function onPlane(v) { var p = pts[v]; return Math.abs(n0[0] * p[0] + n0[1] * p[1] + n0[2] * p[2] - d0) <= tol; }
+    function ek(u, v) { return u < v ? u + '_' + v : v + '_' + u; }
+    var edges = new Map();
+    for (var i = 0; i < tris.length; i++) {
+      for (var e = 0; e < 3; e++) {
+        var eu = tris[i][e], ew = tris[i][(e + 1) % 3], key = ek(eu, ew), list = edges.get(key);
+        if (!list) { list = []; edges.set(key, list); }
+        list.push(i);
+      }
+    }
+    var inPatch = new Uint8Array(tris.length), stack = [t0], patch = [];
+    var cosP = Math.cos(1 * Math.PI / 180);
+    function flat(i) {
+      var nn = nrm[i];
+      return nn[0] * n0[0] + nn[1] * n0[1] + nn[2] * n0[2] >= cosP && onPlane(tris[i][0]) && onPlane(tris[i][1]) && onPlane(tris[i][2]);
+    }
+    if (!flat(t0)) return { reason: 'that triangle is not flat' };
+    inPatch[t0] = 1;
+    while (stack.length) {
+      var cur = stack.pop();
+      patch.push(cur);
+      for (var e2 = 0; e2 < 3; e2++) {
+        var l2 = edges.get(ek(tris[cur][e2], tris[cur][(e2 + 1) % 3])) || [];
+        for (var q = 0; q < l2.length; q++) {
+          var nb = l2[q];
+          if (!inPatch[nb] && flat(nb)) { inPatch[nb] = 1; stack.push(nb); }
+        }
+      }
+    }
+    /* A patch that is a facet of a curved surface (a sphere's, a cone's slope - which is flat only as a sliver) is not a
+       wall: Wall has no line to put on it. It is told apart from a flat wall by two things together: it is small, under
+       1% of the piece's whole surface, and over half its border (by length) meets triangles that bend away from it by
+       under 20 degrees, as neighbouring facets of a curve do. A real wall's edges are corners, and a face with fillets
+       round it is large; a small flat end (a pin's top, a bump's top) has corners round it. That the patch is several
+       triangles does not matter: a bump's foot re-cuts the facets round it into coplanar groups of up to nine. */
+    var patchArea = 0, allArea = 0;
+    function triArea(ti) {
+      var pa = pts[tris[ti][0]], pb = pts[tris[ti][1]], pc = pts[tris[ti][2]];
+      var ax = pb[0] - pa[0], ay = pb[1] - pa[1], az = pb[2] - pa[2], bx = pc[0] - pa[0], by = pc[1] - pa[1], bz = pc[2] - pa[2];
+      return 0.5 * Math.sqrt(Math.pow(ay * bz - az * by, 2) + Math.pow(az * bx - ax * bz, 2) + Math.pow(ax * by - ay * bx, 2));
+    }
+    patch.forEach(function (ti) { patchArea += triArea(ti); });
+    for (var ta = 0; ta < tris.length; ta++) allArea += triArea(ta);
+    if (patchArea < 0.01 * allArea) {
+      var cosS = Math.cos(20 * Math.PI / 180), bordered = 0, smooth = 0;
+      patch.forEach(function (ti) {
+        for (var e4 = 0; e4 < 3; e4++) {
+          var ea = tris[ti][e4], eb = tris[ti][(e4 + 1) % 3], l4 = edges.get(ek(ea, eb)) || [];
+          var len = Math.hypot(pts[ea][0] - pts[eb][0], pts[ea][1] - pts[eb][1], pts[ea][2] - pts[eb][2]);
+          for (var q5 = 0; q5 < l4.length; q5++) {
+            if (inPatch[l4[q5]]) continue;
+            bordered += len;
+            var nb2 = nrm[l4[q5]];
+            if (nb2[0] * n0[0] + nb2[1] * n0[1] + nb2[2] * n0[2] >= cosS) smooth += len;
+          }
+        }
+      });
+      if (bordered > 0 && smooth >= 0.5 * bordered) return { reason: 'that is a curved surface, not a flat wall - Wall works on flat walls (click a face that is flat)', curved: true };
+    }
+    // the plane's own frame: n out, u along (square to the plate where it can be), w = n x u
+    var up = Math.abs(n0[2]) > 0.9 ? [0, 1, 0] : [0, 0, 1];
+    var uu = [up[1] * n0[2] - up[2] * n0[1], up[2] * n0[0] - up[0] * n0[2], up[0] * n0[1] - up[1] * n0[0]], ul = Math.hypot(uu[0], uu[1], uu[2]);
+    uu = [uu[0] / ul, uu[1] / ul, uu[2] / ul];
+    var ww = [n0[1] * uu[2] - n0[2] * uu[1], n0[2] * uu[0] - n0[0] * uu[2], n0[0] * uu[1] - n0[1] * uu[0]];
+    var org = [n0[0] * d0, n0[1] * d0, n0[2] * d0];
+    function to2(p) { var r = [p[0] - org[0], p[1] - org[1], p[2] - org[2]]; return [r[0] * uu[0] + r[1] * uu[1] + r[2] * uu[2], r[0] * ww[0] + r[1] * ww[1] + r[2] * ww[2]]; }
+    // the patch's boundary: directed edges whose neighbour is not in the patch
+    var bEdges = [], byFrom = new Map();
+    patch.forEach(function (ti) {
+      for (var e3 = 0; e3 < 3; e3++) {
+        var a3 = tris[ti][e3], b3 = tris[ti][(e3 + 1) % 3], l3 = edges.get(ek(a3, b3)) || [], shared = false;
+        for (var q3 = 0; q3 < l3.length; q3++) if (l3[q3] !== ti && inPatch[l3[q3]]) shared = true;
+        if (shared) continue;
+        var idx = bEdges.length;
+        bEdges.push({ a: a3, b: b3 });
+        var out = byFrom.get(a3);
+        if (!out) { out = []; byFrom.set(a3, out); }
+        out.push(idx);
+      }
+    });
+    var used = new Uint8Array(bEdges.length), loops = [];
+    for (var s0 = 0; s0 < bEdges.length; s0++) {
+      if (used[s0]) continue;
+      var chain = [], cur2 = s0, closed = false;
+      for (;;) {
+        used[cur2] = 1; chain.push(cur2);
+        if (bEdges[cur2].b === bEdges[s0].a) { closed = true; break; }
+        var outs = byFrom.get(bEdges[cur2].b) || [], nxt = -1;
+        for (var q4 = 0; q4 < outs.length; q4++) if (!used[outs[q4]]) { nxt = outs[q4]; break; }
+        if (nxt < 0) break;
+        cur2 = nxt;
+      }
+      if (!closed) continue;
+      var ring3 = chain.map(function (ci) { return pts[bEdges[ci].a]; }), ring2 = ring3.map(to2), ar = 0;
+      for (var r = 0; r < ring2.length; r++) { var P0 = ring2[r], P1 = ring2[(r + 1) % ring2.length]; ar += P0[0] * P1[1] - P1[0] * P0[1]; }
+      loops.push({ ring3: ring3, ring2: ring2, area: ar / 2 });
+    }
+    if (!loops.length) return { reason: 'the edge round that wall does not close into a loop' };
+    var outer = loops.reduce(function (m, l) { return Math.abs(l.area) > Math.abs(m.area) ? l : m; }, loops[0]);
+    if (!(Math.abs(outer.area) > 1e-6)) return { reason: 'that wall has no area' };
+    if (outer.area < 0) { outer.ring2.reverse(); outer.ring3.reverse(); }
+    var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+    outer.ring2.forEach(function (p) { lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])]; hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])]; });
+    // simple polygon: drop corners that lie on a straight run (a tessellated edge), so the outline is its real corners
+    var ring = outer.ring2.filter(function (p, i, all) {
+      var pr = all[(i + all.length - 1) % all.length], nx2 = all[(i + 1) % all.length];
+      var cr = (p[0] - pr[0]) * (nx2[1] - p[1]) - (p[1] - pr[1]) * (nx2[0] - p[0]);
+      return Math.abs(cr) > 1e-7 * Math.max(1, Math.hypot(p[0] - pr[0], p[1] - pr[1]) * Math.hypot(nx2[0] - p[0], nx2[1] - p[1]));
+    });
+    return { o: org, n: n0, u: uu, w: ww, d: d0, ring: ring, ring3: outer.ring3, areaMm2: Math.abs(outer.area), share: patchArea / allArea,
+             size: [hi[0] - lo[0], hi[1] - lo[1]], centre: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2], tris: patch.length, holes: loops.length - 1 };
+  }
+
+  /* A lasso, drawn on the screen, is a cone from the eye: the rays through the
+     loop's points, cut off at `near` and `far` (depths along the view). In the
+     view's own frame (u across, w up the screen, c the way it looks) the loop at
+     depth `near` is the polygon of the rays scaled to that depth, and the cone is
+     that polygon extruded along c with the top scaled by far / near - the kernel
+     scales about the eye's axis, which is exactly what a cone is.
+     -> { poly, basis, near, far, note } or { reason }. */
+  function lassoFrame(shape, pieceP) {
+    var dirs = Array.prototype.slice.call(shape.dirs).map(function (d) {
+      var l = Math.hypot(d[0], d[1], d[2]);
+      return l > 1e-12 ? [d[0] / l, d[1] / l, d[2] / l] : null;
+    });
+    if (dirs.some(function (d) { return !d; })) return { reason: 'a lasso ray has no direction' };
+    var c = [0, 0, 0];
+    dirs.forEach(function (d) { c[0] += d[0]; c[1] += d[1]; c[2] += d[2]; });
+    var cl = Math.hypot(c[0], c[1], c[2]);
+    if (!(cl > 1e-9)) return { reason: 'the lasso surrounds the eye - draw it on the view, not all the way round' };
+    c = [c[0] / cl, c[1] / cl, c[2] / cl];
+    for (var i = 0; i < dirs.length; i++) {
+      if (dirs[i][0] * c[0] + dirs[i][1] * c[1] + dirs[i][2] * c[2] < 0.1) return { reason: 'the lasso reaches too far round the view - draw a smaller loop' };
+    }
+    var up = Math.abs(c[2]) > 0.99 ? [0, 1, 0] : [0, 0, 1];
+    var u = [up[1] * c[2] - up[2] * c[1], up[2] * c[0] - up[0] * c[2], up[0] * c[1] - up[1] * c[0]];
+    var ul = Math.hypot(u[0], u[1], u[2]);
+    u = [u[0] / ul, u[1] / ul, u[2] / ul];
+    var w = [c[1] * u[2] - c[2] * u[1], c[2] * u[0] - c[0] * u[2], c[0] * u[1] - c[1] * u[0]];   // c x u: u x w = c
+    var near = shape.near, far = shape.far;
+    if (near == null) {
+      if (!pieceP) return { reason: 'the lasso needs depths near and far' };
+      var dlo = Infinity, dhi = -Infinity;
+      for (var k = 0; k < 8; k++) {
+        var px = (k & 1 ? pieceP.hi : pieceP.lo)[0] - shape.eye[0], py = (k & 2 ? pieceP.hi : pieceP.lo)[1] - shape.eye[1],
+            pz = (k & 4 ? pieceP.hi : pieceP.lo)[2] - shape.eye[2];
+        var dd = px * c[0] + py * c[1] + pz * c[2];
+        if (dd < dlo) dlo = dd;
+        if (dd > dhi) dhi = dd;
+      }
+      near = Math.max(1, dlo - DEFAULTS.marginMm);
+      far = dhi + DEFAULTS.marginMm;
+      if (!(far > near + 1e-3)) return { reason: 'the piece is behind the eye the lasso was drawn from' };
+    }
+    var poly = dirs.map(function (d) {
+      var t = d[0] * c[0] + d[1] * c[1] + d[2] * c[2];
+      return { x: near * (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / t, y: near * (d[0] * w[0] + d[1] * w[1] + d[2] * w[2]) / t };
+    });
+    var area = 0;
+    for (var j = 0; j < poly.length; j++) { var a = poly[j], b = poly[(j + 1) % poly.length]; area += a.x * b.y - b.x * a.y; }
+    if (area < 0) poly.reverse();
+    return { poly: poly, area: Math.abs(area) / 2, near: near, far: far, note: poly.length + '-point loop, ' + f1(near) + ' to ' + f1(far) + ' mm from the eye',
+             basis: [u[0], u[1], u[2], 0, w[0], w[1], w[2], 0, c[0], c[1], c[2], 0, 0, 0, 0, 1] };
   }
 
   /* -> { m, what, ... } where m is a kernel Manifold in the piece's raw frame
@@ -638,6 +898,40 @@
         man = mo.man;
         moved = man.transform(realmArray(toRaw));
         return { m: moved, what: what };
+      }
+      if (kind === 'wall') {
+        var wq = wallFrame(shape, ctx.pieceP);
+        if (wq.reason) return { reason: wq.reason };
+        var wcs = new wasm.CrossSection([wq.poly], 'NonZero');
+        try {
+          if (wcs.isEmpty() || !(wcs.area() > 1e-9)) return { reason: 'the wall outline encloses nothing' };
+          solid = wcs.extrude(wq.reach - wq.off);
+          moved = solid.transform(realmArray(matMul(toRaw, matMul(matT(shape.o[0], shape.o[1], shape.o[2]),
+                                                                  matMul(wq.basis, matT(0, 0, wq.off))))));
+          return { m: moved, what: shape.label || 'outside the line', note: wq.note, areaMm2: wcs.area(),
+                   hold: 'pull the line in toward the wall' };
+        } finally { wcs.delete(); }
+      }
+      if (kind === 'lasso') {
+        var lq = lassoFrame(shape, ctx.pieceP);
+        if (lq.reason) return { reason: lq.reason };
+        var lpoly = lq.poly, lcs = new wasm.CrossSection([lpoly], 'NonZero');
+        try {
+          if (lcs.isEmpty() || !(lcs.area() > 1e-9)) return { reason: 'the lasso loop encloses nothing - draw it round something' };
+          /* A loop that crosses itself (a figure of eight) has lobes that meet at a point, and the cone's walls would meet
+             along a line there: a pinch the copy cannot close on. Where the signed area and the filled area part, the loop
+             crosses: widen it by 5 microns so the lobes overlap into one waist. */
+          if (Math.abs(lq.area - lcs.area()) > 1e-6 * lcs.area()) {
+            var fat = lcs.offset(0.005, 'Round', 2, 8);
+            lcs.delete(); lcs = fat;
+            lq.note += ', crossed itself';
+          }
+          solid = lcs.extrude(lq.far - lq.near, 0, 0, realmArray([lq.far / lq.near, lq.far / lq.near]));   // a cone from the eye: the loop grows with depth
+          moved = solid.transform(realmArray(matMul(toRaw, matMul(matT(shape.eye[0], shape.eye[1], shape.eye[2]),
+                                                                  matMul(lq.basis, matT(0, 0, lq.near))))));
+          return { m: moved, what: shape.label || 'the lasso', note: lq.note,
+                   areaMm2: lcs.area() };
+        } finally { lcs.delete(); }
       }
       // outline
       var fp = footprint(wasm, shape);
@@ -683,6 +977,205 @@
     try { return { soup: kern.manifoldToSoup(c.m), areaMm2: c.areaMm2 }; }
     catch (err) { return { reason: (err && err.message) || String(err) }; }
     finally { c.m.delete(); }
+  }
+
+  /* =====================================================================
+     Loop: the bump inside a loop of edges, copied with its underside following the base
+     ===================================================================== */
+
+  var CREASE_PATCH_DEG = 30;        // a patch is smooth: its triangles bend less than this across a shared edge
+  var graphMemo = typeof WeakMap === 'function' ? new WeakMap() : null;
+
+  /* The piece as smooth PATCHES - triangles grown over shared edges while the surface bends under CREASE_PATCH_DEG - and
+     which patch meets which across a crease. soup is the piece's own rawTris (the loop is in its indices).
+     -> { nt, tv, tw (welded vertex ids per corner), area, patchOf, patches: [{ tris, area }], total, twin(t, k) } */
+  function patchGraph(soup) {
+    var hit = graphMemo && graphMemo.get(soup);
+    if (hit) return hit;
+    var Q = DEFAULTS.weldQ, nt = (soup.length / 9) | 0, vmap = new Map(), tv = new Int32Array(nt * 3), area = new Float64Array(nt), nrm = new Float64Array(nt * 3), edges = new Map();
+    function vid(x, y, z) {
+      var k = Math.round(x * Q) + '_' + Math.round(y * Q) + '_' + Math.round(z * Q), i = vmap.get(k);
+      if (i === undefined) { i = vmap.size; vmap.set(k, i); }
+      return i;
+    }
+    for (var t = 0; t < nt; t++) {
+      var o = t * 9;
+      tv[t * 3] = vid(soup[o], soup[o + 1], soup[o + 2]); tv[t * 3 + 1] = vid(soup[o + 3], soup[o + 4], soup[o + 5]); tv[t * 3 + 2] = vid(soup[o + 6], soup[o + 7], soup[o + 8]);
+      var ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2];
+      var vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
+      var cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx, L = Math.sqrt(cx * cx + cy * cy + cz * cz);
+      area[t] = L / 2;
+      if (L > 1e-12) { nrm[t * 3] = cx / L; nrm[t * 3 + 1] = cy / L; nrm[t * 3 + 2] = cz / L; }
+      if (!(L > 1e-12)) continue;
+      for (var e = 0; e < 3; e++) {
+        var a = tv[t * 3 + e], b = tv[t * 3 + (e + 1) % 3], key = a < b ? a + '_' + b : b + '_' + a, l = edges.get(key);
+        if (!l) { l = []; edges.set(key, l); }
+        l.push(t);
+      }
+    }
+    function twin(t, k) {
+      var a = tv[t * 3 + k], b = tv[t * 3 + (k + 1) % 3], l = edges.get(a < b ? a + '_' + b : b + '_' + a);
+      if (!l) return -1;
+      for (var i = 0; i < l.length; i++) if (l[i] !== t) return l[i];
+      return -1;
+    }
+    var cosS = Math.cos(CREASE_PATCH_DEG * Math.PI / 180), patchOf = new Int32Array(nt).fill(-1), patches = [], total = 0;
+    for (var s0 = 0; s0 < nt; s0++) {
+      if (patchOf[s0] >= 0 || !(area[s0] > 0)) continue;
+      var id = patches.length, stack = [s0], tris = [], pa = 0;
+      patchOf[s0] = id;
+      while (stack.length) {
+        var cur = stack.pop();
+        tris.push(cur); pa += area[cur];
+        for (var k = 0; k < 3; k++) {
+          var nb = twin(cur, k);
+          if (nb < 0 || patchOf[nb] >= 0 || !(area[nb] > 0)) continue;
+          if (nrm[nb * 3] * nrm[cur * 3] + nrm[nb * 3 + 1] * nrm[cur * 3 + 1] + nrm[nb * 3 + 2] * nrm[cur * 3 + 2] < cosS) continue;
+          patchOf[nb] = id; stack.push(nb);
+        }
+      }
+      patches.push({ tris: tris, area: pa });
+      total += pa;
+    }
+    var g = { nt: nt, tv: tv, area: area, patchOf: patchOf, patches: patches, total: total, twin: twin };
+    if (graphMemo) graphMemo.set(soup, g);
+    return g;
+  }
+
+  /* The loops of edges that bound the triangles `inSet` (a Uint8Array flag per triangle): directed edges { t, k } of a
+     triangle inside, whose other side is not; chained into closed loops. -> [{ edges: [{ t, k }, ...], length }] */
+  function boundaryLoops(G, soup, inSet) {
+    var out = [], from = new Map(), tv = G.tv;
+    G.__tmp = null;
+    var all = [];
+    for (var t = 0; t < G.nt; t++) {
+      if (!inSet[t]) continue;
+      for (var k = 0; k < 3; k++) {
+        var u = G.twin(t, k);
+        if (u >= 0 && inSet[u]) continue;
+        var a = tv[t * 3 + k], idx = all.length;
+        all.push({ t: t, k: k, a: a, b: tv[t * 3 + (k + 1) % 3] });
+        var l = from.get(a);
+        if (!l) { l = []; from.set(a, l); }
+        l.push(idx);
+      }
+    }
+    var used = new Uint8Array(all.length);
+    for (var s0 = 0; s0 < all.length; s0++) {
+      if (used[s0]) continue;
+      var chain = [], cur = s0, closed = false;
+      for (;;) {
+        used[cur] = 1; chain.push(cur);
+        if (all[cur].b === all[s0].a) { closed = true; break; }
+        var outs = from.get(all[cur].b) || [], nx = -1;
+        for (var q = 0; q < outs.length; q++) if (!used[outs[q]]) { nx = outs[q]; break; }
+        if (nx < 0) break;
+        cur = nx;
+      }
+      if (!closed) continue;
+      var len = 0;
+      var edges = chain.map(function (ci) {
+        var e = all[ci], o = e.t * 9 + e.k * 3, o2 = e.t * 9 + ((e.k + 1) % 3) * 3;
+        len += Math.hypot(soup[o] - soup[o2], soup[o + 1] - soup[o2 + 1], soup[o + 2] - soup[o2 + 2]);
+        return { t: e.t, k: e.k };
+      });
+      out.push({ edges: edges, length: len });
+    }
+    return out;
+  }
+
+  /* The loops round the bump a triangle is on. The patch under the triangle is grown outward, patch by patch, while what
+     it meets is not the surface the bump stands on (that is a patch at least three times the bump's area and 5% of the
+     piece's surface); each stage's boundary is a candidate loop - a pin's end rim, then its foot - and the outermost is
+     the default: the loop where the bump meets what it stands on. `edge` ({ t, k }, a crease edge clicked) starts from the
+     smaller of the two patches that edge divides and prefers the candidate that edge belongs to.
+     -> { ok, candidates: [{ tris, area, perimeterMm, edges, patches }], pick } or { ok: false, reason } */
+  function bumpLoops(soup, tri, opts) {
+    opts = opts || {};
+    var nt = (soup.length / 9) | 0;
+    if (!(tri >= 0 && tri < nt) || tri !== Math.floor(tri)) return { ok: false, reason: 'triangle ' + tri + ' is not a triangle of that piece (it has ' + nt + ')' };
+    var G = patchGraph(soup), p0 = G.patchOf[tri];
+    if (p0 < 0) return { ok: false, reason: 'that triangle has no area' };
+    if (opts.edge) {
+      var u0 = G.twin(opts.edge.t, opts.edge.k);
+      if (u0 >= 0 && G.patchOf[u0] >= 0 && G.patchOf[u0] !== G.patchOf[opts.edge.t]) {
+        var pa = G.patchOf[opts.edge.t], pb = G.patchOf[u0];
+        p0 = G.patches[pa].area <= G.patches[pb].area ? pa : pb;
+      }
+    }
+    var inR = new Uint8Array(nt), inP = new Set([p0]), rArea = G.patches[p0].area, cands = [];
+    G.patches[p0].tris.forEach(function (t) { inR[t] = 1; });
+    function record() {
+      var loops = boundaryLoops(G, soup, inR);
+      if (!loops.length) return false;
+      loops.sort(function (a, b) { return b.length - a.length; });
+      var tris = [];
+      for (var t = 0; t < nt; t++) if (inR[t]) tris.push(t);
+      var edges = [];
+      loops.forEach(function (L) { L.edges.forEach(function (e) { edges.push(e); }); });
+      cands.push({ tris: tris, area: rArea, perimeterMm: loops[0].length, edges: edges, loops: loops.length, patches: inP.size });
+      return true;
+    }
+    for (var step = 0; step < 6; step++) {
+      if (!record()) break;
+      if (rArea > 0.5 * G.total) { cands.pop(); break; }
+      var nbrs = new Set();
+      inP.forEach(function (pid) {
+        G.patches[pid].tris.forEach(function (t) {
+          for (var k = 0; k < 3; k++) {
+            var u = G.twin(t, k);
+            if (u >= 0 && !inR[u] && G.patchOf[u] >= 0) nbrs.add(G.patchOf[u]);
+          }
+        });
+      });
+      if (!nbrs.size) break;
+      var absorb = [];
+      nbrs.forEach(function (q) {
+        var qa = G.patches[q].area;
+        var base = qa >= 3 * rArea && qa >= 0.05 * G.total;
+        if (!base) absorb.push(q);
+      });
+      if (!absorb.length) break;                                   // everything it meets is the surface it stands on: this is the foot
+      absorb.forEach(function (q) { inP.add(q); rArea += G.patches[q].area; G.patches[q].tris.forEach(function (t) { inR[t] = 1; }); });
+    }
+    if (!cands.length) return { ok: false, reason: 'that is not a bump: nothing on that piece stands out of it along a loop of edges' };
+    var pick = cands.length - 1;
+    if (opts.edge) {
+      for (var ci = cands.length - 1; ci >= 0; ci--) {
+        if (cands[ci].edges.some(function (e) { return e.t === opts.edge.t && e.k === opts.edge.k; })) { pick = ci; break; }
+      }
+    }
+    return { ok: true, candidates: cands, pick: pick, patchArea: G.patches[p0].area, total: G.total };
+  }
+
+  /* The copy of what is inside a loop: the triangles as they are, and an underside that continues the surface round the
+     loop (Lift's fill). Needs nso_lift.js, nso_lift_auto.js, nso_lift_curved.js and the cut engine (rawFlatCapLoops) on
+     the page's thread - not the worker's. -> { ok, tris, faces, volumeMm3, bbox, what, ... } or { ok: false, reason } */
+  async function loopCore(piece, shape, build) {
+    var soup = soupOf(piece), res = { ok: false, reason: '', tris: soup };
+    var shapeWhy = shapeProblem(shape);
+    if (shapeWhy) { res.reason = shapeWhy; return res; }
+    var LC = root && root.NSO_LiftCurved && root.NSO_LiftCurved.surface, cap = root && root.rawFlatCapLoops;
+    if (!LC || !cap) { res.reason = 'the loop copy needs Lift\'s curved engine (nso_lift_curved.js) and the cut engine'; return res; }
+    var A;
+    /* relaxMm tiny: the fill is the base fitted round the loop and nothing else. Its other term pulls the fill toward the real
+       neighbours' far corners, which on a cone's fan are 25 mm away (it gave 3258 mm3 for a 50 mm3 pin); the fit is the base
+       to within a few microns, which is what "follows the surface" means for a copy that is then Subtracted from its piece. */
+    try { A = LC.island(soup, Array.prototype.slice.call(shape.tris), { relaxMm: 0.02 }); }
+    catch (err) { res.reason = 'the loop could not be read (' + ((err && err.message) || err) + ')'; return res; }
+    if (!A.ok) { res.reason = 'inside that loop ' + A.reason; return res; }
+    var r;
+    try { r = LC.lift(soup, A, [0], { rawFlatCapLoops: cap }); } catch (err2) { res.reason = 'the loop could not be filled (' + ((err2 && err2.message) || err2) + ')'; return res; }
+    if (!r.ok) { res.reason = 'inside that loop ' + (r.reason || 'could not be lifted'); return res; }
+    var tris = r.pieces[0].soup, cen = census(tris);
+    if (cen.open || cen.repeated || cen.degenerate || cen.welded.open || cen.welded.repeated || cen.welded.collapsed) {
+      res.reason = 'the copy inside that loop did not come out closed (open ' + cen.open + ', repeated ' + cen.repeated + ', degenerate ' + cen.degenerate + ')';
+      return res;
+    }
+    var v = volume(tris);
+    if (!(v > DEFAULTS.tinyMm3)) { res.reason = 'inside that loop holds nothing of this piece'; return res; }
+    return { ok: true, tris: build ? tris : null, faces: tris.length / 9, volumeMm3: v, bbox: bounds(tris), what: 'inside the loop', census: cen,
+             note: 'the underside follows the surface round the loop (' + r.pieces[0].capTris + ' triangles)', fill: r.pieces[0].fill };
   }
 
   /* =====================================================================
@@ -738,7 +1231,7 @@
       if (!c.m) { res.reason = c.reason; return res; }
       cutter = c.m;
       res.what = c.what; res.segments = c.segments || null; res.areaMm2 = c.areaMm2 || null;
-      res.regionP = c.regionP || null; res.note = c.note || '';
+      res.regionP = c.regionP || null; res.note = c.note || ''; res.hold = c.hold || '';
 
       var mp = manifoldOfPiece(wasm, soup, 'this piece');
       if (!mp.man) { res.reason = mp.reason; return res; }
@@ -845,6 +1338,7 @@
   }
 
   async function crop(piece, shape, build) {
+    if (shape && shape.kind === 'loop') return loopCore(piece, shape, build);        // the page's thread: Lift's engines are not in the worker
     var boolRun = root && root.NSO_boolRun;
     if (typeof boolRun !== 'function') return cropCore(piece, shape, build);
     var soup = soupOf(piece);
@@ -867,7 +1361,7 @@
   }
 
   function holdsNothing(res) {
-    return res.keptMm3 > res.tinyMm3 ? '' : res.what + ' holds nothing of this piece - move it over the piece';
+    return res.keptMm3 > res.tinyMm3 ? '' : res.what + ' holds nothing of this piece - ' + (res.hold || 'move it over the piece');
   }
 
   function say(res, verb) {
@@ -1017,7 +1511,7 @@
     var r = resolve(m, shape);
     if (r.reason) return { ok: false, reason: r.reason };
     // a piece whose shells a CROP already merged is planned on that solid, as its copy will be
-    var mergedRaw = root && root.nsoOverlap ? root.nsoOverlap.cachedMerge(r.piece.rawTris) : null;
+    var mergedRaw = root && root.nsoOverlap && r.shape.kind !== 'loop' ? root.nsoOverlap.cachedMerge(r.piece.rawTris) : null;
     if (!mergedRaw) return plan(r.piece, r.shape);
     var n = root.nsoOverlap.shells(r.piece.rawTris, true);
     r.piece.rawTris = mergedRaw;
@@ -1071,7 +1565,7 @@
       /* Work as is (nso-helpers.js, nsoOverlap): a piece - or a Piece cutter - whose shells overlap is cut from
          those shells merged into one solid, for this copy only. The piece on the plate is not touched. */
       var merged = [];
-      if (root && root.nsoOverlap) {
+      if (root && root.nsoOverlap && rs.shape.kind !== 'loop') {      // a loop reads its piece's triangles by index: left as drawn
         var sol = await root.nsoOverlap.solid(m, null, 'crop-readout');
         if (!sol.ok) return refuse(sol.reason, sol);
         if (sol.merged) { rs.piece.rawTris = sol.soup; merged.push(sol.note); }
@@ -1130,6 +1624,8 @@
     planOn: planOn,
     footprintPolys: footprintPolys,
     rimLoop: rimLoop,
+    bumpLoops: bumpLoops,
+    wallFace: wallFace,
     census: census,
     weldSoup: weldSoup,
     volume: volume,

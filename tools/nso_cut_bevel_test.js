@@ -267,7 +267,7 @@ withApp(async (page, logs) => {
     check(tag + 'the blade came up ' + r.before.toFixed(2) + '° off plumb', r.before > 15);
     check(tag + 'PLUMB stands it vertical (' + r.after.toFixed(3) + '° off) with bevel ' + r.bevel + '°', r.after <= 0.5 && r.bevel !== 0);
     check(tag + 'the mitre is untouched (' + r.mitre + ')', r.mitre === (which === 'flat' ? 0 : 20));
-    check(tag + 'the readout shows the bevel it applied', r.readout.indexOf(', bevel ' + r.bevel + '° (plumb)') >= 0 && r.field === String(r.bevel), r.readout);
+    check(tag + 'the readout shows the bevel it applied', r.readout.indexOf(', bevel ' + r.bevel + '° (plumb)') >= 0 && r.field === r.bevel + '°', r.readout);
     check(tag + 'the button reads Plumb, the status names the bevel', r.label === 'Plumb' && r.status.indexOf('bevel ' + r.bevel + '°') >= 0, r.status);
     check(tag + 'the cut faces it makes are vertical (' + r.faces.map(f => elev(f.n).toFixed(2)).join(', ') + '° off horizontal)',
       r.faces.length === 2 && r.faces.every(f => f.area > 10 && elev(f.n) < 0.5));
@@ -278,7 +278,7 @@ withApp(async (page, logs) => {
   await page.evaluate(id => { __pick(id); state.cutT = 0.5; setCutMiter(0); setCutBevel(0); }, tubeId);
   await page.waitForTimeout(30);
   const dialBox = await page.evaluate(() => { const r = document.getElementById('cut-bevel-dial').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
-  const cx = dialBox.x + dialBox.w / 2, cy = dialBox.y + dialBox.h / 2, rr = dialBox.w * 0.4;
+  const cx = dialBox.x + dialBox.w / 2, cy = dialBox.y + dialBox.h * 50 / 58, rr = dialBox.w * 0.4;   // the pivot is at (50, 50) of the half wheel's 100 x 58 box
   const onRail = deg => ({ x: cx + rr * Math.sin(deg * Math.PI / 180), y: cy - rr * Math.cos(deg * Math.PI / 180) });
   const dragTo = async (from, to, steps) => {
     let p = onRail(from);

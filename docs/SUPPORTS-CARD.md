@@ -1,5 +1,10 @@
 # Supports card: a verb with a state
 
+> **2026-11-14: this card is the Print card now** (docs/PRINT-CARD.md). Its button is **Slice**, supports are a tick, the types are Straight
+> strut / Tree / Gecko Hands, and the slice, printer and adhesion rows live on it. What follows is the supports side of it as it was built -
+> the detector, the modes, the tools, the plate build - which the Print card still runs; where a section says Generate, None or Remove, read
+> Slice and the Supports tick.
+
 `app-supports-card.js`, the column's **Supports** drop-down (make/edit group,
 after Seat). One card on the main page. G-scope keeps its support row for
 layer-view work (`docs/GCODE-SUPPORTS.md`); both call the same planner.
@@ -26,6 +31,14 @@ view) and a click is read against the outline along the ray (the ray meets the
 plane of one of the area's spots, inside the loops), so an underside area can be
 clicked from above. A spot the footprint does not hold (a crease, a tip, a side
 spot, one placed by hand) keeps its cell.
+
+
+> **Generate is the slice (newest).** Generate builds every piece's supports, then slices the plate ONCE with the Slice section's
+> printer and settings (`sliceStep`: the plate's pieces less the supports being replaced, plus the new ones under keys of their own);
+> each support is drawn from that slice (nso_slicer.js `columnStacks`), the slice is adopted for the plate as placed
+> (`NSO_Print.card.adopt`) and **Preview**, under Generate, opens it in G-scope as it is. Cancel beside Generate stops the build or
+> its slice. Style **None** builds nothing and just slices (with the raft). The Slice card is this card's last section; **Raft** and
+> **Raft contact** are among its settings. The separate drawing slice per piece (`stackStep`) is gone.
 
 ## 0. Detect first
 
@@ -458,7 +471,7 @@ Two additions that work in every mode, Auto included:
   brush covered that no detected footprint holds become a footprint of their own for the raft, laid to the brush's edge. A detected footprint it went over keeps
   its plate to its edge (`marginMm` 0.02 for 0.1). The painted dots draw over the piece (translucent, the brush's size). Clear paint takes all off, one Undo.
   `card.paintStroke([{ p, n }], r)`, `card.paint(on)`, `card.clearPaint()`, `card.paintCount()` are the page's own calls (tests, a script).
-- **Raft interface** (a checkbox, on): the interface and the transition laid from each footprint and its height, layer by layer - the region plate. Off, the sheet is
+- **Platform under flat faces** (a checkbox, on; it was labelled "Raft interface" - it is no raft: the raft is the Slice card's own, docs/SLICER.md "The raft"): the interface and the transition laid from each footprint and its height, layer by layer - the region plate. Off, the sheet is
   built from the tips alone, as it was before the region plate.
 
 ### What survives, what forgets
@@ -540,7 +553,7 @@ Two controls under Style / Size / May rest on the part, both settings (not Undo 
 | control | on | off |
 | --- | --- | --- |
 | **One trunk per cluster** (no longer shown: Tree in Auto is always the one-trunk build; the switch stays in the page, hidden and checked, for the drives that ask for the lattice tree, and the card's own retry when a one-trunk build's feet ring the piece) | **Auto, Tree** (also with "may rest on the part": the one-trunk build runs as it does without, and the spots it could not reach are planned again alone with the lattice that rests on the part): the planner is sent `opts.oneTrunk` (no feed): tips every ~5 mm, one trunk to a cluster, a canopy, the sheet between (`docs/SUPPORT-ONE-TRUNK.md`). Areas one trunk can feed are planned in one call (`NSO_SupportGridpack.oneTrunkGroups`); each keeps its outline, status and answer, the group's support is the first area's. A spot a thinned tip holds is said **held**, with that tip's landing. | the lattice planner of `SUPPORT-GRIDPACK.md` section 2, a tip on every spot of the 3 mm grid, as it was |
-| **Interface** Dense (Bambu) / Open | **Dense** (default), **in the one-trunk build**: the sheet's lines 0.47 mm apart and 2 interface layers over the 2 of transition (`partsOptsOf`: `sheetPitchMm`, `interfaceLayers`) - Bambu's `support_interface_spacing` 0.1 | **Open**: 0.84 mm, 2 + 2, the first prints'. Every other build (box off, Assisted, Custom, Straight strut, Gecko-hand) is Open whatever the select says |
+| **Top interface layers** 0 / 1 / 2 / 3 (replaced Dense (Bambu) / Open: the owner, "simple numbered layers makes more sense") | **3** (default, Bambu's): the column rule types that many layers under the part interface, over 2 of transition (`partsOptsOf` / `ifaceLayersOf`: `interfaceLayers`; the slicer's `supportInterfaceLayers`, any count the supports carry). The one-trunk build keeps the dense sheet's pitch and own 0.275 grid. 0: transition only | - |
 | **Brim round the foot** (default on, every mode) | After a piece's supports are built the card asks `NSO_Slicer.brimFor` for the piece's brim - Bambu's 5 mm ring of 10 loops round the foot of a part tall for it, 0.1 mm off the wall, off every pad and every other piece - and places it as one more plate piece, "<piece> - brim" (`nsoSupport.brim`: not counted as a support, taken off with the supports on one Undo, exported with ten wall loops, sliced as Brim). A piece on a wide foot gets none. Plate-wide: the same, piece by piece, off the supports already built. | no brim piece; the slicer's own brimType (G-scope's brim select, the project's `brim_type`) still brims a tall part at slice time |
 
 Straight strut and Gecko-hand are one post (or hand) a spot by definition and are never one trunk. Assisted and Custom
@@ -612,3 +625,35 @@ six-part build for development. No browser step.
 As G-scope's row: painted faces are the `skipList`, shifted into the world
 frame when the piece is only moved, refused by name when it is turned and
 painted. The piece itself is never written; supports are new pieces.
+
+## 10. Tree planner, Advanced, and Saved settings (supports-advanced, 2026-11-14)
+
+**Advanced** is Bambu Studio's Advanced support block, row for row: docs/SUPPORT-ADVANCED.md. The section below it, **Tree planner**, is the flow tree's own.
+
+**Tree planner** (`ADV_IDS`, `advKnobsOf`). The flow tree's own numbers (docs/SUPPORT-FLOW.md), each a field with its default
+in its tooltip. Nothing rebuilds as you type; Generate builds with them. A field left at its default sends nothing, so a card left alone builds exactly as
+before; the section's note says how many differ, and **Defaults** puts them back.
+
+| field | default | what it does |
+|---|---|---|
+| Tip spacing | 0.44 x | how far a spot may lie from its tip, as a share of the Branch distance |
+| Tip column | 2.8 mm | how far a tip stands straight under its spot before it may lean and join |
+| Gather | 0.25 | how much a branch heads for the middle of all it can reach, not its nearest neighbour |
+| Join reach | 0.95 x | two branches go for one another when they can meet in this share of the height left |
+| Straight foot | 2.4 mm | nothing leans or joins this near the plate |
+| Flare height / slope | 2 mm / 0.45 | the trunk's widening to its foot |
+
+The pad's reach, the tree's clearance from the part and the gap under a foot on the part are Bambu's rows now (Initial layer expansion, Support/object xy
+distance, Bottom Z distance): one lever each, read by the tree and the slicer.
+
+**Saved settings** (the row over Style: a list, Save, Delete; Export saved / Import in Advanced; `PRESET_FIELDS`). Save keeps every lever of the card
+under a name - the angle, style, size, Tree settings, the four boxes, Interface angle, Raft, Raft contact, every Advanced row and the Tree planner - in this
+browser (`localStorage`, `nso.supports.settings.v1`). Picking a name puts every control back and tells it so, as a hand would; nothing rebuilds until
+Generate. Move a control afterwards and the list reads *not saved* again. The name last saved or picked comes back with the page. Export saved writes
+them all to one file (`nso-supports-settings.json`); Import adds a file's to this browser's and reads only the card's own controls from it.
+
+`NSO_SUPPORTS_CARD.settings` is the same for a test: `now()`, `apply(vals)`, `save(name)`, `pick(name)`, `remove(name)`, `names()`, `exportText()`,
+`importText(text)`, `advanced()`. Gates: `npm run support:settings` (Node), `npm run support:settings-drive` (the real page).
+
+**May rest on the part** now reaches the tree itself (docs/SUPPORT-FLOW.md 4b): a branch may end on a top face of the part. The lattice is no longer
+asked for what the tree could not reach.

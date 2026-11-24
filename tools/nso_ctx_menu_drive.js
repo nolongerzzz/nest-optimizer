@@ -131,14 +131,26 @@ withApp(async (page, logs) => {
   await page.click('#ctx-clone');
   const m1 = await N(() => [state.models.length, state.placed.length, state.undoStack.length]);
   check('one copy: +1 model, +1 piece, +1 Undo', m1[0] === m0[0] + 1 && m1[1] === m0[1] + 1 && m1[2] === m0[2] + 1, m0.join() + ' -> ' + m1.join());
-  check('...landed 4 mm to the right of the piece it copied, in line with it (not the plate corner)', await N(() => {
-    const c = state.placed[state.selectedIndex], o = state.placed[0];
-    return Math.abs((c.x - c.width / 2) - (o.x + o.width / 2) - 4) < 1e-6 && Math.abs(c.z - o.z) < 1e-6;
-  }));
+  /* An 80 mm piece in the middle of the 180 mm A1 Mini has no room beside
+     it, so the copy goes in the next row, 4 mm clear and lined up with it,
+     and never past the plate edge. */
+  check('...landed 4 mm clear of the piece it copied, lined up with it, wholly on the plate', await N(() => {
+    const c = state.placed[state.selectedIndex], o = state.placed[0], pl = getCurrentPlate();
+    const clear = Math.abs(c.x - o.x) < 1e-6 && Math.abs(Math.abs(c.z - o.z) - (o.depth + c.depth) / 2 - 4) < 1e-6;
+    const on = Math.abs(c.x) + c.width / 2 <= pl.w / 2 && Math.abs(c.z) + c.depth / 2 <= pl.d / 2;
+    return clear && on;
+  }), await N(() => JSON.stringify(state.placed.map(p => [p.name, p.x, p.z, p.width, p.depth]))));
   check('...named -copy1, and selected', await N(() => /-copy1$/.test(state.placed[state.selectedIndex] && state.placed[state.selectedIndex].name || '')));
   check('...the box still says 3 (the Clone button is unchanged)', (await N(() => document.getElementById('clone-count').value)) === '3');
   await N(() => { document.getElementById('btn-clone').click(); });
-  check('the Clone button still reads the box: three more', (await N(() => state.models.length)) === m1[0] + 3);
+  /* The box asks for three; the plate has room for one more, so one is
+     made, two are refused out loud, and nothing hangs off the plate. */
+  check('the Clone button still reads the box: three asked, the one that fits made, the rest refused', await N(() => {
+    const pl = getCurrentPlate();
+    const off = state.placed.some(p => Math.abs(p.x) + p.width / 2 > pl.w / 2 + 0.01 || Math.abs(p.z) + p.depth / 2 > pl.d / 2 + 0.01);
+    return !off && /no room on the plate for 2 more/.test(document.getElementById('status').textContent);
+  }));
+  check('...exactly one more model', (await N(() => state.models.length)) === m1[0] + 1);
   await N(() => { document.getElementById('clone-count').value = '1'; undoLast(); undoLast(); });
 
   console.log('\n=== 4. Mirror across X ===');
@@ -235,7 +247,8 @@ withApp(async (page, logs) => {
   await loadSTL(page, fx('box-20mm.stl'));
   await loadSTL(page, fx('box_open.stl'));
   await N(() => { state.undoStack = []; updateUndoBtn(); });
-  const lit = () => N(() => state.placed.map(p => p.mesh.material.emissive.getHex() === 0xdc2626));
+  // lit = the one selected look (app-core nsoPaintSelLook): the rose body and the white outline
+  const lit = () => N(() => state.placed.map(p => p.mesh.material.color.getHex() === 0xf43f5e && !!(p.outline && p.outline.parent === p.mesh)));
   const bare9 = await N(() => window.__c.barePlate());
   await rightClick(bare9);
   check('Select all is live on bare plate', !(await N(() => window.__c.off()))['ctx-select-all']);

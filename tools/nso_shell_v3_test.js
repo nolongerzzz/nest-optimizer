@@ -4,6 +4,9 @@
    UI only - a regrouping. Every control keeps its id, handler, tooltip and
    behaviour; only where it opens from changed.
 
+   (The card regroup of 2026-11-16 changed the order below: the ROW and GROUPS
+   lists further down are the current ticket.)
+
    The top row, left to right: Import, Measure, Move, Rotate, Tip, Align,
    Gen+, Lock position, Lock plate, then at the right Undo, Remove, Export,
    and the Plate & pieces panel glued to the top-right corner. Under Remove
@@ -28,7 +31,7 @@
      4. The panel: always visible, never a drop-down, untouched by every
         drop-down and by leaving the tool; Clone and Snap work from it.
      5. Each plain button does what it did: the locks, Undo, Remove, Clear
-        plate, Optimize, X-ray, Eye, ◎, G-scope, Lift (in Subtract) opening
+        plate, Optimize, X-ray, Eye, ◎, G-scope, Lift (in Crop) opening
         G-scope at its row, Measure (in its row drop-down), Check piece (in
         Check & repair), and the Findings card docks under the panel.
      6. Every control the shell had before v3 (listed below by id, from
@@ -53,10 +56,15 @@ const check = (name, cond, detail) => {
 };
 
 /* ---------------------------------------------------------------- the ticket */
+/* The card regroup (2026-11-16): Print (the supports card) ends the row's left group;
+   Generate (was Gen+) heads the column; Crop shares the Cut / Crop slab (no slab of its
+   own - the switch at the top of the card opens it); Punch is its own card; Assemble
+   follows Sculpt; Fill & fix (Fill / Densify, Foam, GUN, Patch, Weave) sits between
+   G-scope and Check & repair. */
 const ROW = [
   ['menu-import', 'IMPORT'], ['menu-measure', 'MEASURE'], ['menu-move', 'MOVE'], ['menu-rotate', 'ROTATE'],
-  ['menu-tip', 'TIP'], ['menu-align', 'ALIGN'], ['menu-gen', 'GEN+'],
-  ['btn-lock-pos', 'LOCK POSITION'], ['btn-plate-lock', 'LOCK PLATE']
+  ['menu-tip', 'TIP'],
+  ['btn-lock-pos', 'LOCK POSITION'], ['btn-plate-lock', 'LOCK PLATE'], ['menu-supports', 'PRINT']
 ];
 const RIGHT = [['btn-undo', 'UNDO'], ['btn-delete-placed', 'REMOVE'], ['menu-export', 'EXPORT']];
 // Second row, right-aligned under the buttons: [what, label, under what].
@@ -65,19 +73,19 @@ const PANEL = 'plate-panel';
 const PANEL_HOLDS = ['plate-select', 'custom-w', 'custom-d', 'custom-h', 'plate-grid-show', 'chk-plate-grid-snap',
                      'model-list', 'clone-count', 'btn-clone'];
 const GROUPS = [
-  [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'],
-   ['menu-connect', 'CONNECT'], ['menu-joins', 'JOIN'], ['menu-seat', 'SEAT'], ['menu-supports', 'SUPPORTS'], ['menu-add', 'ADD'],
-   ['menu-bit', 'SUBTRACT']],
-  [['menu-shape', 'SHAPE'], ['menu-text', 'TEXT'], ['menu-weave', 'WEAVE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT']],
-  [['menu-slice', 'SLICE'], ['btn-microscope', 'G-SCOPE']],
-  [['menu-repair', 'CHECK & REPAIR']],
+  [['menu-gen', 'GENERATE'], ['menu-scale', 'SCALE'], ['menu-cut', 'CUT / CROP'], ['menu-punch', 'PUNCH'],
+   ['menu-connect', 'DRAW'], ['menu-add', 'ADD'], ['menu-bit', 'SUBTRACT']],
+  [['menu-shape', 'SHAPE'], ['menu-text', 'TEXT'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT'],
+   ['menu-assemble', 'ASSEMBLE']],
+  [['btn-microscope', 'G-SCOPE']],
+  [['menu-fillfix', 'FILL & FIX'], ['menu-repair', 'CHECK & REPAIR']],
   [['btn-xray', 'X-RAY'], ['btn-watch', 'EYE'], ['btn-frame-view', '◎']]
 ];
 /* The view group's faces are icons; X and the eye are named by their
    aria-labels, ◎ by itself. */
 const ICON = { 'btn-xray': 'X', 'btn-watch': '\u{1F441}', 'btn-frame-view': '◎' };
 // Gone from the shell as buttons. Their contents moved (RETIRED below);
-// Lift is not gone - it is Subtract's Lift verb (btn-lift), not a slab.
+// Lift is not gone - it is the Crop card's Lift button (btn-lift), not a slab.
 const GONE = ['menu-bend', 'menu-plates', 'menu-pack', 'btn-shell-supports', 'btn-shell-slice'];
 const NOT_SLABS = ['btn-lift'];
 const ALL = ROW.concat(RIGHT, UNDER.map(([id, l]) => [id, l]), ...GROUPS);
@@ -88,70 +96,77 @@ const DROPDOWNS = ALL.map(([id]) => id).filter(id => id.startsWith('menu-'));
    control listed here has left wherever it was. */
 const HOLDS = {
   'menu-import': ['btn-load-stl', 'btn-library', 'library-list'],
-  'menu-measure': ['btn-measure', 'sel-measure-mode'],
+  'menu-measure': ['btn-measure', 'sel-measure-mode', 'chk-measure-inches', 'chk-ruler', 'chk-ruler-guides', 'btn-ruler-zero'],
   'menu-move': ['chk-move-vertical', 'btn-to-plate', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-nudge-left', 'btn-nudge-right'],
   'menu-rotate': ['btn-rot-left', 'btn-rot-right', 'chk-rot-ring-turn', 'chk-rot-ring-fb', 'chk-rot-ring-ss'],
   'menu-tip': ['btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn'],
-  'menu-align': ['btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock', 'btn-center-lock-pick', 'center-lock-ref'],
   'menu-gen': ['.vp-wheel-menu', '.vp-stock-menu', 'stock-shelf', 'btn-stock-box', 'btn-stock-cone', 'menu-relief', 'btn-relief-pick',
                'menu-photo', 'btn-photoset-pick', 'btn-photoset-report', 'btn-photoset-clear'],
   'menu-export': ['export-format', 'btn-export-model', 'btn-library-save', 'btn-export-stl', 'btn-delete-model'],
   'menu-scale': ['scale-card', 'scale-factor', 'scale-target', 'btn-scale-fit'],
-  'menu-cut': ['edit-card', 'cut-miter-dial', 'cut-slider', 'cut-mm', 'btn-cut'],
-  // CROP: the Shape row, one readout, CROP, Cancel (Detach moved to Subtract, Reattach to Connect)
-  'menu-crop': ['crop-card', 'crop-shape-row', 'btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
-                'btn-crop-shape-piece', 'btn-crop-shape-outline', 'crop-readout', 'btn-crop', 'btn-crop-cancel'],
+  // CUT / CROP: the Cut | Crop switch at the top, then the cutter
+  'menu-cut': ['edit-card', 'btn-cut-mode-cut', 'btn-cut-mode-crop', 'cut-miter-dial', 'cut-slider', 'cut-mm', 'btn-cut'],
+  // CROP (opened by the switch, not a slab): the switch, the Shape row (Box, Cylinder, Sphere, Cookie-Cutter, Outline, Wall, Lasso),
+  // one readout, CROP, Cancel - then Lift, whose panel holds Strip and Detach flange (Reattach is in Connect)
+  'menu-crop': ['crop-card', 'btn-crop-mode-cut', 'btn-crop-mode-crop', 'crop-shape-row', 'btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
+                'btn-crop-shape-piece', 'btn-crop-shape-outline', 'btn-crop-shape-wall', 'btn-crop-shape-lasso', 'crop-readout', 'btn-crop', 'btn-crop-cancel',
+                'btn-lift', 'lift-panel', 'btn-detach'],
   // CONNECT: the builder, and Reattach as its last row (it moved here from the Crop card)
   'menu-connect': ['connect-panel', 'btn-reattach'],
-  // JOIN: one card - the toggle, A, A-B gap, B, B-C gap, C, JOIN, Cancel
-  'menu-joins': ['joins-card', 'join-horizontal', 'join-slot-a', 'join-gap-ab-on', 'join-gap-ab', 'join-slot-b',
-                 'join-gap-bc-on', 'join-gap-bc', 'join-slot-c', 'btn-join', 'btn-join-clear', 'join-readout'],
-  'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
+  // ASSEMBLE: Open editor, then three sections - Join by slots (the toggle, A, A-B gap, B, B-C gap, C, JOIN, Cancel), Seat, Align
+  'menu-assemble': ['asm-card', 'btn-asm-open',
+                 'asm-sec-join', 'joins-card', 'join-horizontal', 'join-slot-a', 'join-gap-ab-on', 'join-gap-ab', 'join-slot-b',
+                 'join-gap-bc-on', 'join-gap-bc', 'join-slot-c', 'btn-join', 'btn-join-clear', 'join-readout',
+                 'asm-sec-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid',
+                 'asm-sec-align', 'btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock', 'btn-center-lock-pick', 'center-lock-ref'],
   'menu-supports': ['supports-card', 'sup-angle', 'btn-sup-all', 'btn-sup-none', 'sup-style', 'sup-size',
-                    'sup-rest', 'btn-sup-remove'],
+                    'sup-rest', 'btn-sup-remove', 'btn-sup-slice', 'btn-sup-slice-cancel', 'slice-set-raft', 'slice-set-raft-gap',
+                    // ...and SLICE, its last section (app-print.js): the plate's printer, its Slice settings (folded), Slice (and Cancel while it runs), the readout, Export .gcode.3mf
+                    'sup-slice-sec', 'slice-card', 'slice-profile', 'slice-settings-toggle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-angle',
+                    'btn-slice-go', 'btn-slice-cancel', 'slice-readout', 'btn-slice-export'],
   // SHAPE: Smooth · Bend · Reducer · Roll · Neck (Tube edge's three verbs)
   'menu-shape': ['btn-smooth', 'btn-bend', 'btn-tube-edge', 'bend-panel', 'te-panel', 'sel-te-verb'],
-  // ADD: Fill/Densify · Foam · Thicken out · Thicken in (a live ghost: the slider, Set, Cancel in its panel) · Extend · Bridge
-  'menu-add': ['btn-fill', 'btn-foam', 'foam-panel', 'btn-thicken-out', 'btn-thicken-in', 'thicken-panel',
+  // ADD: Thicken out · Thicken in (a live ghost: the slider, Set, Cancel in its panel) · Extend · Bridge
+  'menu-add': ['btn-thicken-out', 'btn-thicken-in', 'thicken-panel',
                'btn-extend', 'inp-extend-mm', 'btn-bridge', 'bridge-panel'],
-  // SUBTRACT: Subtract B from A · Extract bit · Carve · Hollow · Hollow to safe min · Lift
-  'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth', 'btn-hollow', 'inp-hollow-mm',
-               'btn-hollow-safe', 'btn-lift', 'lift-panel', 'btn-detach'],
+  // PUNCH: the card is the switch - open it and Punch is armed
+  'menu-punch': ['punch-card', 'inp-punch-dia', 'sel-punch-depth', 'punch-pattern-row', 'punch-readout', 'btn-punch-go', 'btn-punch-cancel'],
+  // FILL & FIX: Fill / Densify · Foam · GUN (and their panels) · Patch · Weave (a section: the lasso arms when it opens)
+  'menu-fillfix': ['btn-fill', 'btn-foam', 'btn-foam-gun', 'btn-foam-float', 'foam-float-panel', 'foam-box-panel', 'foam-gun-panel', 'foam-panel', 'btn-patch', 'patch-readout',
+                   'menu-weave', 'weave-card', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear', 'btn-weave-smooth', 'btn-weave-follow',
+                   'inp-weave-pitch', 'weave-readout', 'btn-weave-go', 'btn-weave-attach', 'btn-weave-cancel'],
+  // SUBTRACT: Subtract B from A · Extract bit · Hollow · Hollow to safe min (Carve is in Sculpt; Lift, with Detach flange, is in Crop)
+  'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-hollow', 'inp-hollow-mm',
+               'btn-hollow-safe'],
   // TEXT: the card is the menu - the text box, Font, Bold / Italic / Font file, Size, Depth, Angle, Mirror, the readout, STAMP, Cancel
   'menu-text': ['text-card', 'inp-text', 'sel-text-font', 'btn-text-bold', 'btn-text-italic', 'btn-text-font-file', 'inp-text-size',
                 'inp-text-depth', 'inp-text-angle', 'chk-text-mirror', 'text-readout', 'btn-text-go', 'btn-text-cancel',
                 'btn-text-mode-stamp', 'btn-text-mode-remove', 'chk-text-word', 'inp-text-reach', 'btn-text-remove'],
-  // WEAVE: the card is the menu - Grow / Shrink / Clear, Smooth / Follow, Pitch, the readout, WEAVE, REATTACH, Cancel (the lasso is the pointer)
-  'menu-weave': ['weave-card', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear',
-                 'btn-weave-smooth', 'btn-weave-follow', 'inp-weave-pitch', 'weave-readout', 'btn-weave-go', 'btn-weave-attach', 'btn-weave-cancel'],
   'menu-paint': ['btn-mask-select', 'btn-mask-paint', 'btn-mask-clear', 'btn-mask-delete', 'sel-mask-delete', 'btn-extract-sel'],
   // SURFACE & EDGES: Soften (R, Full wrap, the Soften card: four style tiles, Radius, readout, Cancel) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture · Wrap (a sub-menu: one feature laid over a face)
   'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'soften-shelf', 'btn-mirror', 'inp-mirror-plane',
                    'btn-skin-face', 'btn-skin-wrap', 'btn-skin-patch', 'btn-trace-raster', 'btn-texture', 'menu-surftex', 'btn-surftex-go'],
-  // SCULPT: the Brush (Carve / Emboss / Smooth here); Carve the tool is in Subtract
-  'menu-sculpt': ['btn-brush', 'sel-brush-mode', 'inp-brush-size', 'inp-brush-intensity', 'chk-brush-hard'],
-  // SLICE (app-print.js): the plate's printer, Slice (and Cancel while it runs), the readout, Export .gcode.3mf, Preview in G-scope
-  'menu-slice': ['slice-card', 'slice-profile', 'btn-slice-go', 'btn-slice-cancel', 'slice-readout', 'btn-slice-export', 'btn-slice-preview'],
+  // SCULPT: two arms. Brush (Emboss / Smooth here; Size, Force, Hard falloff) and Carve (ball-nose / flat shave / V-groove; Depth, Radius, Roll)
+  'menu-sculpt': ['btn-brush', 'sel-brush-mode', 'inp-brush-size', 'inp-brush-intensity', 'chk-brush-hard',
+                  'btn-carve', 'carve-blade', 'carve-depth', 'carve-a', 'carve-roll', 'carve-readout'],
   // CHECK & REPAIR: Check piece · Cap open faces · Repair · Seal · Non-solid · Solidify
   'menu-repair': ['btn-check-defects', 'btn-cap-open', 'chk-seal-repair', 'btn-seal', 'chk-non-solid', 'btn-solidify']
 };
 /* SUBTRACT is a plain run of buttons, one tool after another, like the other cards: the
-   tool, its label, and the ids it holds. Detach flange is part of Lift.
+   tool, its label, and the ids it holds. (Lift moved to the Crop card, with Detach flange in its panel.)
    tools/nso_subtract_card_drive_check.js holds every control. */
 const SUBTRACT_SECTIONS = [
   [null, 'SUBTRACT B FROM A', ['btn-subtract']],
-  [null, 'EXTRACT BIT', ['btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth']],
-  [null, 'PUNCH', ['btn-punch', 'punch-card']],
+  [null, 'EXTRACT BIT', ['btn-extract-bit']],
   [null, 'HOLLOW', ['btn-hollow', 'inp-hollow-mm', 'inp-hollow-slider', 'btn-hollow-safe']],
-  [null, 'LIFT', ['btn-lift', 'lift-panel', 'btn-detach']],
   [null, 'SPLIT TO PARTS', ['btn-split-parts']]
 ];
-const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-repair'];
+const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-fillfix', 'menu-repair'];
 /* Tube edge's verbs are Reducer, Roll, Neck. (Soften's four styles are tiles now: SOFTEN_STYLES.) */
 /* Soften's styles, in the shelf's order: Round, Corners, Corners+edges, Bevel. */
 const SOFTEN_STYLES = ['fillet', 'corners', 'cornersedges', 'chamfer'];
-const OPTIONS = { 'sel-te-verb': ['reducer', 'roll', 'neck'],
-                  'sel-brush-mode': ['carve', 'emboss', 'smooth'], 'sel-measure-mode': ['span', 'edge'],
+const OPTIONS = { 'sel-te-verb': ['reducer', 'roll', 'neck', 'branch'],
+                  'sel-brush-mode': ['emboss', 'smooth'], 'sel-measure-mode': ['span', 'edge', 'apoint', 'aedge'],
                   'plate-grid-show': ['auto', 'on', 'off'] };
 
 /* Every control in the shell on claude-wip before v3 (9f68c20): each
@@ -161,9 +176,9 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'btn-nudge-fwd', 'btn-nudge-back', 'btn-nudge-left', 'btn-nudge-right', 'menu-rotate', 'btn-rot-left', 'btn-rot-right',
   'chk-rot-ring-turn', 'chk-rot-ring-fb', 'chk-rot-ring-ss', 'menu-tip', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face',
   'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'menu-align', 'btn-join-align', 'btn-join-cx', 'btn-join-cz',
-  'btn-center-lock', 'btn-center-lock-pick', 'center-lock-ref', 'menu-gen', 'inp-wheel-height', 'inp-wheel-radius',
-  'inp-wheel-wall', 'inp-wheel-nozzle', 'btn-wheel-ball', 'btn-wheel-open', 'inp-wheel-depth', 'inp-wheel-pull-z',
-  'inp-wheel-pull-dr', 'btn-wheel-pull', 'btn-wheel-trim', 'inp-wheel-trim-z', 'btn-wheel-rim', 'inp-wheel-rim-mm',
+  'btn-center-lock', 'btn-center-lock-pick', 'center-lock-ref', 'menu-gen', 'rng-wheel-scale',
+  'rng-wheel-wall', 'btn-wheel-ball', 'btn-wheel-open', 'rng-wheel-open', 'rng-wheel-pull-z',
+  'rng-wheel-pull-dr', 'rng-wheel-trim', 'rng-wheel-rim',
   'sel-stock-shape', 'inp-stock-height', 'inp-stock-radius', 'inp-stock-wall', 'inp-stock-nozzle', 'inp-stock-waste',
   'inp-stock-prop', 'chk-stock-match', 'chk-stock-oversize', 'btn-stock-make', 'btn-stock-attach', 'menu-relief', 'relief-file',
   'btn-relief-pick', 'inp-relief-width', 'inp-relief-base', 'inp-relief-relief', 'inp-relief-detail', 'sel-relief-levels',
@@ -178,8 +193,8 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'btn-scale-dim', 'btn-scale-fit', 'menu-cut', 'cut-miter-dial', 'cut-miter-deg', 'btn-cut-square', 'cut-slider',
   'btn-cut-nudge-m', 'cut-mm', 'btn-cut-nudge-p', 'btn-cut', 'btn-cut-right-side-out', 'menu-crop', 'edit-axis',
   /* The Crop card's axis buttons, box fields, Lift and Move controls are gone: one tool, a shape dragged to
-     size (docs/CROP.md says where each job went). The ids that stay are the card's own, and Detach flange and
-     Reattach, which moved to the Subtract and Connect cards under the same ids. */
+     size (docs/CROP.md says where each job went). The ids that stay are the card's own, and Detach flange, which
+     is part of the Lift button of this card, and Reattach, in the Connect card, under the same ids. */
   'btn-crop', 'btn-detach', 'btn-reattach', 'menu-joins', 'join-horizontal', 'join-slot-a', 'join-gap-ab-on', 'join-gap-ab',
   'join-slot-b', 'join-gap-bc-on', 'join-gap-bc', 'join-slot-c', 'btn-join', 'btn-join-clear',
   'btn-lift', 'menu-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'oversize-gap',
@@ -202,6 +217,8 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'btn-microscope', 'ms-input', 'btn-xray', 'btn-watch', 'btn-frame-view', 'move-vert-slider'];
 /* The ids that went: wrappers whose job is now done by what is listed. */
 const RETIRED = {
+  // The ALIGN, JOIN and SEAT buttons: one ASSEMBLE card, each a section of it (docs/ASSEMBLE-EDITOR.md)
+  'menu-align': ['asm-sec-align'], 'menu-joins': ['asm-sec-join'], 'menu-seat': ['asm-sec-seat'],
   // Soften's Round / Bevel / Corners / Corners+edges drop-down is a shelf of four tiles (app-soften-live.js);
   // state.edgeTreat holds the choice the drop-down used to
   'sel-edge-treat': ['soften-shelf'],
@@ -231,6 +248,7 @@ const RETIRED = {
    is a failure, not a pass. */
 const OWN_STATE = {
   'move-vert-slider': 'Move > Vertical on',
+  'btn-detach': 'Lift on (Detach flange is in the Lift panel, which opens with the Lift button)',
   'inp-thicken-mm': 'Thicken out / in armed (the slider is in the live panel)',
   'cooling-profile': 'Export format 3MF',
   'scale-length': 'a section the reader names', 'btn-scale-length': 'ditto', 'scale-width': 'ditto',
@@ -256,7 +274,9 @@ const OWN_STATE = {
   'btn-stock-attach': 'the Connect card open (it is in that card, under Set / Cancel)',
   // #194: the Supports card is a verb with a state - Remove all once it has
   // built, Remove once a built support is picked
-  'btn-sup-none': 'Supports card BUILT', 'btn-sup-remove': 'Supports card BUILT, a support picked'
+  'btn-sup-none': 'Supports card BUILT', 'btn-sup-remove': 'Supports card BUILT, a support picked',
+  // Crop's own slab is hidden: it shares the Cut / Crop slab, and the switch at the top of the card opens it (2026-11-16)
+  'menu-crop': 'shares the Cut / Crop slab'
 };
 /* File inputs are never on screen: their button opens them. */
 const FILE_INPUT_VIA = { 'file-input': 'btn-load-stl', 'photoset-input': 'btn-photoset-pick', 'relief-file': 'btn-relief-pick',
@@ -264,6 +284,15 @@ const FILE_INPUT_VIA = { 'file-input': 'btn-load-stl', 'photoset-input': 'btn-ph
 
 /* ------------------------------------------------------------------ helpers */
 const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9+&◎\- ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/* Crop has no slab: it is opened the way a person opens it - the Cut / Crop slab, then the
+   switch's Crop at the top of the card. */
+async function openCropByHand(page) {
+  const a = await clickFace(page, '#menu-cut > summary');
+  if (!a.ok) return a;
+  await page.waitForTimeout(80);
+  return clickFace(page, '#btn-cut-mode-crop');
+}
 
 async function shutAll(page) {
   await page.evaluate(() => {
@@ -382,7 +411,7 @@ withApp(async (page, logs) => {
     check('no drop-down mark on any face', geo._marks.length === 0, geo._marks.length + ' found');
     check('Bend, Plate, Pack, Supports and Slice settings are not buttons any more', geo._gone.length === 0,
       geo._gone.join(', ') || GONE.join(', '));
-    check('Lift is a button in a card, not a column slab', geo._notSlabs.length === 0, geo._notSlabs.join(', ') || 'in Subtract');
+    check('Lift is a button in a card, not a column slab', geo._notSlabs.length === 0, geo._notSlabs.join(', ') || 'in Crop');
     const cut = ALL.filter(([id]) => geo[id] && geo[id].cut).map(([id]) => id);
     check('no label is cut off or spills out of its slab at 1280 x 800', cut.length === 0, cut.join(', ') || 'none');
 
@@ -392,8 +421,8 @@ withApp(async (page, logs) => {
       row.every(b => b.inRow && Math.abs(b.y - top) < 0.5) && row.every((b, i) => i === 0 || b.x > row[i - 1].r - 0.5),
       row.map(b => b.id.replace(/^(menu|btn)-/, '') + '@' + Math.round(b.x)).join(' '));
     const undo = geo['btn-undo'], lockPlate = geo['btn-plate-lock'], exp = geo['menu-export'], pan = geo._panel;
-    check('Undo, Remove and Export sit at the right of the row, apart from Lock plate',
-      undo.x - lockPlate.r > 6 && pan && exp.r < pan.x,
+    check('Undo, Remove and Export sit at the right of the row, apart from Lock plate and Print',
+      undo.x - geo['menu-supports'].r > 6 && geo['menu-supports'].x > lockPlate.r && pan && exp.r < pan.x,
       'lock plate ends ' + Math.round(lockPlate.r) + ', undo at ' + Math.round(undo.x) + ', export ends ' + Math.round(exp.r));
     const under = UNDER.map(([id, , over]) => {
       const u = geo[id], o = geo[over];
@@ -416,33 +445,35 @@ withApp(async (page, logs) => {
     const imp = geo['menu-import'];
     const col = GROUPS.map(g => g.map(([id]) => Object.assign({ id }, geo[id])));
     const first = col[0][0];
-    check('the column starts under Import with Scale, at its x', Math.abs(first.x - imp.x) < 0.5 && first.y > imp.b &&
-      first.y - imp.b < 8 && first.id === 'menu-scale',
+    check('the column starts under Import with Generate, at its x', Math.abs(first.x - imp.x) < 0.5 && first.y > imp.b &&
+      first.y - imp.b < 8 && first.id === 'menu-gen',
       'import ' + Math.round(imp.x) + ',' + Math.round(imp.b) + ' ' + first.id + ' ' + Math.round(first.x) + ',' + Math.round(first.y));
     const stacked = col.slice(0, 4).every(g => g.every(b => b.inCol && Math.abs(b.x - imp.x) < 0.5 && Math.abs(b.w - imp.w) < 0.5));
     check('groups 1-4 are one stack under Import, Import\'s width', stacked,
       col.slice(0, 4).map(g => g.map(b => Math.round(b.x) + '/' + Math.round(b.w)).join(' ')).join(' | '));
     const pitches = [];
-    col.slice(0, 3).forEach(g => g.forEach((b, i) => { if (i) pitches.push(+(b.y - g[i - 1].y).toFixed(2)); }));
+    col.slice(0, 4).forEach(g => g.forEach((b, i) => { if (i) pitches.push(+(b.y - g[i - 1].y).toFixed(2)); }));
     check('a 36 px pitch inside each group', pitches.every(p => Math.abs(p - 36) < 0.5), pitches.join(' '));
     const gap12 = +(col[1][0].y - col[0][col[0].length - 1].b).toFixed(2);
     check('a 12 px gap between the make/edit and surface groups', Math.abs(gap12 - 12) < 0.5, String(gap12));
-    const view = col[4], repair = col[3][0], stack = col[2], lastAbove = col[1][col[1].length - 1];
+    // repair: the bottom group's top (Fill & fix); repairEnd: its foot (Check & repair, right under it)
+    const view = col[4], repair = col[3][0], repairEnd = col[3][col[3].length - 1], stack = col[2], lastAbove = col[1][col[1].length - 1];
     check('the view group (X, eye, ◎) is one row pinned to the bottom of the column',
       view.every(b => b.inCol && Math.abs(b.b - (geo._vp.bottom - 8)) < 0.5 && Math.abs(b.y - view[0].y) < 0.5) &&
       Math.abs(view[0].x - imp.x) < 0.5 && Math.abs(view[2].r - imp.r) < 0.5,
       view.map(b => b.id + '@' + Math.round(b.x) + ',' + Math.round(b.y) + '/' + Math.round(b.w)).join(' ') + '; viewport bottom ' + geo._vp.bottom);
-    check('the bottom stack is Slice then G-scope (the 36 px pitch), pinned under Sculpt, and Check & repair follows it a group gap lower',
-      stack.length === 2 && stack[0].id === 'menu-slice' && stack[1].id === 'btn-microscope' &&
-      Math.abs(stack[1].y - stack[0].y - 36) < 0.5 && Math.abs(repair.y - stack[1].b - 12) < 0.5 && stack[0].y - lastAbove.b >= 12 - 0.5,
-      'sculpt ends ' + Math.round(lastAbove.b) + ', ' + stack.map(b => b.id + ' ' + Math.round(b.y) + '..' + Math.round(b.b)).join(', ') + ', check & repair ' + Math.round(repair.y));
-    check('Check & repair is on its own, directly above the view row (a group gap), well below Sculpt',
-      Math.abs(view[0].y - repair.b - 12) < 0.5 && repair.y - lastAbove.b >= 12 - 0.5,
-      'sculpt ends ' + Math.round(lastAbove.b) + ', check & repair ' + Math.round(repair.y) + '..' + Math.round(repair.b) +
+    check('the bottom stack is G-scope alone (Slice is the supports card\'s last section), pinned under Assemble, and Fill & fix follows it a group gap lower',
+      stack.length === 1 && stack[0].id === 'btn-microscope' &&
+      Math.abs(repair.y - stack[0].b - 12) < 0.5 && stack[0].y - lastAbove.b >= 12 - 0.5,
+      'assemble ends ' + Math.round(lastAbove.b) + ', ' + stack.map(b => b.id + ' ' + Math.round(b.y) + '..' + Math.round(b.b)).join(', ') + ', fill & fix ' + Math.round(repair.y));
+    check('Fill & fix with Check & repair right under it, directly above the view row (a group gap), well below Assemble',
+      col[3].map(b => b.id).join() === 'menu-fillfix,menu-repair' &&
+      Math.abs(view[0].y - repairEnd.b - 12) < 0.5 && repair.y - lastAbove.b >= 12 - 0.5,
+      'assemble ends ' + Math.round(lastAbove.b) + ', fill & fix ' + Math.round(repair.y) + ', check & repair ..' + Math.round(repairEnd.b) +
       ', view row at ' + Math.round(view[0].y));
     const colBottom = Math.max(...view.map(b => b.b));
     check('the column fits inside the viewport at 1280 x 800',
-      colBottom <= geo._vp.bottom && first.y >= geo._vp.top && lastAbove.b < repair.y,
+      colBottom <= geo._vp.bottom && first.y >= geo._vp.top && lastAbove.b < repair.y && lastAbove.b < stack[0].y,
       'column ' + Math.round(first.y - geo._vp.top) + '..' + Math.round(colBottom - geo._vp.top) + ' px of a ' + geo._vp.h + ' px viewport');
     /* No page header: the viewport is the window - it starts at 0 and is all
        800 px (it was 739, under a 61 px header) - and the row and the pinned
@@ -500,13 +531,26 @@ withApp(async (page, logs) => {
         const ps = state.placed.map((p, i) => ({ p, i })).filter(({ p }) => p && p.mesh && !(p.mesh.userData && p.mesh.userData.nsoSupport));
         return ps.length === 1 ? { i: ps[0].i, id: ps[0].p.sourceId } : null;
       });
-      const want = id === 'menu-joins' ? { i: -1, id: null } : sole || before;
+      const want = id === 'menu-assemble' ? { i: -1, id: null } : sole || before;
       if (after.i !== want.i || after.id !== want.id) keeps.push(id + ' ' + JSON.stringify(want) + ' -> ' + JSON.stringify(after));
     }
     check('every drop-down opens on a click and holds the controls the ticket gives it', holdFails.length === 0,
       holdFails.join('; ') || DROPDOWNS.length + ' drop-downs');
-    check('Shape, Add, Subtract, Surface & edges and Check & repair hold them in the ticket\'s order', orderFails.length === 0,
+    check('Shape, Add, Subtract, Surface & edges, Fill & fix and Check & repair hold them in the ticket\'s order', orderFails.length === 0,
       orderFails.join(', ') || ORDERED.join(', '));
+    // CROP: no slab; the switch at the top of the Cut / Crop card opens it, at the same spot, holding what the ticket gives it.
+    await shutAll(page);
+    const oc = await openCropByHand(page);
+    await page.waitForTimeout(150);
+    const cr = await page.evaluate((holds) => {
+      const d = document.getElementById('menu-crop'), body = d.querySelector(':scope > .vp-menu-body'), b = body.getBoundingClientRect();
+      return { open: d.open, cutOpen: document.getElementById('menu-cut').open, x: b.left, y: b.top,
+               missing: holds.filter(i => { const e = document.getElementById(i); return !e || !body.contains(e); }) };
+    }, HOLDS['menu-crop']);
+    check('CROP opens from the Cut / Crop card\'s switch, in place of Cut, at the one spot, holding the ticket\'s controls',
+      oc.ok && cr.open && !cr.cutOpen && Math.abs(cr.x - vp.left - 134) < 0.5 && Math.abs(cr.y - vp.top - 52) < 0.5 && cr.missing.length === 0,
+      JSON.stringify(Object.assign({ click: oc.why || 'ok' }, cr)));
+    await shutAll(page);
     const opts = await page.evaluate((o) => Object.entries(o).filter(([id, want]) => {
       const got = [...document.getElementById(id).options].map(x => x.value).sort().join();
       return got !== want.slice().sort().join();
@@ -684,7 +728,7 @@ withApp(async (page, logs) => {
     const fv = await page.evaluate(() => ({ cam: state.camera.position.toArray(), status: document.getElementById('status').textContent }));
     check('◎ frames the view', c.ok && fv.cam.some((v, i) => Math.abs(v - cam0[i]) > 1), fv.status);
 
-    // G-scope, then Lift (in Subtract): on the plate, not a way into G-scope.
+    // G-scope, then Lift (in Crop): on the plate, not a way into G-scope.
     const gs = async () => page.evaluate(() => {
       const panel = document.getElementById('microscope');
       // the viewport is what G-scope draws on (its old Features row stood in for it, and left G-scope)
@@ -712,13 +756,18 @@ withApp(async (page, logs) => {
     check('SUBTRACT is a plain run of buttons: no collapsing sections, each tool\'s button showing when the card opens',
       secs.sections === 0 && secs.hidden.length === 0, JSON.stringify(secs));
     check('...and every control the card had is still on it', secs.missing.length === 0, JSON.stringify(secs.missing));
+    check('...and Lift, with Detach flange, is not on it', await page.evaluate(() => !document.querySelector('#menu-bit #btn-lift, #menu-bit #btn-detach, #menu-bit #lift-panel')));
+    await shutAll(page);
+    await openCropByHand(page);
+    await page.waitForTimeout(150);
     c = await clickFace(page, '#btn-lift');
     await page.waitForTimeout(300);
-    const gl = await gs(), lit = await page.evaluate(() => ({ armed: NSO_LIFT_PLATE.isArmed(), panel: !document.getElementById('lift-panel').hidden }));
-    check('LIFT, in SUBTRACT, arms Lift on the plate and its panel opens; G-scope stays shut',
-      c.ok && lit.armed && lit.panel && !gl.open, JSON.stringify({ lit, open: gl.open, why: c.why }));
+    const gl = await gs(), lit = await page.evaluate(() => ({ armed: NSO_LIFT_PLATE.isArmed(), panel: !document.getElementById('lift-panel').hidden,
+      inCrop: !!document.getElementById('btn-lift').closest('#crop-card'), detach: !!document.getElementById('btn-detach').closest('#lift-panel') }));
+    check('LIFT, in CROP, arms Lift on the plate and its panel opens, Detach flange in it; G-scope stays shut',
+      c.ok && lit.armed && lit.panel && lit.inCrop && lit.detach && !gl.open, JSON.stringify({ lit, open: gl.open, why: c.why }));
     await page.evaluate(() => document.getElementById('btn-lift').click());
-    check('...a second click puts Lift away', await page.evaluate(() => !NSO_LIFT_PLATE.isArmed()), '');
+    check('...a second click puts Lift away, its panel with it', await page.evaluate(() => !NSO_LIFT_PLATE.isArmed() && document.getElementById('lift-panel').hidden), '');
     await shutAll(page);
 
     // Optimize, then Clear plate (last: it empties the plate).
@@ -807,7 +856,7 @@ withApp(async (page, logs) => {
       for (const d of chain) {
         // A card the one before it opened by itself (Join's column shows the Join card) is already there: a click would shut it.
         const there = await page.evaluate((d) => document.querySelector(d).open, d);
-        const r = there ? { ok: true } : await clickFace(page, d + ' > summary');
+        const r = there ? { ok: true } : d === '#menu-crop' ? await openCropByHand(page) : await clickFace(page, d + ' > summary');
         const open = await page.evaluate((d) => document.querySelector(d).open, d);
         if (!r.ok || !open) { ok = false; list.forEach(c => unreachable.push(c.id + ' (at ' + d + ': ' + (r.why || 'did not open') + ')')); break; }
       }

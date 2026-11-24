@@ -753,7 +753,7 @@
       if (sr.height > 0) top = Math.max(top, Math.round(sr.bottom - hr.top + gap));
     });
     var right = gap;
-    var open = document.querySelector('.vp-shell-menu[open] > .vp-menu-body');
+    var open = document.querySelector('.vp-shell-menu[open]:not(#menu-measure) > .vp-menu-body');
     if (open) {
       var br = open.getBoundingClientRect();
       var w = el.offsetWidth || 300;

@@ -38,9 +38,9 @@ const CORE = ['updateUndoBtn', 'pushUndo', 'clearUndo', 'clearRedo', 'undoLast',
   'nsoGeometriesNamed', 'nsoReleaseGeometries', 'nsoPoseBakeGeometries', 'nsoLeavingGeometries', 'nsoDropRedo',
   'nsoCopyFields', 'nsoRestoreFields', 'nsoWorldFingerprint', 'nsoWorldSnapshot', 'nsoDropOutline', 'nsoWorldRestore', 'nsoUndoPoseBake',
   'addModel', 'addModelFromZUpGeometry', 'zUpToYUp', 'placeNewModel', 'placeModelMovable',
-  'clearSelectionOutline', 'selectPlaced'];
+  'clearSelectionOutline', 'selectPlaced', 'nsoSelAllPieces', 'nsoLitPieces', 'nsoLooksSelected', 'nsoPaintSelLook'];
 const ENGINE = ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
-  'nso_support_tree.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
+  'nso_support_tree.js', 'nso_support_flow.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
 
 /* A page element: the properties and methods the card touches, and the listeners it adds. */
 function makeDom() {
@@ -69,7 +69,7 @@ function makeDom() {
   }
   const el = id => els[id] || (els[id] = new El(id));
   for (const id of ['sup-count', 'supports-card', 'sup-progress', 'btn-sup-all', 'btn-sup-none', 'btn-sup-remove', 'sup-angle', 'sup-angle-note',
-    'sup-style', 'sup-size', 'sup-rest', 'sup-rows', 'sup-hint', 'sup-tools', 'sup-tune', 'sup-tune-note', 'sup-tune-count', 'sup-tune-defaults',
+    'sup-style', 'sup-size', 'sup-rest', 'sup-small', 'sup-rows', 'sup-hint', 'sup-tools', 'sup-tune', 'sup-tune-note', 'sup-tune-count', 'sup-tune-defaults',
     'sup-knob-tip', 'sup-knob-growth', 'sup-knob-lean', 'sup-knob-node', 'sup-plate', 'sup-plate-row', 'status', 'menu-supports',
     'sup-mode-auto', 'sup-mode-assisted', 'sup-mode-custom', 'sup-tool-tips', 'sup-tool-circles', 'sup-tool-erase',
     'sup-raft', 'sup-paint', 'sup-paint-row', 'sup-paint-clear', 'sup-brush', 'btn-sup-slice', 'btn-sup-slice-cancel', 'sup-slice-line']) el(id);
@@ -134,6 +134,7 @@ function makeApp(opts) {
   const core = read('app-core.js'), selOutline = read('app-sel-outline.js'), join = read('app-join.js');
   vm.runInContext([
     'let nextId = 1; const UNDO_MAX = 40; const REDO_LABEL = {}, UNDO_REPLACE_LABEL = {};',
+    core.match(/^const SELECT_COLOR = .*$/m)[0],
     ...CORE.map(n => fnSource(core, n, 'app-core.js')),
     fnSource(join, 'meshToWorldSoup', 'app-join.js'),
     'this.__core = { addModelFromZUpGeometry, placeModelMovable, selectPlaced, clearSelectionOutline, pushUndo, undoLast, redoLast };'

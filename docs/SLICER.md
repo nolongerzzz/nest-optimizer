@@ -163,9 +163,12 @@ labelled a fit, and its evidence is stated:
     everything within `topWallKeepMm` of it (2w + 0.985 mm).
   - Result: the loop lands on Bambu's to **1 µm**. It is one data point, so
     it is a fit.
-- **Narrow sparse strips print solid.**
+- **Narrow sparse strips print solid, where they border solid infill (2026-11-20).**
   - Strips 0.875 mm wide (under the ribs) came out solid; strips 1.0 mm wide
     (over the tabletop's leg arms) stayed sparse.
+  - Both lie between solid regions. A strip between **walls** stays sparse in Studio down to 0.52 mm between
+    the infill lines' centres: three L legs of the walls tester, Arachne and Classic alike. So the rule
+    applies only to a narrow piece that borders solid infill.
   - The threshold is 1.7 × spacing = 0.944 mm, inside that bracket. The same
     width folds narrow solid strips between top surfaces into the top
     surface, as z 8.1 shows.
@@ -288,7 +291,7 @@ its eighth finding records the run counts (Bambu 2 a layer, NSO 1).
      the comparison;
    - support *generation* (detection only);
    - support expansion;
-   - seams and wall ordering beyond inner-then-outer;
+   - wall ordering beyond inner-then-outer (seams: see "Aligned seams");
    - ironing, gap fill, arc fitting;
    - Arachne variable-width walls (both real files use `classic`).
 7. **Sparse infill length** is 12 % short on supportwithinsupport. The
@@ -447,6 +450,309 @@ right over the sheet that holds it.
 `fixtures/supports/top_clip_x2.stl`: a 10 x 10 x 16 post with an 8 x 8 clip
 under its top on each side, and the card-default supports built for it.
 
+### Concentric (`solidPattern` / `topPattern` / `bottomPattern` / `sparsePattern: 'concentric'`)
+
+Rings that follow the region's outline, in place of the lines. Measured
+black-box on a real slice: `concentric.gcode.3mf` (Bambu Studio 02.09.01.70,
+A1 mini, 0.4 nozzle, 0.2 layers, 2 classic walls, ten flat shapes 0.8 - 1.0 mm
+tall with every surface and the solid infill concentric). Seven of its shapes
+(the straight-sided ones) are pinned in
+`fixtures/slicer-concentric-reference.json`. A second slice of the same plate
+in monotonic lines (`monotonic_3dhoneycomb.gcode.3mf`) has the same 72 wall
+loops point for point, so only the fill differs between the two.
+
+| rule | measured | here |
+|---|---|---|
+| ring to ring | 0.377 at 0.42 / 0.2, 0.457 at the first layer's 0.5: the bead spacing | `spacingOf(w, h)` |
+| the outermost ring | 0.333 from the inner wall's centre at 0.45 / 0.42, 0.388 at 0.5 / 0.5: 0.85 x the mean of the two spacings (`infill_wall_overlap` 15 %) | `ringRoom` grows the fill region (bead centres, 0.85 x the wall's spacing) by the difference and half a spacing, along the walls only |
+| the middle | beads across = width / spacing; every ring is nominal but the last, which takes the remainder: one ring 0.354 - 0.63 wide, or one line 0.55 - 0.69 wide down the middle | a piece under two spacings deep is measured (`insetDepth`) and gets 0 - 4 beads: a line under 1.5 spacings, a pair of rings under 2.75, a line between rings under 3.5 |
+| order | from the middle outward, each ring starting beside the last one's start | post-order over the pieces, `ringFrom` |
+| bridges | straight lines | unchanged: only Bottom surface (first layer), Top surface and Internal solid infill take the pattern |
+
+Against the reference, on a solid layer and the top of each of the seven
+shapes: the outermost ring within 0.001 mm, the same number of paths, the
+innermost ring's width within 0.0012 mm, the volume laid within 0.2 %.
+
+Where it differs, and what is stated rather than measured:
+
+- **The reference's pentagon** ends its solid layers in a dot 0.645 wide; this
+  lays a last ring 0.344 wide in the same room (1.6 spacings: one bead there,
+  two here). Its rectangle has two at 1.70 and its right triangle two at 1.42,
+  so the switch is not a width alone.
+- **A middle whose width changes along it** (the semicircle, the ellipse):
+  Bambu steps the line's width every 0.3 - 0.4 mm and may run it as a loop;
+  this lays one medial line (`medialPaths`) with its width stepped by 0.04 to
+  the room, or the last ring.
+- **Necks.** Where a region pinches between two lobes the rings split and each
+  lobe ends in its own middle; the wedge left at the pinch is not filled.
+- **Sparse concentric is stated, not measured**: the reference is all shell
+  (no sparse layer; the second file's 3D honeycomb never prints either). The
+  first ring lies along the walls, the rest a spacing over the density apart,
+  all nominal width.
+- **The first layer's own width** (`initial_layer_line_width` 0.5) is not a
+  setting of this slicer; its first layer is laid at the infill's width.
+- A ring closes on itself; the planner leaves its own seam gap, as on a wall.
+
+The print card and G-scope offer **concentric** on both pattern rows (see
+"The two pattern rows"). A template that names concentric for one of the four
+project keys alone is sliced that way (`NSOPrintPlanner.engineOptions`).
+
+### Rectilinear (the lists' name for `zigzag`)
+
+Bambu Studio's **Rectilinear** - `zig-zag` in its profile - is the pattern this
+slicer has always called `zigzag`: lines at `infill_direction` (45), turned 90
+degrees with every layer, joined at their ends. The pattern rows of the print
+card and G-scope list it as **rectilinear** (the option's value stays
+`zigzag`), the summaries say rectilinear, and the engine takes `rectilinear`
+or `zig-zag` for any of its four pattern options.
+
+Checked against `rectilinear.gcode.3mf` (the concentric plate cut again with
+every pattern Rectilinear; its walls are the same 72 loops), pinned in
+`fixtures/slicer-rectilinear-reference.json`: on two solid layers and the top
+of each of the seven straight-sided shapes the lines run at Bambu's angle, as
+many of them within 2, the length laid within 3.5 %. The differences: Bambu
+widens the line (0.420 - 0.428) so a whole number fits across, where this
+keeps the nominal spacing; and it draws every layer in one path, where this
+breaks the path at some slanted edges (the hexagon's layer in 9). Like the
+other two files this one is all shell, so its sparse Rectilinear never prints.
+
+### Archimedean chords (`'archimedeanchords'`, any of the four pattern options)
+
+One spiral from the middle outward, cut to the region. Measured black-box on
+`archimedeanchords.gcode.3mf`: the concentric plate's ten shapes, 9.8 mm tall
+(so the sparse infill prints: 44 layers of it), every pattern Archimedean
+chords, sparse 15 % at 0.45. Seven shapes pinned in
+`fixtures/slicer-archimedean-reference.json`.
+
+| rule | measured | here |
+|---|---|---|
+| the curve | from the centre a straight stroke one pitch long at 135 degrees, then counter-clockwise, one pitch further out with every turn; the same on every layer | `spiralFill`: r = pitch (1 + turn), a polyline within 0.01 mm of the curve |
+| the pitch | 0.377 in a solid fill (the bead spacing at 0.42 / 0.2, 0.457 on the first layer's 0.5), 2.713 in the sparse one (0.407 / 15 %) | `spacingOf(w, h)`, over the density when sparse |
+| a solid fill's centre | not the box's middle on a shape without point symmetry: the middle of the fill region's box in the frame turned 45 degrees (`infill_direction`) - the triangle's 7 mm below its box's middle | `turnedBoxCentre(region, 45 deg)`, one spiral a connected piece |
+| a sparse fill's centre | the middle of the object's own box (the part's, not the wall's: 0.105 above the walls' on the triangle, whose apex is mitred), the same on all 44 layers | the middle of the box of all the object's layers |
+| the ends | cut where the spiral leaves the region. Sparse: where it comes back in, the two ends are joined along the wall unless an earlier join already runs there; the ends left turn 1.63 mm along the wall (4 spacings: `infill_anchor` 400 %) | `clipLine`, then joins the shorter way round (`outlineTrack`), sparse up to `sparseAnchorMaxMm` with 4-spacing hooks, solid up to 3 spacings |
+
+Against the reference: on a solid layer of each of the seven shapes the
+spiral's start within 0.005 mm, the length laid within 0.4 %, the number of
+paths the same or one more; on a sparse layer (sliced at the reference's 0.45)
+the start within 0.001 mm and the length within 13 % - the spiral is the same
+curve, the joins and hooks along the walls are placed by a simpler rule than
+Bambu's.
+
+Not matched, or stated: Bambu writes the sparse spiral in arcs (G2 / G3), this
+in short lines; the slicer has one infill width (the reference's sparse lines
+are 0.45, its solid 0.42), so a sparse spiral at 0.42 is 8 % tighter than
+Bambu's; a solid fill in several pieces on one layer (a top beside solid
+infill) is one spiral a piece, which the reference does not show.
+
+The pattern rows list it as **archimedean chords**, for the infill and for the surfaces.
+
+### Hilbert curve (`'hilbertcurve'`: the surfaces and the solid infill)
+
+One square space-filling line. Measured black-box on
+`hilbertcurve_3dhoneycomb.gcode.3mf` (the concentric plate's shapes, 43.6 mm
+tall; every surface and the solid infill Hilbert curve). Points on Bambu's
+lines are pinned in `fixtures/slicer-hilbert-honeycomb-reference.json`.
+
+| rule | measured | here |
+|---|---|---|
+| the grid | one bead spacing (0.377 at 0.42 / 0.2, 0.457 on the first layer), turned so every stroke lies at 45 or 135 degrees | `hilbertFill`, the frame at 135 degrees |
+| the curve | the plain Hilbert curve of the smallest power of two that covers the region (128 across on every shape), from the low corner of the region's box in that frame; the same on every layer | `hilbertPoint`; quadrants off the box are not made |
+| where the box is | Bambu's region lies 0.013 mm outside this slicer's (0.85 x half the difference of the wall's spacing and the fill's - the concentric rings' measure, found again in the grid's phase) | the box grown by that |
+
+Against the reference, on a solid layer of all ten shapes, 100 % of Bambu's
+line lies on this one (99.8 % on the square) and 96 - 99 % of this one on
+Bambu's: the curve is the same, and more of the cut ends are joined along the
+walls here (4 - 24 paths a layer against 59 - 97), which is the 1 - 4 % more
+length.
+
+### 3D honeycomb (`sparsePattern: '3dhoneycomb'`)
+
+Wavy lines whose waves and direction change with height. Measured on the same
+file's sparse infill (15 %, 0.45 wide, 0.2 layers, 210 layers of it). In the
+frame turned 45 degrees (`infill_direction`), about the middle of the object's
+own box:
+
+| rule | measured | here |
+|---|---|---|
+| a layer | one family of lines D = 3.579 apart, the middle one through the centre; each a square wave with slanted flanks: flats D - 2 a long, a to one side of the line then a to the other, the flanks at 45 degrees to the line (along X or Y on the plate); the wave 2 D long; next-door lines mirror images | `honeycomb3dFill` |
+| with height | a goes + D/4 -> - D/4 over 10 layers, back over the next 10 (0.179 a layer); the lines are straight every 10th layer (every H = 2.0 mm); they run along the frame's first axis going down, along its second coming back; + D/4 on layers 5, 25, 45... | `honeycomb3dAt` |
+| the ends | cut at the region, joined to the next line along the wall | `clipLine`, joins up to `sparseAnchorMaxMm` |
+
+Against the reference: 960 points pinned on Bambu's lines (three shapes,
+layers 5 - 23, both directions and both sides of straight, clear of the walls)
+lie within 0.005 mm of these lines; the length laid is within 11 % (the joins
+along the walls are placed differently).
+
+**D is fitted to this slice and stated:** D = (1 + sqrt(3)/2) / sqrt(2) x
+spacing / density (3.5802 against the measured 3.5788).
+
+**The wave's height is a length (2026-11-19).** A second real slice, at another
+density, settled the other number: the owner's TPU anti-vibration feet
+(`bambu_arachne.gcode.3mf`: Studio 02.09, 3D honeycomb **10 %**, 0.45 / 0.2, no
+walls, no shells; `fixtures/slicer-feet-reference.json`). There D is 5.369
+(this formula: 5.371), and the lines are straight at z 3.0, 6.0, 9.0 ... -
+every **15** layers. So the straight-to-straight height H scales with D as
+spacing / density does: 2.000 mm at 15 %, 3.000 at 10 % (H = 0.5585 x D).
+The rule before, a quarter wave of whole layers rounded up (D / 4h: 4.47 -> 5
+here), gave 7 there - straight every 14 layers, a layer early each wave, and
+per-layer lengths up to 9 % off. The wave now runs on the print height itself:
+a quarter is H / 2h layers, 5 here and 7.5 there. On the feet every layer's
+length is within 2.5 % of Bambu's, and 7284 points pinned on its lattice (1.5 mm
+and more in from the edge) lie within 0.015 mm of these lines; what differs is
+the links along the outline (`slicer:test` "The anti-vibration feet").
+
+### Octagram spiral (`'octagramspiral'`: the surfaces and the solid infill)
+
+Eight-pointed stars, one inside the next, drawn as one line from the middle
+outward. Measured on `OctogramSpiral_Gyroid.gcode.3mf` (the same plate, the
+surfaces and the solid infill Octagram spiral), pinned in
+`fixtures/slicer-octagram-gyroid-reference.json`. In bead spacings from the
+centre, read off the circle's solid layer: the first stroke goes to (-1, 1);
+star n has its sides n spacings off the two axes, its points n (1 + sqrt 2)
+out and its notches n sqrt 2 out on the axes; it ends on the +Y axis, from
+where the line steps out to the next star's first corner. The centre is the
+Archimedean spiral's (the middle of the region's box in the 45 degree frame),
+and like it the star is the same on every layer. It is `spiralFill` with
+another line.
+
+Against the reference, on a solid layer of all ten shapes: 100 % of Bambu's
+line on this one, 99.6 - 100 % of this one on Bambu's, the length within
+0.2 %.
+
+### Gyroid (`sparsePattern: 'gyroid'`)
+
+Each layer is the cut through one smooth surface. Measured on the same file's
+sparse infill (15 %, 0.45 wide, 210 layers): the lines of every layer lie on
+
+    cos X sin Y + cos Y sin Z + cos Z sin X = 0,   X, Y, Z = 2 pi / wavelength x (x, y, z)
+
+with x and y from the middle of the object's own box and z the layer's top
+from the plate. 145 000 points of four shapes over all 210 layers lie on it
+within 0.03 mm at **one** wavelength for the three axes, 6.988 mm. A layer is
+cut as y(x) where |sin Z| >= |cos Z| (wavy lines along X, half a wavelength
+apart) and as x(y) elsewhere, so the lines turn from one axis to the other
+every eighth of a wavelength up (`gyroidFill`). The ends are joined along the
+walls as the 3D honeycomb's are.
+
+Against the reference: 960 points pinned on Bambu's lines (three shapes,
+layers 4 - 25) lie within 0.06 mm of these (Bambu writes the curves in arcs,
+this in lines 0.15 mm long); the length laid is within 16 % (the joins along
+the walls).
+
+**One number is fitted to this one slice, and stated:** the wavelength is
+2 pi / 2.44 x spacing / density (6.9881 against the measured 6.988). A slice
+at another density would confirm the 2.44.
+
+### Cubic (`sparsePattern: 'cubic'`)
+
+Measured on `cubic_sparse.gcode.3mf` (15 %, 0.45 wide, 0.2 layers; the shapes
+35.8 - 43.6 mm tall), pinned in `fixtures/slicer-cubic-reference.json`. A layer
+is three families of straight lines at 45, 105 and 165 degrees (the infill
+direction and on by 60), each 3 x spacing / density apart (8.141). Each family
+slides sideways by the layer height over sqrt 2 a layer (0.1414), the middle
+one against the other two: the lines are the cut through three sets of planes
+at right angles to each other - cubes standing on a corner. All three pass
+through the middle of the object's box at the plate (z 0), whatever the
+object's height. `linesFill` with `cubicAt`.
+
+Against the reference: 840 points pinned on Bambu's lines (three shapes of
+three heights, layers 4 - 150) lie within 0.02 mm of these.
+
+### Adaptive cubic (`sparsePattern: 'adaptivecubic'`)
+
+Measured on `Adaptivecubic_sparse.gcode.3mf`, pinned in
+`fixtures/slicer-adaptivecubic-reference.json`. The cubic's sliding lines,
+with three differences:
+
+- the families lie at 0, 60 and 120 degrees (not turned by the infill
+  direction);
+- they are 11.023 apart: cubes 9.000 on edge, which is 3 x the line's
+  **width** over the density (0.45 / 15 %) - fitted to this one slice;
+- all three pass through the middle of the object's box in the cubes' own
+  frame, in all three directions: for a prism its middle in plan at half its
+  height (the reference's shapes are of five heights, and each one's lines sit
+  where its own half height puts them). `adaptiveCubicLattice` takes the
+  object's triangles for it.
+
+**The adapting is not measured and not done.** Bambu's cubes grow coarser deep
+inside a large part; none of the reference's parts (24 - 39 mm across) is
+large enough to show a coarser cell, so every cell here is the finest. On a
+large part this lays more than Bambu would. A slice of a part some 80 mm
+across would show the rule.
+
+Against the reference: 840 pinned points within 0.03 mm.
+
+### Honeycomb (`sparsePattern: 'honeycomb'`)
+
+Measured on `honeycomb_sparse.gcode.3mf`, pinned in
+`fixtures/slicer-honeycomb-reference.json`. One lattice of regular hexagons
+for the whole object, the same on every layer: 2 x spacing / density across
+the flats (5.427), a side 3.133, a pair of edges along 135 degrees and the
+others along 75 and 15. A layer draws it as zigzag lines along one of the
+three edge directions - 135 on layer 4 (the first sparse one), 75 on the next,
+15 on the third, and round again (the layer's index modulo 3). Where two
+zigzags meet they run side by side one spacing apart - the doubled walls -
+each half a spacing off the hexagon's true edge, so over three layers every
+edge is doubled once. A hexagon's middle lies (W, a) from the middle of the
+object's box (W = spacing / density, a the side): the same on all ten shapes,
+but read at one density, so that it scales with W is stated. `honeycombFill`.
+
+Against the reference: 960 pinned points (three shapes, the three directions
+twice round and layers 50 and 101) within 0.002 mm; the length laid within
+12 %.
+
+### Lightning (`sparsePattern: 'lightning'`)
+
+**Not Bambu's trees - what they are for, by their measures.** In
+`Lightning_sparse.gcode.3mf` (the plate's shapes, 35.8 - 43.6 mm tall, 15 %)
+the sparse layers are empty from the bottom shell up to 39 - 89 layers under
+the top shell; from there branches rooted on the walls reach further in with
+every layer, and on the last layer under the top they lie as dense as lines
+sqrt 2 spacings over the density apart (0.247 - 0.268 mm of line a mm2 inside
+the walls on all ten shapes; 1 / (sqrt 2 x 2.713) = 0.261). The trees are grown
+by a procedure a black-box reading cannot recover, and this slicer does not
+grow them. `lightningFill` lays, from the top of the object down:
+
+- under every **roof** - sparse infill with none over it: the top shell, or
+  the floor of a pocket - straight lines sqrt 2 x spacing / density apart
+  along the infill direction, each from wall to wall;
+- a layer down, each line as two stubs, one from each wall, each one layer
+  height shorter than the stub over it (45 degrees: the reference's square,
+  11.5 mm from wall to middle, has its last branch 57 layers - 11.4 mm - under
+  the top), until a stub is no longer than a line is wide;
+- every line in the same place on every layer, so each stub lies on the one
+  below.
+
+Against the reference's measures (`fixtures/slicer-lightning-reference.json`,
+seven shapes): the length laid under the top 0.235 - 0.249 a mm2 against
+Bambu's 0.255 - 0.268; the whole object's sparse infill 0.68 - 1.29 x Bambu's
+a shape and 1.02 x over the seven together; nothing below layer 107 - 144
+where Bambu's first branch is at layer 90 - 159. The lines are combs, not
+trees: they do not branch and do not lean towards each other.
+
+### Joining lines along the walls
+
+Every sparse pattern here ends its lines on the fill region and joins one
+line's end to the next along the wall (`chainAlongOutline`) when that is no
+longer than `sparseAnchorMaxMm` and no earlier join runs there - a stretch of
+wall is traced once. Bambu's own joins and hooks follow a finer rule
+(`infill_anchor`); the lines are the same, the length laid on a sparse layer
+differs by up to 10 - 30 % on these small parts, most where a layer has few
+lines (adaptive cubic).
+
+### The two pattern rows
+
+Bambu sets the sparse infill and the surfaces apart (this file: Hilbert curve
+on the surfaces, 3D honeycomb inside), so the print card and G-scope have two
+rows: **infill** (grid, rectilinear, lines, concentric, archimedean chords, 3D
+honeycomb, gyroid, honeycomb, cubic, adaptive cubic, lightning -> `sparse_infill_pattern`) and **surfaces** (rectilinear,
+concentric, archimedean chords, hilbert curve, octagram spiral -> `top_surface_pattern`,
+`bottom_surface_pattern`, `internal_solid_infill_pattern`, the three as one
+choice). Concentric and Archimedean chords no longer set both from the infill
+row. In G-scope the two selects share one cell of the settings grid (infill
+first), so the card is no taller than it was.
+
 ### Thin walls (classic walls with Detect thin wall on)
 
 Bambu Studio, with the **classic** wall generator and **Detect thin wall** on,
@@ -526,6 +832,191 @@ classic semantics, not Arachne: one fixed width, no variable bead.
 
 ---
 
+### No walls, no shells (`wallLoops: 0`, 2026-11-19)
+
+The owner's TPU anti-vibration feet (`bambu_arachne.gcode.3mf`) print as pure 3D honeycomb: `wall_loops = 0`,
+`top_shell_layers = 0`, `bottom_shell_layers = 0`. Studio lays every line of every layer as Sparse infill:
+- **No walls:** the infill runs out to half its own line from the outline (0.225 mm at the 0.45 line).
+  `perimeters()` returns no loop and that region; before, it always laid an outer wall.
+- **No shells:** a shell thickness adds layers only to a count of one or more. That file keeps
+  `top_shell_thickness = 1` with 0 top layers and has no top at all. This engine read the thickness as 5 top
+  layers.
+
+The Print card's **Wall loops** row now takes 0.
+
+---
+
+### Arachne (`wallGenerator: 'arachne'`, 2026-11-16)
+
+Bambu Studio's second wall generator, picked on the Print card under **Quality → Wall generator**
+(`#slice-set-wall-gen`) or by a profile's `wall_generator = arachne`. Classic stays the default: both real
+profiles say `classic`.
+
+**What it changes.** Classic lays every wall one fixed width, a fixed spacing in. A part whose thickness is
+not a whole number of beads gets a gap down its middle, and a feature thinner than a bead prints nothing
+(or a sliver drawn out and back). Arachne fits the walls to the thickness. The beads' count and width
+vary so a thin rib, fin, neck or wedge is filled wall to wall.
+
+**NSO's own construction, not a port.** Arachne lives in CuraEngine and in Bambu Studio / OrcaSlicer, all
+AGPL, so nothing is taken from them (section 1). `arachneWalls()` is written here from the behaviour and
+from the six settings Studio shows, on top of what this slicer already has: Clipper offsets, `insetDepth`
+and the raster centreline `medialPaths`.
+
+1. **Thick and thin.** The region is opened (eroded, then grown back with mitred corners) by
+   `N × spacing + spacing / 2`, the half-thickness that holds the `N` classic walls and some fill. What
+   survives is the thick part. It gets `perimeters()` exactly, with its walls, top-wall rule and infill
+   region. What the opening took off is thin, and is all walls. A layer with nothing thin is sliced as
+   Classic, byte for byte (`slicer:test`, the box and the cylinder).
+2. **A thin piece** (the rules measured on two real Studio slices, 2026-11-20; see below).
+   - **Its thickness `T`** is its typical one, not its deepest point (an L's corner is deeper than its legs).
+     A piece with no hole is a rectangle of the same area and outline, `T = (P − √(P² − 16A)) / 4` (exact for
+     a strip or an L). A piece with holes is a ring, `T = 2A / P` (exact for a tube). Never more than twice its
+     deepest inset.
+   - **The count.** Nominal walls are laid from the outside in (the outer wall's spacing, then the inner
+     wall's), as many pairs as leave a middle at least `ARACHNE_ADD` (0.75) × the inner wall's line. That
+     middle is one wall up to `ARACHNE_SPLIT` (1.65) × the line, and a pair beyond it. Never more than two
+     walls a wall loop.
+   - **The widths.** With Wall distribution count 1, only the middle varies: the middle wall of an odd count,
+     the innermost pair of an even one. Every wall outside them keeps its own width. A higher count spreads
+     the leftover over the innermost `d` walls a side. Each varying wall is
+     `(T − fat − 2 × fixed spacings) / their count + fat` wide (`fat = w − spacing`, the stadium overlap).
+   - They are laid as insets of the piece, edge to edge. A loop is dropped where its two sides would lie on
+     each other (it is opened by a quarter of its spacing), so where the piece narrows, the count drops and
+     the middle wall takes the room.
+   - **A dot.** A piece too small to have a centreline a bead long (a decimal point) is one short bead across
+     its long way, the outer wall's width.
+3. **The middle.** What the loops leave is drawn down its centreline, each 0.1 mm step as wide as the room
+   there. The room is measured to the nearest edge and on to the edge across, since the raster centreline
+   can sit half a pixel off the middle. A step bounded by the piece's own outline is that stretch's
+   **Outer wall** and takes no overlap. A step between beads is an **Inner wall** plus `fat`.
+
+| lever (Studio's key) | default | here |
+|---|---|---|
+| Wall transitioning threshold angle (`wall_transition_angle`) | 10° | between loops, a stretch where the room opens faster than a wedge of this angle (read over the transition length) gets no middle bead |
+| Wall transitioning filter margin (`wall_transition_filter_deviation`) | 25 % | a bead's width changes only when the room moves by more than this |
+| Wall transition length (`wall_transition_length`) | 100 % | a bead's width follows the room averaged over this length |
+| Wall distribution count (`wall_distribution_count`) | 1 | the innermost walls a side that share a thin piece's leftover width |
+| Minimum wall width (`min_bead_width`) | 85 % | a narrower bead is printed this wide: 85 % of the **inner wall's line**, measured (Studio's 0.20 mm tube at 0.38 = 0.85 × 0.45; of the nozzle it would be 0.34) |
+| Minimum feature size (`min_feature_size`) | 25 % | a thinner feature is not printed (of the nozzle) |
+
+The engine takes the percentages as fractions (`minBeadWidth: 0.85`). The planner reads all seven keys (`engineOptions`). The card writes those that
+differ from the profile (`configOverlay`), so the G-code's config block and the project's settings say
+what was sliced. A slice with Arachne also writes `; wall_generator = arachne` in the engine's own
+config block.
+
+**Scope.** A support or a brim keeps the classic generator, with its Detect thin wall pass, because its
+export says `wall_generator = classic`. Detect thin wall has no work under Arachne: thin features are its
+job.
+
+**Measured on a real Arachne slice (2026-11-19), where it agrees with Classic.** The owner's TPU
+anti-vibration feet, sliced by Studio 02.08 with Arachne and its default levers, 2 walls (0.42 outer, 0.45
+inner), grid 15 %, 3 bottom / 5 top: four 60 mm blocks, nothing thin. Every wall is its nominal width, and
+each feature is where Classic's rules put it: the outer wall 0.210 from the edge, the inner 0.602, the
+sparse from 0.948, and on top one wall with the surface from 0.530. Sliced from the file's own settings,
+this engine lays every feature on every layer within 0.03 % of Bambu's length, at those insets to 2 µm
+(`fixtures/slicer-feet-reference.json`, `slicer:test` "The anti-vibration feet"). So on a thick part,
+Arachne is Classic, as rule 1 says.
+
+**Measured on thin parts (2026-11-20).** Two of the owner's Studio projects, each with its mesh and
+Studio's own Arachne slice (Studio 02.09, 2 walls, 0.42 / 0.45):
+- **Erik's wall-thickness benchmark:** tubes 0.2 to 1.6 mm thick, L legs 0.4 to 3.2 mm, raised digits.
+  PLA Matte, flow 0.98.
+- **A board of thin bars**, 0.15 to 2.0 mm. PETG, flow 0.94.
+
+Each mesh was sliced with its project's settings, placed where Studio placed it, and compared island by
+island. Studio's widths carry the flow ratio (the planner applies it to NSO's), so NSO's are scaled by it.
+What Studio does, and NSO now does:
+
+| thickness | Studio | rule |
+|---|---|---|
+| 0.15 – 0.3 mm | one wall, 0.36 – 0.38 | the minimum wall width, of the inner line |
+| 0.4, 0.6, 0.7 (a digit's stroke) | one wall, its own width | a middle up to 1.65 × the line |
+| 0.8, 1.0 | two walls, 0.42 / 0.52 | the middle splits; each `(T + fat) / 2` |
+| 1.2, 1.4 | three: 0.42 outer, middle 0.44 / 0.64 | a middle of at least 0.75 × the line is added |
+| 1.6, 2.0 | four: 0.42 outer, inner pair 0.44 / 0.64 | the middle splits again; two walls a loop at most |
+| 2.4 and up | Classic's walls and sparse infill | the thick part |
+| a 0.8 mm dot | one short 0.42 bead | a dot |
+
+`slicer:test` "Arachne, measured" slices every test piece of both, 74 sections from
+`fixtures/slicer-arachne-reference.json` (`tools/nso_slicer_arachne_reference.js` remakes it from the four
+files). Every piece's walls are within 2 % of Studio's plastic and its mean width within 0.015 mm: worst
+1.0 % / 0.008 mm on the tester, 0.7 % / 0.006 mm on the board. Whole prints: −1.7 % and −1.1 % of
+Studio's plastic, all of it in the infill and shells.
+
+The split and add thresholds are fitted, bracketed by the samples: a 0.70 middle stays one wall and 0.79
+splits; a 0.25 middle is none and 0.45 is one. The middle of each bracket is taken. `slicer:test`
+"Arachne" also holds the rules on made shapes:
+- strips from 0.05 to 0.6 mm;
+- 1.0 mm as two walls of 0.52;
+- 1.4 mm as 0.42 / 0.64 / 0.42;
+- the distribution count;
+- the two minimums;
+- a wedge to a point;
+- the threshold angle;
+- supports stay Classic;
+- the G-code reads back each width.
+
+Known edges:
+- **A thin piece meeting a thick part:** the thin piece's loops run along the cut edge where it meets the
+  thick part, so the walls there are two loops side by side, not one continuous wall.
+- **The digit 8:** Studio draws it with pairs of 0.36 mm walls while it draws a 0 of like strokes as one
+  0.70 wall. It decides by local shape at the 8's junctions. NSO draws both as one wall: 5 % of the 8's
+  plastic.
+- Classic's Gap infill is its own section below ("Gap infill"). Arachne needs none.
+
+---
+
+### Gap infill (`gapFill`, Classic, 2026-11-20)
+
+Studio's Classic fills a strip that no wall loop and no infill covers with **Gap infill**: one line down the
+strip's middle, as wide as the room there. Measured on the owner's two Studio Classic slices of the walls tester
+and the thin board, the projects with their meshes (`fixtures/slicer-arachne-reference.json`, the two Classic
+sets). On by default; `gapFill: false` is the slice as it was. Supports and brims keep it off: their slices were
+fitted on Bambu's support slices.
+
+`perimeters()` and `gapPaths()`:
+1. **An inner loop that would lie on itself is dropped.** Its centres' region is opened by `GAP_LOOP_MIN`
+   (0.72) × a spacing, so a loop is laid only where its two sides stand apart. On the walls tester, a 1.4 mm
+   tube's inner loop, 0.196 between its sides, is dropped for a 0.62 gap line; a 1.6 mm tube's, at 0.396, is
+   kept. That bracket is 0.48–0.97 of the 0.407 spacing, and 0.72 is its middle.
+2. **Infill only where one infill line fits.** The infill region (bead centres) is opened by half the infill
+   line: the 2.4 mm L's 0.50 core stays sparse, as Studio's, and the 1.4 mm tube's 0.34 core becomes a gap line.
+3. **The gap** is the region (less the outer bead's overlap) that no loop's band and no infill's reach covers,
+   opened by the minimum feature size. A piece too thin for any loop is all gap. That is the same whether or
+   not another island on the layer has loops, as Studio prints the board's 0.4 mm bar with Detect thin wall off.
+4. **Each strip** is drawn down its centreline (`medialPaths`), each 0.1 mm step as wide as the room plus the
+   bead overlap (`variableRuns`). The floor is the minimum feature size, not the minimum wall width: Studio's
+   gap lines go down to 0.22.
+5. An opening that takes nothing away keeps the outline as it was, so a part with no gap (the box, the
+   cylinder, the clip) slices byte for byte as before.
+
+| piece | Studio | NSO |
+|---|---|---|
+| 1.0 mm tube / bar | outer loop, gap 0.22 | outer loop, gap 0.24 |
+| 1.2 mm tube, 1.2 mm L | outer loop, gap 0.42 | outer loop, gap 0.44 |
+| 1.4 mm tube | outer loop, gap 0.62 (no inner loop) | the same, gap 0.64 |
+| 2.0 mm L / bar | two loops, gap 0.42 between them | the same |
+| 1.6 mm tube, 0.8 mm | loops, no gap | the same |
+
+Gap infill over whole prints:
+- walls tester: 7,472 against Studio's 7,482 (−0.1 %);
+- thin board: 4,343 against 4,113 (+5.6 %).
+
+`slicer:test` "Classic, measured":
+- every piece Studio gap-fills has NSO's gap infill too, walls and gap within 3 % of Studio's plastic (worst
+  1.4 % on the tester's 5, 1.1 % on the board's 42);
+- 13 of the tester's 16 pieces are within 5 %, and 44 of the board's 50.
+
+**What still differs is Detect thin wall's, not gap infill.**
+- With it on (the walls tester), Studio lays a thin feature as one wall of its own thickness plus the bead
+  overlap: the 0.2 mm tube 0.24, the 0.4 0.44, the 0.6 one 0.63 wall. NSO's thin wall is the bead's fixed
+  0.42, and up to 1.05 beads (0.44) wide: the 0.2 tube is +73 %, and the 0.6 tube is laid as two loops,
+  +31 %.
+- With it off (the board), Studio lays a 0.4–0.6 mm bar as its outer loop narrowed to 0.38. NSO lays the 0.5
+  and 0.6 at the loop's 0.42 (+9.6 %), and the 0.4 as one gap line (−53 %).
+
+---
+
 ### The brim (supports-one-trunk, third round)
 
 `brimType` ('none' by default; 'auto' | 'outer'), `brimWidthMm` 5, `brimObjectGapMm` 0.1, `brimLineWidthMm` (null: 1.25 x the nozzle,
@@ -536,6 +1027,8 @@ layer only, round the part's outer boundary, 10 loops of a 0.5 mm line at the st
 `Brim` (G-code `; FEATURE: Brim`). Each loop is cut where it would come within half a line (+ 0.02 mm) of another object's first layer -
 a support's pad - so the brim and the pad touch edge to edge (Bambu's: 0 - 0.05 mm) and never join; a run under 1 mm is dropped. Auto
 brims a part that is tall for its foot (height over the root of the first layer's area at least 2: the stem of a chalice, a tower).
+**A part on supports gets no auto brim** (the owner: "the box is unchecked" - Brim round the foot off is no brim): its brim is the
+supports card's (Brim round the foot, a brim object of its own, below) or none. Bambu's supp_ref_v2 rings the trunks' feet in auto; NSO does not.
 The brim is a tall thin part's added hold, the way the tree's pad is the support's: for these heads it is all that holds the stem
 when the pad is a hand wider than the trunk. G-scope's Slice settings carry a **brim** select (auto / every part / off, auto at rest);
 the print planner reads the project's own `brim_type` (`auto_brim` -> auto, `outer_only` / `outer_and_inner` -> outer, `no_brim` -> none),
@@ -561,6 +1054,187 @@ objects by Z, a `; LAYER_HEIGHT:` per object where it differs. The print planner
 Slice turns it on for a Dense sheet (`nsoSupport.sheetLayerMm`) only.
 With it on, every sheet zone is typed by the part's nearness (the stair's way): interface while the part lies within the top support layer's reach (the gap + a layer, 0.4) + 2
 of the support's own layers over it, transition within 2 more, cell by cell, so a slope's plate has the 3 + 2 across its ribbon (`hostEx`).
+
+### The raft (`raftLayers`)
+
+Bambu's raft is its own system between the plate and the first layer of everything on it - part, support or both - not a part of any support style
+(the owner's circle slices, 1 - 10 layers; `fixtures/supports/raft_circle.gcode.3mf`, 8 layers under a 50 mm disc, and `supp_ref_raft.gcode.3mf`, 10
+under the six heads' trees). Read off both and built as `raftPlan` / `addRaft`:
+
+- **Layers**: N = `raft_layers`; the top ceil(N/2) are interface (`Support interface`), the rest base (`Support`) - 1: 1 interface, 2: 1 + 1, 3: 1 + 2,
+  10: 5 + 5. The first at the first layer's height, every other 0.75 x the nozzle (0.2, 0.5, 0.8 ... 2.9 for 10).
+- **The plate on it**: everything is lifted the raft's top + `raft_contact_distance` (0.1), and its first layer is an ordinary layer (2.3 + 0.1 + 0.16 =
+  2.56 for the circle's 8, as Bambu). Each support's first layer gets a layer of its own under it that closes the 0.1 gap (Bambu's 3.0 under each
+  trunk). No brim with a raft.
+- **Region**: the first layer of everything, grown `raft_expansion` (1.5) under the top layer, 0.5 more under the others, 1.0 more again under the first
+  (the circle: 1.5 / 2.0 / 2.9 - 3.4 past the disc).
+- **Lines** (0.42): the first layer solid along Y; the base along X at `support_base_pattern_spacing` + a bead's spacing (2.5 -> 2.856, Bambu's own
+  2.856); the interface at `support_interface_spacing` + a bead's spacing, along Y under supports (supp_ref: 0.45) and 45 / 135 in turn under a part
+  alone (the circle: 0.886). Each layer one zig-zag joined along its edge.
+- **Settings**: the Slice card and G-scope's Slice panel have *raft N layers* and *contact mm*; the .gcode.3mf records them as `raft_layers` /
+  `raft_contact_distance`, and a profile's own raft keys are read (`nso-print-planner.js` engineOptions).
+
+- **On the plate**: a slice with a raft hands its layers back (`raftToPlate`) and the plate is drawn as it prints - the bed (surface,
+  grid, border, ticks; display only) lowered by the lift and the raft's layers between it and the pieces, base light green, interface dark
+  (`app-print.js` showRaftView). The pieces do not move; the raft is no piece (never picked, sliced or exported) and goes when its slice is
+  the plate's no more (checked once a second while drawn). With a raft the supports card builds no brim.
+
+Not matched yet: under a tree, Bambu's first raft layer is about 0.9 mm *inside* the base layers where under the bare disc it is 1 mm outside; here it
+is outside for both. Bambu's tree also prints its own Support through the raft's interface layers where the trunk stands; here the interface covers it.
+
+### A free bridge's direction (`freeBridgeAngle`, 2026-11-14)
+
+A bridge line holds only if both its ends rest on the layer below. NSO laid every bridge at the
+layer's solid-infill angle (45 / 135), which is right over a hole with walls all round and wrong
+over a slot that is open on its long sides: the owner's CR-TPU tower level has a roof 30 mm long
+and 8 mm deep between two pillars, and at 45 degrees its bridge lines were 8 - 11 mm long with both
+ends in the air. They printed as hanging loops. Studio's slice of the same level runs them 31 mm,
+pillar to pillar.
+
+For each piece of bridge over open air (`bottomOpen`, a layer above the first, no support object
+under it):
+
+- every 5 degrees is tried: the piece is filled with lines at that angle, and a line counts as
+  held when a point 0.3, 0.8 or 1.5 mm past each of its ends is over the layer below
+  (`BRIDGE_REACH_MM`: a bridge's fill ends inside the walls that stand on what holds it);
+- of the directions that hold as much line as the best (within 2 %), the one with the shortest
+  lines is taken;
+- a piece the layer's own angle already holds whole (98 %) is left at it, so is one nothing holds
+  (a cantilever), and so is one where the best direction is not 5 % better.
+
+When no piece changes, the layer's bridge is filled in one call as before, so those slices are
+byte for byte what they were. `o.bridgeAngleAuto === false` turns it off. A bridge over a support
+object is still laid by the support rules (`bridgeAt`), and `bridge_angle` still wins over both.
+
+The bridge paths over open air carry `free: true` (the ones over sparse infill do not): the print
+planner's bridge temperature counts only those.
+
+Pinned slices that changed: `hinge_knuckle_box` at 0.4 and `top_clip_x2_coupon` at both nozzles
+(`slicer:test`). Held by `print:slice` 3c: a doorway's roof is laid 99 % along its 30 mm gap.
+
+
+**Choosing among the angles that hold (2026-11-15).** The 5-degree tries were compared by the length
+of their held lines, and the tie among those within 2 % broken by the mean line length. Both are
+the scan's phase as much as the geometry - the same area is the same length of line at any angle,
+give or take a line - and on the owner's tower the 2.4 x 9.6 mm slot over the cone (the top of the
+round hole) was laid at 10 degrees: every line slanted, the first and last starting and ending in
+mid-air, a build-up the owner traced to that layer. Now the tries are compared by the share of their
+lines held at both ends, and among those within 2 % of the best the one with the piece's shortest
+extent along the lines wins: the slot goes straight across, 0 degrees. Checked in `slicer:test`
+("Bridges": a 2.4 mm slot open at both ends).
+
+### A bridge reaches onto what holds it (`bridgeAnchorMm`, 2026-11-15)
+
+An open-air bridge is the layer's solid minus the layer below, so its lines used to stop at the gap's
+edge: on the owner's TPU tower roof 11 of 40 line ends lay on nothing and the rest on 0.05 mm, and the
+roof's lines dropped into the window on two prints (210 and 215 C, 2026-11-14 and -15). Bambu Studio
+carries the bridge on past the edge: on its slice of the same tower
+(`fixtures/print-planner/a1mini-0.4/studio-generic-tpu-tower.gcode.3mf`, z 9.354, 19.304, 29.453,
+39.403) every roof line has 0.65 to 2.2 mm of its last 3 mm over the layer below.
+
+Each open-air piece wide enough to be a bridge (two lines across, so the slivers along a sloping wall
+are left alone) now grows `bridgeAnchorMm` (1 mm) into the layer's fill that is not top surface,
+solid or sparse, and that ground is laid as part of the bridge, in its direction; it is taken out of
+the solid, internal-bridge and sparse fill. The direction is still chosen on the gap itself
+(`freeBridgeAngle`). 1 mm puts NSO's roof line ends where Studio's are (left 71.5 / 83.0 against
+Studio's 71.2-71.6 / 82.6-82.8, right 102.2 against 101.9) and gives every end 0.85 to 1.85 mm on
+material. `bridgeAnchorMm: 0` is the old edge. Checked in `slicer:test` ("Bridges"): two posts under
+a roof, every turn of the bridge at least 0.6 mm over a post.
+
+### A bridge fills its gap wall to wall (`bridgeFitSpacing`, 2026-11-15)
+
+The fill lines sit on a global grid, so across the owner's 8.1 mm roof gap the first bridge line fell
+0.35 mm in from the region's edge and a strip about 0.25 mm wide was left open along the front wall -
+in Studio's preview of NSO's file, a line missing. Bambu evens out a solid fill's spacing to the
+width it fills (`adjust_solid_spacing`): its slice of the same tower lays the roof as 22 lines from
+85.9 to 94.1, the outer two on the walls. An open-air bridge piece now gets its own spacing, its
+width across the lines over the nearest whole number of spacings, with a line on each edge: the roof
+is 21 lines, 85.96 to 94.04, 0.404 apart. Slivers along a sloping wall (narrower than two lines) and
+the bridges over sparse infill keep the grid. `bridgeFitSpacing: false` is the grid. Checked in
+`slicer:test` ("Bridges").
+
+### A loop starts where it is held (`seamOffOverhang`, 2026-11-15)
+
+A wall loop that an overhang cuts into pieces is still one loop, laid piece after piece. Its seam
+fell on a corner of the owner's roof gap, so both back walls began with their 15.7 mm hanging run:
+the first line laid into the air from a start that rested on nothing and was pulled along, and on
+CR-TPU it went off the back edge (a bump the next layer printed over), where the front walls,
+entered from the block beside the gap, held. Such a loop now begins on the held wall just before
+the run - the piece before it is cut 3 mm (`SEAM_LEAD_IN_MM`) from its end and the loop starts
+there - so the nozzle primes on the layer below, close to the old start, and comes into the run
+already laying. Only a run that hangs from end to end moves the start: the first try turned any loop
+that began on an overhang piece to its first held one, which moved the slanting lip face's start too
+and put the CR-TPU prime and wipe on that face, and sent the roof's loops across the bridge to a
+prime at the gap's far corner (the owner's next print: squirts off the lip, a leak on the roof).
+`seamOffOverhang: false` is the seam where it fell.
+Checked in `slicer:test` ("Bridges").
+
+### No crumbs (`shortFillMm`, 2026-11-15)
+
+Every fill piece is its own travel, prime and retraction. At a corner where the fill meets a wall
+at a slant the zigzag leaves pieces of a fraction of a millimetre: the owner's CR-TPU tower level had
+62 primes that laid less than 1.5 mm, among them 0.03 mm and 0.31 mm of solid infill at the tip of the
+roof, each with the whole 1.5 mm prime pushed out and pulled back on the spot - and whole lines hung
+off that tip. `shortFillMm` drops an open fill piece (sparse, solid, top, bottom, bridge) shorter than
+it; walls and closed loops always stay. It is 0 by default - Studio lays every piece, and the
+Studio-matched fixtures keep them - and a filament asks for it (`FILAMENTS[id].slicer`; CR-TPU: 1 mm,
+which left that level 40 primes fewer). Checked in `slicer:test` ("No crumbs").
+
+### A wall over a gap (`spanPieces`, `path.span`, 2026-11-14)
+
+An Overhang wall is a wall whose whole width hangs. Bambu prints it two ways. Measured on the
+owner's Studio slice of the CR-TPU tower, every Overhang wall move against the nearest line of the
+layer below:
+
+| Studio's speed | moves | how far from the layer below |
+| --- | --- | --- |
+| 10 mm/s (`overhang_4_4_speed`) | 213, 507 mm | 0.42 - 0.5 mm (never over 0.74): it hugs the layer below |
+| 39.5 mm/s (the bridge's, at the flow limit) | 91, 676 mm | up to 8.5 mm: the walls of a roof, 29 mm in one move |
+
+Studio's PLA slice of the A1 mini coupon says the same: its Overhang wall tops out at
+`bridge_speed` (F3000). NSO printed every Overhang wall at 10 mm/s, in a move every 0.2 mm, and over
+a gap a soft filament laid that slowly hangs - the first line of the owner's roof.
+
+So a hanging piece is cut where it is a line width or more from the layer below on both sides.
+Those runs (2 mm or longer, `overhangSpanMinMm`) carry `span: true`, with the points on a straight
+line dropped, and the planner prints them at the bridge's speed and acceleration, exempt from the
+layer-time slowdown as a bridge is. What hugs the layer below stays at `overhang_4_4_speed`. On the
+tower NSO now has 577 mm at 10 mm/s and 623 mm at the bridge's speed, against Studio's 507 and 676.
+
+Pinned slices that changed: `hinge_knuckle_box` 0.4, `top_clip_x2` and `top_clip_x2_coupon` at both
+nozzles. Held by `print:slice` 3c (the doorway's four wall spans, each one 30 mm move) and
+`print:planner` (an Overhang wall is at one speed or the other).
+
+
+### One island, then the next
+
+A layer's walls are built a depth at a time and its fill after them, so a layer of two islands used
+to run inner wall, inner wall, outer wall, outer wall, fill, fill: five crossings of the gap between
+them every layer, each one a retraction and a chance of a string. The owner's TPU string test
+(two 5 mm cones 10 mm apart, 2026-11-14) strung from where the layers get small, and nozzle
+temperature (225, 235, 245), no Z hop and a longer retraction did not move it.
+
+Bambu Studio finishes an island - its walls, then its fill - and goes to the next (its Generic TPU
+slice of the temperature tower, `fixtures/print-planner/a1mini-0.4/studio-generic-tpu-tower.gcode.3mf`,
+any layer of several islands). `islandOrder` (`nso_slicer.js`) does the same after a part's layers
+are built: the paths are filed by the island of the layer's section they lie in, keep their order
+inside it, and the islands follow nearest first, starting from the one nearest where the layer
+below ended. The cones went from 74 crossings to 20, one a layer.
+
+- A part only: a support's layers keep their own order.
+- A layer of one island is not touched, so a part that is one piece at every height slices byte for
+  byte as before.
+- `islandOrder: false` is the order by depth, for comparing.
+- Checked in `slicer:test` ("Islands"): two posts, one move across a layer, the same paths.
+
+### A bridge's strand, by its kind (the planner's `beadOf`)
+
+Every Studio slice in the repo (`thick_bridges = 0`) writes a bridge over open air as a line of
+the layer's own height, 0.40 - 0.43 wide; only the bridge over sparse infill is the round strand of
+the nozzle's diameter (0.4 x 0.4). NSO laid every bridge as the round one: 1.6 times the plastic
+over a gap, and at a volumetric limit a slower one (25.5 against 39.3 mm/s for CR-TPU). The planner
+now reads `thick_bridges` (default off) for a bridge with `path.free` and
+`thick_internal_bridges` (default on) for the rest.
 
 ## 7. Scope and complexity, as found
 
@@ -598,3 +1272,86 @@ What the score still shows on the Oblique ribbon (supp_ref): the generated slab 
 Typing one fill by position left the transition strip of a sloped plate one line or none by the phase of the fill's lines (Oblique: 3 to 28 mm of transition a layer against Bambu's steady 23). On a support's own grid the plate is now laid as Bambu lays it (checked on supp_ref's Oblique, z 10.0: a transition loop, an interface loop and the interface zig-zag): the interface region (the part within the interface layers over the cell) and the transition region (within the transition layers over that) each get their loop on the slab's edge, the support's own wall run that lay in them is dropped (the loop replaces it), and the zig-zag fills the interface and the transition wherever it is wider than a line; a narrow transition strip is its loop alone. Foot IoU: Oblique 0.66 -> 0.71, Sphere 0.68 -> 0.78, Circular 0.64 -> 0.67, Negative Sphere 0.69 -> 0.73; Negative Sphere2 0.69 -> 0.62 (its plate is three crescents where Bambu's is one big C round the hole: the footprint is the generator's, not this).
 
 Note on the fill's width test: the zig-zag fills a transition region only where it is wider than 2.4 line widths (the region opened by 1.2 line widths); at 0.6 the strip of the Oblique's ramp was filled too and the transition ran 32 - 42 mm a layer against Bambu's 23 (seen in a real export, 644 vs 468 mm), at 1.2 it is 21 - 23 a layer. Judge a change to this on the per-layer lengths of the real export, not on the score's totals alone.
+
+### Time: the exact cuts are welded once (2026-11-10)
+
+Generate ends with the plate's slice (acdd25e), so the slicer's time is Generate's. On supp_ref_2x (one piece, 10 supports) the slice was 70 of
+Generate's 83 s, and half of it was `indexSoup`: `exactAt` (the support typing's cut of the part at heights of its own: `prepExact`, `cavSection` /
+`holeAtZ`) called `sliceMesh`, which welded the whole part again on every call, and every support asked the part for the same heights again.
+Now `makeP` welds an object once (`prepSoup`: the welded mesh and each triangle's z range) for its layers and every exact cut, and `exactAt`
+keeps each section by its height (the same float), so a height ten supports ask is cut and closed once. Same bytes: the plate's .gcode.3mf
+from the page and `support:gate --rule column --json` are identical before and after.
+
+| headless Chromium, GENERATE pressed to idle | before | after |
+|---|---|---|
+| supp_ref (6 pieces) | 31 s | 25 s |
+| supp_ref_2x (1 piece) | 83 s (slice 70 s) | 42 s (slice 31 s) |
+
+What is left in the 2x slice: the exact sections' closing offsets and `unionAll` in the typing (manifold, about 18 s), and the layers themselves.
+
+**Second round (the typing).** The slice of the page's own Generate job (captured from the worker, replayed in node, the G-code compared byte for byte):
+- `geometry()`'s operations are kept by their inputs: a section is never changed once made, so `unionAll`, `union`, `offset`, `diff`, `inter`
+  and `dropSmall` asked again of the same sections (by identity) and the same numbers return the first answer. The typing asks the host's layers
+  the same unions and cuts for every support layer and every support (the column rule's window of host layers, `dropSmall` of each, the
+  overhang of each layer, per support). Cleared by `free()`.
+- `prepExact` no longer cuts all six reaches of every layer up front: a height is cut when it is first read (1,670 cuts -> 486 on the 2x).
+- `topUnder` makes its `cover` (the next layer's closed, filled footprint) only when the layer reaches under the host at all.
+- `indexSoup`: the weld grid is an open-addressed table on the cells' integer coordinates, not a Map of string keys (10 - 20 x; same V and T,
+  checked on every object of the 2x job).
+- `splitOverhang` tests its points against the layer below through `insideIndex` (edges filed by horizontal bands; every answer is `inside`'s).
+
+| the plate's slice, node replay of the page's job | before | after |
+|---|---|---|
+| supp_ref (sheet typing) | 7.7 s | 4.4 s |
+| supp_ref_2x (sheet typing) | 30.3 s | 14.7 s |
+| supp_ref_2x (column rule) | 38.4 s | 15.1 s (`columnRule` 15.4 -> 4.0 s) |
+
+Headless Chromium, GENERATE to idle: supp_ref 25 -> 18 s, supp_ref_2x 42 -> 26 s, supp_ref_2x with the column rule 41 -> 31 s. The G-code is
+the same bytes in all three; `support:gate` and `support:gate --rule column` print the same JSON. What remains of the slice is mostly the
+layers themselves (walls, infill, the sections of every object: `buildLayers` and `makeP`, about 9 s of the 2x).
+
+**Third round (the build, before the slice).** A probe `leg(a, b, 0, 0, 0, 0)` - a bare line, no section, no clearance - built its eight
+rails at radius 0: the axis itself, cast again eight times to the same answer (and, on a miss, the inside test nine times). The horns' wall
+probes and `hornUnderMap` (18 maps of 101 x 101 columns, up to 12 casts each, on the 2x) are made of them. `leg` now answers a bare line from
+the axis alone: the same numbers. supp_ref_2x with the column rule, the build's own time in the page 13.1 -> 8.4 s, GENERATE 31.7 -> 25.5 s;
+the plate's G-code the same bytes on all three plates, both gates the same JSON. Looked for and not repeated work: the 11 crowns' meshes
+(`blobSoup`) are 11 different bodies, `leg` asked the same question twice is 0.3 s of 1.8, and the thickness probes are built once a mesh.
+
+
+### Aligned seams (`seamAligned`, 2026-11-23)
+
+Every loop has a seam: where it starts, the seam gap where it ends, the wipe and the next prime
+beside it. NSO began each loop where its polygon happened to begin; on the owner's half-size Gulf
+logo a gap-infill ring between the rim's two walls began half way down the rim's smooth right side,
+and printed there as a break with a grey fleck in the white. Studio (`seam_position = aligned`)
+began the same loops in the concave corner where the rim meets the white band.
+
+`placeSeam` scores each vertex by the loop's turn round it, taken about a millimetre either side
+(so a curve of many short edges is one gentle turn): a concave corner is best, a sharp convex one
+next, a straight or gently curving stretch worst (Studio's `compute_angle_penalty`). It adds 0.02 per
+mm from the nearest seam on the layer below (to 10 mm), so a loop with no corner keeps its seam
+where the one below was. A gap line whose ends meet is a ring and begins the same way, beside the
+walls' seams. The box's seam stays on one corner, the cylinder's in one line, all the way up.
+
+### A top face stops as little as it can (`topRuns`, path.glide, 2026-11-23)
+
+Every place a top run stops is a retraction, a wipe, a lift and a prime on the finished face - a
+mark. The layer's top was filled as one lot, the nearest free line next, so the nozzle came into a
+letter part way along its lines, swept to one end and came back for the rest: on the owner's Gulf
+logo the l (a rectangle) took two runs, the f five, the top layer stopped 40 times (Studio's: 28),
+and each stop left a curl where the wipe folded over a corner's short strokes. Ending each run on a
+long line instead only moved the wipe into the middle of the letter: a scar across it (the next print).
+
+Now each piece of the top is filled on its own, nearest piece next, begun at whichever of its two
+outermost lines is nearer: a plain shape is one zig-zag. A concave piece that still takes several
+runs goes from one to the next inside itself without a stop (path.glide: a move under 15 mm whose
+line crosses no edge of the piece, at the layer's height, nothing retracted - Studio's top goes
+line to line the same way). The one stop left on a piece wipes back along its last stroke only
+(the planner's `wipePath(..., oneStroke)`), the rest of the retraction taken standing. The logo's
+top layer: 14 stops.
+
+### A connector may not cut across the outline (`crossesOutline`, 2026-11-23)
+
+Fill lines were joined by a straight connector when its midpoint lay inside the fill; an 18 mm
+sparse connector on the logo jumped the G's open counter and stayed bare on the top. A connector
+that crosses the fill's outline is now a travel.

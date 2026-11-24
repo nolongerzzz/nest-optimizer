@@ -11,7 +11,7 @@
  *   A. fixtures/supports/top_clip_x2_supports.gcode.3mf   A1 mini 0.4, the
  *      coupon and its NSO supports, sliced by Studio 02.08.02.61
  *   B. fixtures/supports/simple_overhang_bambu.gcode.3mf  A1 mini 0.4, the arc
- *   C. fixtures/supports/simple_overhang_p1s.gcode.3mf    P1S 0.4, the arc
+ *   C. fixtures/bambu-templates/p1s-0.4/mouse1.gcode.3mf  P1S 0.4, the owner's mouse (its blocks); the arc is planned on it
  *
  * and to the printer template (fixtures/bambu-templates/a1mini-0.4/).
  *
@@ -128,11 +128,15 @@ async function main() {
   // every extruding move: its F against its feature's expected speed on that layer
   let over = 0, under = 0, nMoves = 0, slowed = 0;
   const topSpeed = {};
+  /* a hanging wall that spans (the slicer's path.span) prints as a bridge - Studio's own slice of this plate tops its Overhang wall at
+     bridge_speed (F3000) - so an Overhang wall may be at overhang_4_4_speed or at the bridge's */
+  const spanV = (w, h) => Math.min(S.speed.bridge, S.filament.maxVolumetric / stadium(w, h)) * 60;
   sc.moves.forEach(mv => {
     const first = mv.layer === 0;
-    const w = mv.feature === 'Bridge' ? S.nozzleMm : mv.lw, h = mv.feature === 'Bridge' ? S.nozzleMm : mv.lh;
+    const w = mv.lw, h = mv.lh;                               /* a bridge's bead is what the file says it is: the layer's height over open air, the nozzle's over infill */
     const want = expectV(mv.feature, w, h, first) * 60;
     nMoves++;
+    if (mv.feature === 'Overhang wall' && !first && near(mv.F, spanV(w, h), 0.01)) return;
     if (mv.F > want + 0.01) over++;
     else if (mv.F < want - 0.01) { slowed++; if (mv.F < S.cooling.slow_down_min_speed * 60 - 0.01 && mv.F < want - 0.01) under++; }
     const k = mv.feature + (first ? ' L1' : '');
@@ -143,7 +147,7 @@ async function main() {
   const topWant = (feature, first) => {
     // the widest/narrowest beads differ; compare against the speed at the bead the layer printed
     const mv = sc.moves.filter(m => m.feature === feature && (m.layer === 0) === first).sort((a, b) => b.F - a.F)[0];
-    return mv ? { got: mv.F, want: expectV(feature, feature === 'Bridge' ? S.nozzleMm : mv.lw, feature === 'Bridge' ? S.nozzleMm : mv.lh, first) * 60 } : null;
+    return mv ? { got: mv.F, want: expectV(feature, mv.lw, mv.lh, first) * 60 } : null;
   };
   const exact = [];
   ['Outer wall', 'Inner wall', 'Top surface', 'Support'].forEach(f => {
@@ -157,8 +161,11 @@ async function main() {
   const l1b = l1('Bottom surface');
   check('layer 1: the bottom surface at initial_layer_infill_speed (' + S.speed.firstInfill + ' mm/s = F' + S.speed.firstInfill * 60 + ')', l1b && l1b.got === S.speed.firstInfill * 60, l1b && l1b.got);
   const br = sc.moves.filter(m => m.feature === 'Bridge');
-  check('a bridge prints at bridge_speed (F' + S.speed.bridge * 60 + ') as a round bead of the nozzle\'s diameter',
-    br.length > 0 && br.every(m => near(m.F, S.speed.bridge * 60, 0.01) && near(m.lw, S.nozzleMm, 1e-9) && near(m.lh, S.nozzleMm, 1e-9)), br.length + ' bridge moves');
+  /* Studio's slice of this plate (thick_bridges = 0) writes its bridges LAYER_HEIGHT 0.2: a line of the layer's height over open air. The round
+     bead of the nozzle's diameter is the bridge over sparse infill (thick_internal_bridges) */
+  const brThin = br.filter(m => m.lh < S.nozzleMm - 1e-6), brRound = br.filter(m => near(m.lw, S.nozzleMm, 1e-9) && near(m.lh, S.nozzleMm, 1e-9));
+  check('a bridge prints at bridge_speed (F' + S.speed.bridge * 60 + '): over open air a line of the layer\'s height (' + brThin.length + ' moves), over sparse infill a round bead of the nozzle\'s diameter (' + brRound.length + ')',
+    br.length > 0 && brThin.length + brRound.length === br.length && brThin.length > 0 && br.every(m => near(m.F, S.speed.bridge * 60, 0.01)) && brThin.every(m => near(m.lh, 0.2, 1e-6)), br.length + ' bridge moves');
   const accels = [...sc.accels].sort((a, b) => a - b);
   const okA = new Set([S.accel.first, S.accel.def, S.accel.outer, S.accel.top, S.accel.travel, S.accel.short, S.accel.firstTravel, S.accel.inner, S.accel.sparse, S.accel.solid, S.accel.support, S.accel.interface, S.accel.bridge]);
   check('every M204 is one the template names (' + accels.join(', ') + ')', accels.every(a => okA.has(a)), accels.join(', '));
@@ -276,15 +283,16 @@ async function main() {
   const off = PL.plan(res, { config: tpl, printer: Object.assign({}, PR, { bed: { x: 60, y: 60, z: 180 } }) });
   check("a plate that is not on the bed is refused, not clipped", !off.ok && /not on the Bambu Lab A1 mini/.test(off.reason), off.reason);
 
-  // ---- the P1S, from the owner's P1S slice of the bare arc
+  // ---- the P1S, from the owner's P1S project (mouse1.3mf) and its own slice (Studio 02.09.01.70)
   const PS = L.printer('p1s-0.4'), p1sCfg = await L.p1sTemplate();
-  const BP = await L.bambuSlice('fixtures/supports/simple_overhang_p1s.gcode.3mf');
+  const BM = await L.bambuSlice('fixtures/bambu-templates/p1s-0.4/mouse1.gcode.3mf');      /* the blocks' source */
+  const BP = await L.bambuSlice('fixtures/supports/simple_overhang_p1s.gcode.3mf');          /* Studio's P1S arc: the toolpath reference (section 9) */
   check('the P1S blocks are a fresh freeze of the owner\'s P1S slice',
     JSON.stringify((await FZ.build('p1s-0.4')).frozen, null, 1) + '\n' === require('fs').readFileSync(path.join(ROOT, 'fixtures', 'print-planner', 'p1s-0.4', 'frozen.json'), 'utf8'));
   const pb = await L.plateB(128, 128, false, p1sCfg);
   const PP = PL.plan(pb.res, { config: p1sCfg, printer: PS });
   check('the arc plans for the P1S', PP.ok, PP.reason);
-  const ppl = PP.gcode.split('\n'), bpl = BP.gcode.split('\n');
+  const ppl = PP.gcode.split('\n'), bpl = BM.gcode.split('\n');
   const psS = noM73(slab(ppl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END')), bsS = noM73(slab(bpl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END'));
   const dS = diffs(psS, bsS);
   check('the P1S start block is Studio\'s, line for line (' + psS.length + ' lines); the bed-leveling box is the one line that differs',
@@ -463,12 +471,15 @@ async function main() {
   const B1 = await L.bambuSlice('fixtures/supports/simple_overhang_bambu.gcode.3mf');
   const pb1t = pb1;            // the arc alone, A1 mini (template-driven slice)
   const P1 = PL.plan(pb1t.res, { config: tpl, printer: PR });
-  const pbP = await L.plateB(128, 128, false, p1sCfg);
-  const PPs = PL.plan(pbP.res, { config: p1sCfg, printer: PS });
+  /* the arc against Studio's own P1S arc: planned with the settings that slice was made with (Generic PLA, 12 mm3/s; the P1S template
+     is now the owner's mouse1 project, Bambu PLA Basic at 21) - the same settings, or the speeds are not the planner's to compare */
+  const arcCfg = BP.config;
+  const pbP = await L.plateB(128, 128, false, arcCfg);
+  const PPs = PL.plan(pbP.res, { config: arcCfg, printer: PS });
   const refs = [
     { name: 'A  coupon + NSO supports, A1 mini', ref: A, ours: P, bIds: ['4044'], nIds: [ids[0]], tol: 0.011, cfg: tpl },
     { name: 'B  arc, A1 mini (Studio\'s trees on it)', ref: B1, ours: P1, bIds: null, nIds: null, tol: 0.06, cfg: tpl },
-    { name: 'C  arc, P1S (Studio\'s trees on it)', ref: BP, ours: PPs, bIds: null, nIds: null, tol: 0.06, cfg: p1sCfg }
+    { name: 'C  arc, P1S (Studio\'s trees on it)', ref: BP, ours: PPs, bIds: null, nIds: null, tol: 0.06, cfg: arcCfg }
   ];
   const results = {};
   for (const R of refs) {
@@ -506,8 +517,10 @@ async function main() {
   check('PINNED, engine not planner: the coupon\'s body is solid infill in NSO where Studio keeps 15 % sparse (NSO solid-only ' + ra.rows['Internal solid infill'].n +
     ' layers; same feature set on ' + ra.equal + ' of ' + ra.aligned + ' - the engine\'s narrow-sparse rule was fitted on 0.6 mm slices)',
     ra.rows['Internal solid infill'].n >= 40 && ra.equal >= 10 && ra.equal <= 40, JSON.stringify(ra.rows['Internal solid infill']));
-  check('PINNED, engine not planner: the arc has no supports in this plan, so its slope is Overhang wall in NSO (' + rb.rows['Overhang wall'].n + ' layers) where Studio holds it up with trees; the engine makes no Gap infill (Studio: ' + rb.rows['Gap infill'].b + ' layers) and no Floating vertical shell (' + rb.rows['Floating vertical shell'].b + ')',
-    rb.rows['Gap infill'].n === 0 && rb.rows['Gap infill'].b > 100 && rb.rows['Floating vertical shell'].n === 0 && rb.rows['Overhang wall'].n >= 15);   // 50 and over while a wall was overhang once its centre hung; 23 now it is overhang where its whole width does (Bambu's)
+  /* Gap infill: none in NSO until 2026-11-20 (Studio's on 133 layers); Classic's gap infill (docs/SLICER.md "Gap infill") lays it on 95 of them */
+  check('PINNED, engine not planner: the arc has no supports in this plan, so its slope is Overhang wall in NSO (' + rb.rows['Overhang wall'].n + ' layers) where Studio holds it up with trees; Gap infill on ' +
+    rb.rows['Gap infill'].both + ' of Studio\'s ' + (rb.rows['Gap infill'].both + rb.rows['Gap infill'].b) + ' layers (' + rb.rows['Gap infill'].n + ' of NSO\'s own); no Floating vertical shell (' + rb.rows['Floating vertical shell'].b + ')',
+    rb.rows['Gap infill'].both >= 80 && rb.rows['Gap infill'].n <= 40 && rb.rows['Floating vertical shell'].n === 0 && rb.rows['Overhang wall'].n >= 15, 'gap ' + JSON.stringify(rb.rows['Gap infill']));   // 50 and over while a wall was overhang once its centre hung; 23 now it is overhang where its whole width does (Bambu's)
   check('the same arc, A1 and P1S: the engine gives one toolpath (the two plans have the same features on every layer), the printers differ in the blocks and speeds only',
     JSON.stringify(results[refs[1].name].rows) === JSON.stringify(results[refs[2].name].rows));
 
@@ -533,7 +546,7 @@ async function main() {
     });
     // nothing NSO writes is faster than the template permits
     check(R.name.slice(0, 1) + ': no feature in NSO\'s file is faster than the template\'s speed (' + SS.speed.outer + ' outer, ' + SS.speed.inner + ' inner, ' + SS.speed.sparse + ' sparse mm/s) or the volumetric limit',
-      FEATS.every(f => !nt[f] || nt[f].f <= PL.featureSpeed(SS, f, false).v * 60 + 0.01));
+      FEATS.every(f => !nt[f] || nt[f].f <= Math.max(PL.featureSpeed(SS, f, false).v, f === 'Overhang wall' ? SS.speed.bridge : 0) * 60 + 0.01));   /* (a wall that spans a gap is a bridge) */
   }
   // ---- temperatures
   const temps = gc => { const t = new Set(); L.scan(gc).temps.forEach(x => t.add(x.code + ':' + x.s)); return [...t].sort().join(' '); };
@@ -580,8 +593,8 @@ async function main() {
       new RegExp('key="prediction" value="' + Math.round(P.stats.seconds.total) + '"').test(si));
   console.log('\n  NSO\'s plan against Studio\'s slice of the same plate (the toolpaths differ: supports, infill order):');
   const pb3p = tri;                       // the arc with NSO's two trees, A1 mini
-  const pc3 = await L.plateB(128, 128, true, p1sCfg);
-  const tri2 = PL.plan(pc3.res, { config: p1sCfg, printer: PS });
+  const pc3 = await L.plateB(128, 128, true, arcCfg);
+  const tri2 = PL.plan(pc3.res, { config: arcCfg, printer: PS });
   [['A  coupon + supports', headOf(A.gcode), P, +bh['total filament length [mm] '.trim()] || +bh['total filament length [mm]'], +bh['total filament weight [g]']],
    ['B  arc, A1 (NSO trees)', headOf(B1.gcode), pb3p, null, null], ['C  arc, P1S (NSO trees)', headOf(BP.gcode), tri2, null, null]].forEach(row => {
     const hb = row[1], n = row[2].stats.seconds;

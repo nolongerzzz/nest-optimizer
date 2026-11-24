@@ -194,7 +194,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 3 */
   console.log('\n=== 3. Open Join, pick A, double-click ===');
   {
-    await page.evaluate(() => document.getElementById('menu-joins').scrollIntoView());
+    await page.evaluate(() => document.getElementById('menu-assemble').scrollIntoView());
     await openJoin(page);
     await page.click('#join-slot-a');
     const pc = await pieceAt(0);
@@ -307,10 +307,10 @@ withApp(async (page, logs) => {
     await shot('carve-dblclick-disarmed');
     const r = await page.evaluate(() => ({
       armed: state.carveArmed, pressed: document.getElementById('btn-carve').getAttribute('aria-pressed'),
-      sculpt: document.getElementById('menu-bit').open
+      sculpt: document.getElementById('menu-sculpt').open
     }));
     check('Carve disarmed through its button', r.armed === false && r.pressed === 'false', JSON.stringify(r));
-    check('Subtract menu (Carve\'s home since shell v3) closed with it', r.sculpt === false);
+    check('Sculpt menu (Carve\'s home) closed with it', r.sculpt === false);
     held('Carve', before, await snap());
   }
 
@@ -377,10 +377,13 @@ withApp(async (page, logs) => {
        Subtract, Shape, Text, Paint, Surface & edges, Sculpt and Check & repair in
        the column. Then a member open inside a merged one (Photo in Gen+):
        the double-click shuts it and the drop-down holding it. Plate & pieces is pinned open, not a drop-down: it stays. */
-    const COL = ['menu-measure', 'menu-align', 'menu-connect', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-add', 'menu-bit',
-                 'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-slice', 'menu-repair'];
+    /* The card regroup (2026-11-16): Print (the supports card) moved to the row, Punch and Fill & fix
+       are cards, Weave is a section of Fill & fix, Assemble sits under Sculpt. */
+    const COL = ['menu-measure', 'menu-supports', 'menu-punch', 'menu-connect', 'menu-add', 'menu-bit',
+                 'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-assemble',
+                 'menu-fillfix', 'menu-repair'];
     const ids = await page.evaluate(() => [...document.querySelectorAll('.vp-col-menu')].map(d => d.id));
-    check('the shell holds these sixteen', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
+    check('the shell holds these fourteen (Slice is the supports card\'s last section)', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
     for (const id of COL.concat(['menu-photo'])) {
       await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
       await page.click('#' + id + ' > summary');

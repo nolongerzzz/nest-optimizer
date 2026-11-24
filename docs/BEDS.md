@@ -24,6 +24,13 @@ overlaps will land (a later ticket). Queueing and any all-plates behaviour are n
 - **Everything acts on the active bed** - the Pieces card, Select, Clone, Delete, Lift, Cut, Join / Connect, Crop,
   Foam, Fill, Thicken, Extend, Bridge, Close, Patch, Hollow, Optimize, Import placement, Supports, Slice, Export,
   Measure, Undo / Redo, Clear plate. Export and Slice write the active bed only.
+- **Preview goes to G-scope's plate of the same number** (2026-11-12, the owner: "allow multi plate preview, since we
+  have up to 6 plates"). With more than one bed, bed N's Preview (Supports > Preview, the Slice card's Preview) opens
+  its slice on G-scope's plate N; the other G-scope plates keep what they hold, so two beds' support runs stand side by
+  side in G-scope and Compare takes plates 1 and 2. One bed: the active G-scope plate, as ever. `NSO_Print`'s
+  `previewInGscope` passes `{ plate: NSO_BEDS.activeNumber() }` to `NSO_MICROSCOPE.openFile` / `openSlice`. The
+  Slice card still keeps one slice - the active bed's; a bed's slice once previewed lives on in its G-scope plate.
+  See docs/GSCOPE.md item 1. Gate: `gscope:bed-plates`.
 - **Delete plate** (right-click menu, under Clear plate): removes the active bed and its pieces - the wipe Clear plate
   does, for this bed only. No Undo. Disabled with one bed. The beds after it move up one number; the next bed becomes
   active (the previous one when the last was deleted).
@@ -58,6 +65,9 @@ camera by the step the beds move.
 - **A piece moves whole or not at all.** A piece with copies of its model on the plate (quantity), with supports, or
   that is a support is not moved between beds - they are tied by id and would be split - and the status line says so.
   A piece that started off its own bed (placed past the edge) is not carried to another by a nudge.
+  A **Select all group** dragged over another bed goes whole (`moveGroup`): every piece keeps its pose and its place
+  relative to the others, copies, supports and hosts may go because they go together, and the group is refused (in
+  words, every piece put back) only when it would leave one of those behind.
 - **Busy.** A job that will put its result onto "the plate" when it finishes must finish on the bed it started on, so
   nothing switches (or adds, or deletes) while `NSO_BoolBusy.active()`, `NSO_SUPPORTS_CARD.busy()`, `state.importsPending`
   (a file being read, parsed or fetched - `handleFiles`, the Library row - or a big piece waiting for its tree), the boolean
@@ -78,8 +88,9 @@ every existing entry, which names pieces by index in that bed's lists, stays val
 | + plate | none (an empty bed; Delete plate removes it) |
 | make a bed active | none (not an edit) |
 | Delete plate | none, and the bed's lines go with it - like Clear plate |
-| Clear plate | none, as before; wipes the active bed's two lines |
-| plate-size change | none, as before (pieces come off every bed; the models stay) |
+| Clear plate | none, as before; wipes the active bed's two lines. With pieces on only one plate it also closes every tool and card (a fresh start); with pieces on two or more plates it does not |
+| plate-size change | none, and none needed: every bed keeps its pieces where they were, plate-centred (2026-11-12, the owner: switching A1 Mini -> P1S to slice for the other printer must not lose the piece). A piece the new bed no longer holds stays put and is named in the status line |
+| Select all group moved between beds | **one step**, the same two entries, each holding the whole group (`group: [{ item, model, index, modelIndex, pose }]`): Undo puts every piece back at its own pose and index and the group is still selected. |
 | piece moved between beds | **one step**, two entries that name each other: `bedMoveOut` on the bed it left, `bedMoveIn` on the bed it landed on (each bed's line is its own). Undo on either puts the piece back at the pose and index it left from and makes the bed it left active. It needs the other half to be the last step of its own line - a move cannot be taken back from under later steps on that bed, whose indices it would shift - otherwise it changes nothing and says "Undo the later steps on Plate N first". If the other half is gone (that bed was deleted, or the entry fell off the line) the entry is dropped and it says so. A move is not redoable (like the Supports and G-scope Lift steps). |
 
 ## Where a single global plate remains (by design)

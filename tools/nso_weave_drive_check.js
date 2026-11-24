@@ -131,14 +131,16 @@ withApp(async (page, logs) => {
   MID[2] = fx.base(0, 0);
 
   console.log('\n=== 1. the WEAVE button, and the card it opens ===');
+  /* Since 2026-11-16 Weave is a section of the Fill & fix card (a nested <details>, like Surface's
+     Wrap), after Patch; no column slab of its own. */
   const place = await page.evaluate(() => {
     const t = document.getElementById('menu-weave'), sum = t && t.querySelector('summary');
-    const prev = t && t.previousElementSibling, next = t && t.nextElementSibling;
-    const y = el => el.querySelector('summary').getBoundingClientRect();
-    return t ? { label: sum.textContent.trim(), col: t.classList.contains('vp-col-menu'), prev: prev.id, next: next.id,
-      order: y(prev).top < y(t).top && y(t).top < y(next).top, sameX: Math.abs(y(prev).left - y(t).left) < 1 } : null;
+    const card = t && t.parentElement.closest('details');
+    const patch = document.getElementById('btn-patch');
+    return t ? { label: sum.textContent.trim(), card: card && card.id, col: t.classList.contains('vp-col-menu'),
+      afterPatch: !!(patch && (patch.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING)) } : null;
   });
-  check('WEAVE is a column button between TEXT and PAINT, in line with them', place && place.label === 'Weave' && place.col && place.prev === 'menu-text' && place.next === 'menu-paint' && place.order && place.sameX, JSON.stringify(place));
+  check('WEAVE is a section of the Fill & fix card, after Patch, with no column slab', place && place.label === 'Weave' && place.card === 'menu-fillfix' && !place.col && place.afterPatch, JSON.stringify(place));
   await page.click('#menu-weave > summary');
   await page.waitForFunction(() => nsoWeaveState().open, null, { timeout: 5000 });
   const ids = ['btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear', 'btn-weave-smooth', 'btn-weave-follow',

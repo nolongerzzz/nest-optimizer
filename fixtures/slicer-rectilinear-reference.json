@@ -1,0 +1,194 @@
+{
+ "source": "rectilinear.gcode.3mf - the plate of slicer-concentric-reference.json (its outlines are the parts), cut by Bambu Studio 02.09.01.70 with every surface, the solid infill and the sparse infill Rectilinear (zig-zag in the profile). solid / solid2 / top: the second and third layers' and the top's fill - its paths, the lines' angle, how many lines longer than 1.5 mm, the length laid, the width Bambu gave the line.",
+ "shapes": [
+  {
+   "name": "hexagon",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 135,
+    "lines": 74,
+    "length": 1519.8,
+    "width": 0.42119
+   },
+   "solid2": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 45,
+    "lines": 74,
+    "length": 1519.8,
+    "width": 0.42119
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 1,
+    "angle": 135,
+    "lines": 76,
+    "length": 1608.9,
+    "width": 0.42307
+   }
+  },
+  {
+   "name": "octagon",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 135,
+    "lines": 77,
+    "length": 1667.2,
+    "width": 0.42103
+   },
+   "solid2": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 45,
+    "lines": 77,
+    "length": 1667.2,
+    "width": 0.42103
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 1,
+    "angle": 135,
+    "lines": 79,
+    "length": 1759.9,
+    "width": 0.42252
+   }
+  },
+  {
+   "name": "pentagon",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 135,
+    "lines": 73,
+    "length": 1367.9,
+    "width": 0.42434
+   },
+   "solid2": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 45,
+    "lines": 73,
+    "length": 1368.6,
+    "width": 0.42434
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 1,
+    "angle": 135,
+    "lines": 76,
+    "length": 1472.1,
+    "width": 0.42165
+   }
+  },
+  {
+   "name": "rectangle",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 135,
+    "lines": 95,
+    "length": 1686.1,
+    "width": 0.42034
+   },
+   "solid2": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 45,
+    "lines": 95,
+    "length": 1686.1,
+    "width": 0.42034
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 1,
+    "angle": 135,
+    "lines": 98,
+    "length": 1802.9,
+    "width": 0.42047
+   }
+  },
+  {
+   "name": "square",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 135,
+    "lines": 81,
+    "length": 1434.1,
+    "width": 0.42194
+   },
+   "solid2": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 45,
+    "lines": 81,
+    "length": 1434.1,
+    "width": 0.42194
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 1,
+    "angle": 45,
+    "lines": 84,
+    "length": 1534.9,
+    "width": 0.42203
+   }
+  },
+  {
+   "name": "triangle_eq",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 135,
+    "lines": 64,
+    "length": 858.1,
+    "width": 0.42048
+   },
+   "solid2": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 45,
+    "lines": 64,
+    "length": 858.1,
+    "width": 0.42048
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 1,
+    "angle": 135,
+    "lines": 67,
+    "length": 941.1,
+    "width": 0.42352
+   }
+  },
+  {
+   "name": "triangle_right",
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 135,
+    "lines": 37,
+    "length": 616.8,
+    "width": 0.4284
+   },
+   "solid2": {
+    "feature": "Internal solid infill",
+    "paths": 1,
+    "angle": 45,
+    "lines": 71,
+    "length": 624.5,
+    "width": 0.42364
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 1,
+    "angle": 135,
+    "lines": 40,
+    "length": 704.9,
+    "width": 0.42423
+   }
+  }
+ ]
+}

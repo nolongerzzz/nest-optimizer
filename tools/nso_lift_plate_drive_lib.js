@@ -68,6 +68,18 @@ const sameSoup = (a, b) => !!a && !!b && a.length === b.length && a.every((v, i)
 const volumeOf = (page, soup) => page.evaluate(s => NSO_Lift.volume(new Float32Array(s)), soup);
 
 /* Look down on a piece from above and in front, the whole of it in view. */
+/* Lift is a button in the Crop card, which stands over the left of the view: a check that clicks on a piece
+   with the card open asks (setClearOfCard) for the picture to be slid right, so the piece is clear of it.
+   Only checks whose clicks are found through camera.project use it; the offset is the camera's own. */
+let CLEAR_OF_CARD = false;
+const setClearOfCard = on => { CLEAR_OF_CARD = !!on; };
+const clearOfCard = page => page.evaluate(() => {
+  const card = document.querySelector('#menu-crop[open] > .vp-menu-body');
+  const w = state.renderer.domElement.clientWidth, h = state.renderer.domElement.clientHeight;
+  if (card) state.camera.setViewOffset(w, h, -Math.round(card.getBoundingClientRect().right / 2), 0, w, h);
+  else state.camera.clearViewOffset();
+  state.camera.updateProjectionMatrix();
+});
 async function frameOn(page, id, up) {
   await page.evaluate(([id, up]) => {
     const p = state.placed.find(q => q && q.sourceId === id);
@@ -77,6 +89,7 @@ async function frameOn(page, id, up) {
     state.camera.position.set(c.x, c.y + span * (up || 1.05), c.z + span * 0.45);
     state.controls.update();
   }, [id, up || 0]);
+  if (CLEAR_OF_CARD) await clearOfCard(page);
   await page.waitForTimeout(250);
 }
 /* The screen point of raw triangle `tri` of a piece, as drawn. */
@@ -217,6 +230,6 @@ const dropPieces = (page, ids) => page.evaluate(ids => {
 
 module.exports = {
   makeCheck, rawTriNear, status, readout, card, raw, plateState, pieceInfo, overlaps, added, sameSoup, volumeOf,
-  frameOn, screenOfTri, hoverTri, clickTri, ctrlZ, waitRead, selectRow, armOn, disarm, featureOf, topTriOf, setSlider, strip,
+  frameOn, setClearOfCard, clearOfCard, screenOfTri, hoverTri, clickTri, ctrlZ, waitRead, selectRow, armOn, disarm, featureOf, topTriOf, setSlider, strip,
   openScopeOnPlate, clickScopeTri, frameScope, shooter, dropPieces
 };

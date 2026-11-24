@@ -28,6 +28,21 @@ changes: the plates stay where they stand.
 **Copying across** is item 11: press the thing on one plate, drag it over the
 other, let go - a copy lands there, where it was let go.
 
+**Plates 3 to 6** (2026-11-12, the owner: "allow multi plate preview, since we
+have up to 6 plates"). The main view has up to six beds (docs/BEDS.md), and a
+bed's Preview lands on G-scope's plate of the same number: `openFile` /
+`openSlice` take `opts.plate` (1 to 6) and make that plate active before the
+file is read; the other plates are not touched. Without `opts.plate` (one bed,
+Import) the file lands on the active plate, as before. Plates 1 and 2 always
+stand; plates 3 to 6 stand only while they hold something (or are the active
+one), in number order right of plate 2, and an emptied one goes once another
+plate is made active. Everything on them works as on plates 1 and 2, except a
+drag copies from plates 3 to 6 to plate 1 (1 and 2 copy to each other).
+Internally they are `'p3'` ... `'p6'`; `NSO_MICROSCOPE.livePlates()` lists the
+plates standing, `bedPlate(n)` maps bed n to its plate. Compare's plate (`'cmp'`)
+is labelled **Compare** (it was "Plate 3") and stands last; Compare still takes
+plates 1 and 2. Gate: `gscope:bed-plates` (tools/nso_gscope_bed_plates_test.js).
+
 **Removed.** The LENS | TAKE toggle, the names LENS and TAKE anywhere a user
 reads them, and the shown-plate switch (one plate drawn at a time). The corner
 row is **BACK · ◎ · CLEAR · EXPORT · CLOSE**; ◎ (`#ms-btn-frame`) frames both
@@ -61,24 +76,34 @@ starts in.
 
 Item 9: CLEAR empties the active plate and nothing else. Shift-CLEAR is gone.
 
-## 3. CLOSE and BACK end the visit (round 1a)
+## 3. CLOSE and BACK keep the plates (round 1a; 2026-11-11)
 
-CLOSE, BACK (a producer's way back, e.g. Picture), and every export that leaves
-G-scope end the visit **whole**. The next open starts on plate 1 with:
-- a fresh read of the plate, or of the imported file if either plate was
-  showing it (or a slice made from it) when G-scope closed;
-- nothing isolated, nothing selected, no capture box, the slider at All;
-- the Features list's defaults (Travel off), Toolpath render, REGION off (a
-  click is the piece's), the ▾ menu and the Export card shut, the Slice
-  settings folded and back to the printer profile (item 12);
-- plate 2 empty, and the default view (◎'s framing of both plates).
+Since 2026-11-11 (the owner: "make all plates survive a close, so I can jump back
+and forth between main and G-scope") CLOSE, BACK (a producer's way back, e.g.
+Picture), and every export that leaves G-scope **put G-scope away with its plates**:
 
-**Nothing from the previous visit survives except an imported file**, and a
-CLEAR of the plate that showed it drops that too (item 9).
+- plates 1 to 6 and the Compare plate (a compare, its Compare state with it) come back
+  as they were left when the rail button opens G-scope again - the same
+  documents, what was isolated or selected, the slider, the Features list - on
+  the plate that was showing;
+- **plate 1, when it is a read of the main plate or empty, is read again** on
+  that open (the main plate may have changed meanwhile; an empty main plate
+  empties it; an emptied plate 1 - CLEAR, then CLOSE - keeps nothing). Anything
+  else on plate 1 - an import, a slice - is kept as it was;
+- a close still ends what is half done: a Compare pick, the drag in hand, the
+  ▾ menu or Export card, REGION;
+- while G-scope is put away plate 1 is the active plate, so a file opened from
+  the main view (Import, or a Preview with one bed) lands on plate 1 as before,
+  and the other plates are untouched. With more than one bed, a Preview lands
+  on the plate of its bed's number (item 1, Plates 3 to 6).
 
-`close()` empties both plates (`reset`) and keeps only `importedDoc`; the rail
-button reopens a copy of `importedDoc` with `open()` (which resets everything
-about it) or reads the plate.
+With nothing on any plate a close is the old end of the visit: `reset()`, and
+the next open reads the plate (or the imported file) fresh. `NSO_MICROSCOPE.reset()`
+still drops everything.
+
+`close()` keeps the scene and records the plate that was showing
+(`keptPlate`); the rail button calls `resumeKept()` before anything else.
+Gate: `gscope:close-keep` (tools/nso_gscope_close_keep_test.js).
 
 ## 4. The Features list: checkboxes only (round 1b)
 
@@ -401,8 +426,13 @@ always:
 - **The switch is the view**: Normal (the mesh) | Slice (the toolpaths). The
   document decides its side: a toolpath - a slice made here, a sliced file,
   moves set down into a slice - is the Slice side; a mesh, pieces or an empty
-  plate is the Normal side. Slice on a mesh slices it with the Slice settings
-  as they stand; Normal on a slice made here goes back to its mesh, whole
+  plate is the Normal side. **The plate has one slice** (the owner: "It needs
+  to be one slice"): Slice on the plate opens the Supports card's slice - the
+  file Generate wrote, the one Preview and Export have - and slices nothing of
+  its own; with no slice of the plate as it stands it makes that slice (the
+  Supports card's settings), then opens it. Slice on an STL / 3MF opened here
+  slices it with G-scope's Slice settings as they stand. Normal on a slice
+  made here or the plate's slice goes back to its mesh, whole
   again; Normal on a mesh re-frames; a sliced file has no mesh, so Normal is
   off there. The track between the two flips it too. **Flipping it changes the
   rows**:
@@ -416,9 +446,10 @@ always:
   `fixtures/supports/top_clip_x2_supports.gcode.3mf`, "Bambu Lab A1 mini 0.4
   nozzle", "0.20mm Standard @BBL A1M"); on any other printer the app's 0.4
   nozzle and half of it. Walls 2, 15 % grid and support below 30° are that
-  profile's. They are set from the profile at the start of every visit, an
-  edit lasts the visit, and they take effect on the next slice (Normal, then
-  Slice again), as before.
+  profile's. They are set from the profile when G-scope first opens; CLOSE
+  keeps them with the plates (item 3), and they take effect on the next slice
+  of a file opened here (Normal, then Slice again). The plate's slice is the
+  Supports card's, with that card's settings.
 - The **Features list** stays bottom-left (checkboxes only, item 4; Check all
   in its head), the **slider** on the right, the **corner row** top-right. The
   left wall stays under the card whichever side it shows.
@@ -612,25 +643,48 @@ and moved afterwards, as a plate's pieces are.
 
 ## 13. Compare plates: side by side, then overlaid, then measured
 
+**Filament, side by side** (the owner: "a side by side filament readout in the top centre box, whatever the comparison may be"). While the
+Compare plate holds two sliced pieces - Plates, Pieces, Lasso or Selected - the head box deepens: under its file line, a table of each
+piece's filament (metres and grams) over what is shown - the line types checked in the Features list and, when the slider holds a band,
+that band - in total and line type by line type, with how much more or less the orange piece takes than the blue. It is each move's own
+E summed (no estimate); grams at 1.24 g/cm3 of a 1.75 mm filament. `NSO_MICROSCOPE.compareFilament()` returns the same numbers.
+Gate: `gscope:compare`.
+
 **What the user sees.** With a file on each plate, the card shows a folded row, *Compare plates*, with four
 ways in, each one click or two. **Plates** sets both whole plates down side by side on a **third plate**
 (Compare) - nothing to isolate, no region box to drag. **Pieces** asks for a click on a piece on plate 1, then
-plate 2 is shown and asks for a click on a piece there; the second click sets both pieces down on plate 3
+plate 2 is shown and asks for a click on a piece there; the second click sets both pieces down on the Compare plate
 (press Pieces again to leave the pick). **Lasso** is Pieces with a loop: press on plate 1 and draw round a piece, any shape (a square item
 gets a square) - a yellow loop follows the pointer, the card counts its points - and let go: the loop closes itself and everything inside its
 cylinder is taken, at every height (all layers, every line type that is shown, supports with the piece). Then the same on
-plate 2, and both land on plate 3. A segment is in when its midpoint is inside the loop (even-odd); a mesh piece when any triangle
+plate 2, and both land on the Compare plate. A segment is in when its midpoint is inside the loop (even-odd); a mesh piece when any triangle
 centroid is. A loop that holds nothing, or a stroke that encloses nothing (under 3 mm across), is refused and you draw it again; Esc or the button again leaves the pick. **Selected** is the older way: isolate something on each plate - a
-piece with its supports, one line type, a layer band: whatever a drag would carry - then press it. On plate 3,
+piece with its supports, one line type, a layer band: whatever a drag would carry - then press it. On the Compare plate,
 plate 1's is at the left in orange and plate 2's at the right in blue, each at the height it came from, the
-camera close on them. Plates 1 and 2 are not touched: with Pieces or Lasso each plate is made whole again (un-isolated,
-nothing selected) as soon as its pick is taken, so **Clear compare** empties plate 3 and returns to plates 1 and 2 side by
+camera close on them.
+
+**What a Pieces click takes (2026-11-11).** A piece is a head **with its supports and brim**, as one body, whichever
+of them is clicked:
+- *One OBJECT_ID, many bodies* (a plate exported as one STL, e.g. supp_ref_2x: six heads under id 318): the click takes
+  the **island** under the pointer - the lines of that id that touch it layer on layer (1 mm cells, layers up to
+  0.65 mm below; `islandOf`).
+- *A head and its supports as separate ids* (NSO's own slice: every support and brim is an object of its own, so
+  Export and the exclude mask can name it; Bambu prints them under the head's label): G-scope reads which head each id
+  holds - the Supports card's slice from the document's `nsoPlateSlice` (labels -> plate pieces -> `hostSourceId`),
+  G-scope's Slice switch from `pieceHeads` (the slicer's result now reports each object's `key` / `hostKey`) - and
+  the click takes the head's group, then its island (`headsOf`, `headOf`). The owner's Oblique came out as two
+  pieces, depending on whether the lip was clicked.
+- Outside Compare a click still takes one OBJECT_ID.
+Gates: `gscope:compare-island`, `gscope:compare-heads`.
+
+Plates 1 and 2 are not touched: with Pieces or Lasso each plate is made whole again (un-isolated,
+nothing selected) as soon as its pick is taken, so **Clear compare** empties the Compare plate and returns to plates 1 and 2 side by
 side, whole, with no selection. **Overlay** moves the blue
 one so the two parts' outlines coincide (XY only; the heights stay; with no part walls - supports alone - it
 lines up by everything drawn) and draws both see-through. **Side by side** (or the card's **Back**) undoes it: the blue piece
 returns beside plate 1's, opaque again. The arrows nudge the blue piece by the step chosen
 (0.05 - 5 mm), Z too; the row reads the total. **Colours** puts the line types' own colours back. The
-Features list and the layer slider act on both pieces at once. **Clear compare** empties plate 3.
+Features list and the layer slider act on both pieces at once. **Clear compare** empties the Compare plate.
 
 **Measure** (Diff readout). Reads the two pieces' moves, already in one frame, and writes a table: per line
 type (part, support tree, interface, transition) the Z range and layer count of each side and the area only
@@ -645,7 +699,7 @@ and `bLacks` (ours has it, the reference does not). "The layer under" is each si
 support layers sit at their own Z between the part's), and only if within 0.5 mm below.
 
 **How it is built.** `compareStart` reads each plate's selection with `pullSpec` (the drag's own read) and
-sets the two copies down on plate 3 with `makeGhost` / `setDownOn` at a chosen XY and the height they came
+sets the two copies down on the Compare plate with `makeGhost` / `setDownOn` at a chosen XY and the height they came
 from - so a compare is a plate of two pieces, and every piece control (move, seat, Export) works on it. A
 piece's `tint` is written into its kept geometry's colours (`tintGeometry`); `alpha` draws it see-through.
 `bakePiece` moves the blue piece for Overlay and the nudges. The measuring is `nso-gscope-diff.js`
@@ -657,7 +711,7 @@ compareTint / compareClear / compareDiff / compareReport`.
 to the generator, is not done; the report is the input to either.
 
 **Check.** `compare:diff` (`tools/nso_compare_diff_test.js`, synthetic moves with known answers) and
-`gscope:compare` (`tools/nso_gscope_compare_test.js`): refused with nothing isolated; plate 3 holds two
+`gscope:compare` (`tools/nso_gscope_compare_test.js`): refused with nothing isolated; the Compare plate holds two
 tinted pieces, plates 1 and 2 byte-identical; Overlay's outlines coincide; the nudge moves only the blue
-piece; Colours off and on again are exact; Clear compare empties plate 3; the measurement reads. `COMPARE_A` /
+piece; Colours off and on again are exact; Clear compare empties the Compare plate; the measurement reads. `COMPARE_A` /
 `COMPARE_B` name two other `.gcode.3mf` files for it.

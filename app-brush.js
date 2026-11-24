@@ -1363,7 +1363,7 @@ if (typeof document !== 'undefined') (function () {
     return {
       radius: r,
       intensity: it,
-      mode: mode ? mode.value : 'carve',
+      mode: mode ? mode.value : 'emboss',
       falloff: (hard && hard.checked) ? 'hard' : 'soft'
     };
   }
@@ -1972,6 +1972,15 @@ if (typeof document !== 'undefined') (function () {
     }
     syncLabels();
     setLabel();
+    /* The Brush is armed only while its card (Sculpt, shared with Carve) is open: shutting the
+       card puts the brush away, ending a stroke in flight as the button does. A MutationObserver
+       on `open`, not a 'toggle' listener, for the reason app-join.js's one-panel rule gives. */
+    var card = el('menu-sculpt');
+    if (card && !card._brushCardBound && typeof MutationObserver === 'function') {
+      card._brushCardBound = true;
+      new MutationObserver(function () { if (!card.open && armed) exit(); })
+        .observe(card, { attributes: true, attributeFilter: ['open'] });
+    }
     if (!state || !state.renderer || !state.renderer.domElement || state._brushBound) return;
     state._brushBound = true;
     state.renderer.domElement.addEventListener('pointerdown', onDown, true);

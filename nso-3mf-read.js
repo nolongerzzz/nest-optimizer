@@ -12,7 +12,12 @@
  *   3D/Objects/*.model          Production-extension object parts, reached via
  *                               p:path on <component> / <item> (Bambu Studio
  *                               and PrusaSlicer write their meshes this way)
- *   Metadata/model_settings.config   Bambu object names, when present
+ *   Metadata/model_settings.config   Bambu object names, when present, and the filament
+ *                                    (extruder) each object and part prints with
+ *   paint_color on a <triangle>      Studio's painted filament colours (PrusaSlicer:
+ *                                    slic3rpe:mmu_segmentation), kept per triangle with
+ *                                    the project's filament colours - nso_paint.js reads
+ *                                    them (docs/MULTICOLOR.md)
  *   Metadata/nso_scene.json          NSO's own scene block, handed back
  *                                    verbatim as `sceneJson` when the archive
  *                                    has one - this reader does not interpret
@@ -370,7 +375,7 @@
             model.objects.set(cur.id, cur);
             break;
           case 'mesh':
-            if (cur) { inMesh = true; cur.mesh = { vertices: [], triangles: [] }; }
+            if (cur) { inMesh = true; cur.mesh = { vertices: [], triangles: [], paint: null }; }
             break;
           case 'vertex':
             if (inMesh) {
@@ -388,6 +393,12 @@
                 throw new Error('Bad triangle indices in object ' + cur.id);
               }
               cur.mesh.triangles.push(a, b, c);
+              /* a painted triangle's filament colours (Studio's paint_color, PrusaSlicer's mmu_segmentation): kept as written */
+              var pc = attrs.paint_color || attrs['slic3rpe:mmu_segmentation'] || null;
+              if (pc) {
+                if (!cur.mesh.paint) cur.mesh.paint = [];
+                cur.mesh.paint[cur.mesh.triangles.length / 3 - 1] = String(pc);
+              }
             }
             break;
           case 'component':
@@ -434,6 +445,34 @@
     return model;
   }
 
+  /**
+   * The filament each object and part prints with, from Bambu's model_settings.config: { objectId: { ext: n, parts: { partId: n } } }
+   * (1-based; a part's own beats its object's). A part's id is the object id of its component in the model.
+   */
+  function parseModelSettingsExtruders(xml) {
+    var out = {}, objId = null, partId = null, depth = 0, objDepth = -1, partDepth = -1;
+    walkXml(xml, {
+      open: function (name, attrs) {
+        depth++;
+        if (name === 'object' && attrs.id != null) { objId = String(attrs.id); objDepth = depth; out[objId] = out[objId] || { ext: 0, parts: {} }; }
+        else if (name === 'part' && objId && attrs.id != null) { partId = String(attrs.id); partDepth = depth; }
+        else if (name === 'metadata' && objId && attrs.key === 'extruder') {
+          var n = parseInt(attrs.value, 10);
+          if (n > 0) {
+            if (partId && depth === partDepth + 1) out[objId].parts[partId] = n;
+            else if (depth === objDepth + 1) out[objId].ext = n;
+          }
+        }
+      },
+      close: function (name) {
+        if (name === 'part' && depth === partDepth) { partId = null; partDepth = -1; }
+        if (name === 'object' && depth === objDepth) { objId = null; objDepth = -1; }
+        depth--;
+      }
+    });
+    return out;
+  }
+
   /** Bambu's Metadata/model_settings.config: object id -> name. */
   function parseModelSettingsNames(xml) {
     var names = {};
@@ -453,6 +492,29 @@
       }
     });
     return names;
+  }
+
+  /**
+   * The settings an object overrides in Bambu's model_settings.config (its Objects tab): [{ id, name, keys: { key: value } }], one per object
+   * that has any. Its name and extruder, and its parts' own metadata, are not overrides.
+   */
+  function parseModelSettingsOverrides(xml) {
+    var out = [], cur = null, depth = 0, objDepth = -1;
+    walkXml(xml, {
+      open: function (name, attrs) {
+        depth++;
+        if (name === 'object' && attrs.id != null) { cur = { id: String(attrs.id), name: '', keys: {} }; objDepth = depth; }
+        else if (name === 'metadata' && cur && depth === objDepth + 1 && attrs.key) {
+          if (attrs.key === 'name') cur.name = attrs.value || '';
+          else if (attrs.key !== 'extruder') cur.keys[attrs.key] = attrs.value == null ? '' : String(attrs.value);
+        }
+      },
+      close: function (name) {
+        if (name === 'object' && depth === objDepth) { if (cur && Object.keys(cur.keys).length) out.push(cur); cur = null; objDepth = -1; }
+        depth--;
+      }
+    });
+    return out;
   }
 
   /** Root relationship -> model part name, defaulting to 3D/3dmodel.model. */
@@ -491,6 +553,8 @@
    *                    warnings: string[]}>}
    *   positions is a triangle soup [x,y,z, x,y,z, x,y,z, ...] per triangle, in
    *   millimetres, Z up, with all transforms applied - one entry per build item.
+   *   vertexIds (Int32Array, one per soup vertex) says which of the file's
+   *   vertices each one is: equal ids, one vertex; the file's own indexing.
    */
   function parse3MF(bytes, opts) {
     opts = opts || {};
@@ -517,12 +581,28 @@
       ? zip.read('_rels/.rels').then(function (d) { return parseRootModelPart(decoder.decode(d)); })
       : Promise.resolve('3D/3dmodel.model');
 
+    var objectSettings = [], extruders = {};
     var bambuNames = zip.has('Metadata/model_settings.config')
       ? zip.read('Metadata/model_settings.config').then(function (d) {
-          try { return parseModelSettingsNames(decoder.decode(d)); }
+          try {
+            var xml = decoder.decode(d);
+            objectSettings = parseModelSettingsOverrides(xml);
+            try { extruders = parseModelSettingsExtruders(xml); } catch (e2) { extruders = {}; }
+            return parseModelSettingsNames(xml);
+          }
           catch (e) { warnings.push('model_settings.config unreadable: ' + e.message); return {}; }
         })
       : Promise.resolve({});
+
+    /* A Bambu Studio project's own settings (Metadata/project_settings.config): what it was sliced with - its process, its filament, its
+       printer, and which of them were changed from the system presets (different_settings_to_system). Kept for the Print card, which can
+       slice with them (app-print.js plateProject). Optional: a plain 3MF has none, and an unreadable one is a warning. */
+    var projectSettings = zip.has('Metadata/project_settings.config')
+      ? zip.read('Metadata/project_settings.config').then(function (d) {
+          try { var o = JSON.parse(decoder.decode(d)); return o && typeof o === 'object' && !Array.isArray(o) ? o : null; }
+          catch (e) { warnings.push('project_settings.config unreadable: ' + e.message); return null; }
+        }).catch(function () { return null; })
+      : Promise.resolve(null);
 
     // Optional, and optional all the way down: a plain Bambu or MakerWorld
     // file has no such part, and an unreadable one is a warning rather than a
@@ -537,8 +617,8 @@
         })
       : Promise.resolve(null);
 
-    return Promise.all([rootRels, bambuNames, sceneJson]).then(function (r) {
-      var rootPart = r[0], names = r[1], scene = r[2];
+    return Promise.all([rootRels, bambuNames, sceneJson, projectSettings]).then(function (r) {
+      var rootPart = r[0], names = r[1], scene = r[2], project = r[3];
       return loadPart(rootPart).then(function (root) {
         var items = root.build.slice();
         if (!items.length) {
@@ -561,6 +641,7 @@
             var soup = [];
             var found = { name: '' };   // first <object name> met on the way down
             var itemPart = resolvePartPath(item.path, rootPart);
+            soup.extOf = extruders[String(item.objectid)] || { ext: 0, parts: {} };   // the filament of this item's object and its parts
             return collect(itemPart, item.objectid, item.transform, soup, 0, found).then(function () {
               if (!soup.length) {
                 warnings.push('Build item ' + (idx + 1) + ' (object ' + item.objectid + ') has no mesh; skipped');
@@ -574,10 +655,22 @@
               // object inside it may not be); then the file name.
               var name = names[item.objectid] || found.name ||
                          (items.length === 1 ? base : base + '_' + (idx + 1));
+              /* the filament colours: per triangle its paint code (or null), whether the reader swapped two of its corners,
+                 and the filament of its part / object - null when nothing is painted and every part prints with the first */
+              var anyPaint = soup.paint && soup.paint.some(function (x) { return !!x; });
+              var anyExt = soup.ext && soup.ext.some(function (x) { return x > 1; });
+              var paint = (anyPaint || anyExt) ? {
+                codes: soup.paint, flip: Uint8Array.from(soup.flip), ext: Uint8Array.from(soup.ext),
+                colours: colourList(project)
+              } : null;
               out.push({
                 id: item.objectid,
                 name: name,
+                paint: paint,
                 positions: positions,
+                // per soup vertex, its vertex in the file (appendTransformed): the mesh's own indexing, kept so an
+                // export can write it back rather than weld by position
+                vertexIds: Int32Array.from(soup.ids || []),
                 triangleCount: positions.length / 9
               });
             });
@@ -600,6 +693,8 @@
             var chain = Promise.resolve();
             obj.components.forEach(function (comp) {
               chain = chain.then(function () {
+                /* a top-level component is a part: its filament is its own, else its object's */
+                if (depth === 0) soup.partExt = soup.extOf.parts[String(comp.objectid)] || 0;
                 return collect(resolvePartPath(comp.path, partName), comp.objectid,
                                mul(comp.transform, M), soup, depth + 1, found);
               });
@@ -615,6 +710,8 @@
             unit: root.unit,
             application: root.metadata.Application || '',
             sceneJson: scene,
+            projectSettings: project,                  // Studio's project_settings.config, or null
+            objectSettings: objectSettings,            // [{ id, name, keys }]: an object's own setting overrides in model_settings.config
             warnings: warnings
           };
         });
@@ -624,15 +721,33 @@
 
   function appendTransformed(mesh, M, soup) {
     var v = mesh.vertices, t = mesh.triangles;
+    // Each soup vertex's identity in the file: this mesh's base (every mesh reached, each time it is reached, gets
+    // its own run) + its vertex index. Two shells that touch keep their own vertices where they meet - welding by
+    // position would join them along the seam, every edge there shared by four faces (docs/BAMBU-PROJECT-EXPORT.md).
+    var ids = soup.ids || (soup.ids = []), base = soup.idBase || 0;
+    soup.idBase = base + v.length / 3;
     // A mirroring transform turns the mesh inside out; swap two corners so the
     // winding still points outward.
     var flip = det3(M) < 0;
+    var paint = soup.paint || (soup.paint = []), flips = soup.flip || (soup.flip = []), exts = soup.ext || (soup.ext = []);
+    var own = soup.partExt || (soup.extOf && soup.extOf.ext) || 1;
     for (var i = 0; i < t.length; i += 3) {
       var a = t[i], b = flip ? t[i + 2] : t[i + 1], c = flip ? t[i + 1] : t[i + 2];
       pushVertex(v, a, M, soup);
       pushVertex(v, b, M, soup);
       pushVertex(v, c, M, soup);
+      ids.push(base + a, base + b, base + c);
+      paint.push((mesh.paint && mesh.paint[i / 3]) || null);
+      flips.push(flip ? 1 : 0);
+      exts.push(own);
     }
+  }
+
+  /** The project's filament colours, first filament first ('#RRGGBB'), from Studio's project_settings.config. */
+  function colourList(project) {
+    var c = project && project.filament_colour;
+    if (typeof c === 'string') c = c.split(/[;,]/);
+    return Array.isArray(c) ? c.map(function (x) { return String(x).trim(); }) : [];
   }
 
   function pushVertex(v, idx, M, soup) {
@@ -650,7 +765,8 @@
     return parse3MF(bytes, opts).then(function (r) {
       var W = typeof self !== 'undefined' && self.NSO_Work;
       if (!W) return r;
-      return W.transfer(r, r.objects.map(function (o) { return o.positions.buffer; }));
+      return W.transfer(r, r.objects.map(function (o) { return o.positions.buffer; })
+        .concat(r.objects.map(function (o) { return o.vertexIds.buffer; })));
     });
   }
 
@@ -658,9 +774,11 @@
     parse3MF: parse3MF,
     parse3MFTransfer: parse3MFTransfer,
     openZip: openZip,
+    parseModelSettingsOverrides: parseModelSettingsOverrides,
     walkXml: walkXml,
     parseModelXml: parseModelXml,
     parseModelSettingsNames: parseModelSettingsNames,
+    parseModelSettingsExtruders: parseModelSettingsExtruders,
     parseRootModelPart: parseRootModelPart,
     parseTransform: parseTransform,
     mul: mul,

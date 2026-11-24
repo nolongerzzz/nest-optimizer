@@ -116,7 +116,7 @@ wire:offset, wire:scale, stock:shelf, leave:tool.
   a pose on the record reads as it lies. The stretch rows fill only where the
   piece read more of L / W / H as loaded (`NSO_scaleBodyRows`, the raw soup
   turned back by bakedQ, cached per soup) than it does now: a leaned box keeps
-  all three; a cone (stock:shelf) or a blob (wire:offset) gets no stretch row.
+  all three; a cone (stock:shelf) or a blob (wire:offset) gets no stretch row. (Superseded: every piece but a ring, rod or recognised shape now gets the stretch rows wherever it has no straight run, and `NSO_scaleBodyRows` is gone - docs/SECTION.md.)
 - **Cut layout** (app-cut.js / app-join.js): a square cut across a turned
   piece's length parts the halves along the blade normal (`layoutAfterSplit`'s
   new `along`, from `getCutPlaneLocal`'s `normalWorld`), not along plate X. The

@@ -103,6 +103,7 @@ withApp(async (page, logs) => {
   }, alongFrac);
   const setSized = (w, d, k) => page.evaluate(([w, d, k]) => {
     document.getElementById('btn-cut-blade-sized').click();
+    cutBladeState().follow = false; cutBladeRefresh();      // Follow strand is on by default; these drive the plain sized blade
     const set = (id, v) => { const e = document.getElementById(id); e.value = String(v); e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); };
     set('cut-blade-width', w); set('cut-blade-depth', d); set('cut-blade-kerf', k);
   }, [w, d, k]);
@@ -169,7 +170,20 @@ withApp(async (page, logs) => {
   console.log('spinning in place: bevel and mitre');
   id = await fresh();
   await setSized(12, 8, 1);
-  const click = await fingerTop(0.5);
+  /* A point on the finger's top the blade's handle (ball and bar) does not cover on screen: the handle is drawn over
+     everything, and a press on it takes hold of the blade instead of placing it (app-core.js) - on every blade. */
+  let click = null;
+  for (const f of [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]) {
+    const wp = await fingerTop(f);
+    const under = wp && await page.evaluate(wp => {
+      const v = new THREE.Vector3(wp[0], wp[1], wp[2]).project(state.camera);
+      state.raycaster.setFromCamera(new THREE.Vector2(v.x, v.y), state.camera);
+      const h = state.cutHelper ? state.cutHelper.children.filter(c => c.userData && (c.userData.cutBall || c.userData.cutBar)) : [];
+      return h.length > 0 && state.raycaster.intersectObjects(h, false).length > 0;
+    }, wp);
+    if (wp && !under) { click = wp; break; }
+  }
+  check('found a spot on the finger clear of the blade\'s handle', !!click);
   await clickAt(click);
   // The blade holds the click IN ITS OWN PLANE exactly. Along the plane's normal the plane may sit up to 1 mm off the
   // click: a cut keeps 1 mm of piece on each side (MIN_CUT_SIDE_MM), so a click on the very top, with the blade turned

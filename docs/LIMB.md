@@ -79,6 +79,19 @@ short stubs, 1.6-4.4 mm from their fork, with ring radii from 0.9 to 11 mm (the 
 at the tree's joints). Pressing mid-prong finds the same fork as pressing the tip
 (tested); pressing low on the trunk carries 1,868 of the 1,900 vertices.
 
+### On a rod: the hint
+
+When the grab is on a rod with a flat, round tip - a shoot Cylinders → Branch
+made, or the trunk - the card passes `opts.hint` (nso_rod_branch.js,
+`NSO_rodLimbHint`): the rod's own axis is the bone and the hinge sits 1 mm past
+where the rod meets what it grows from. The tree reading above skews round a
+fat or slanted junction (a short Ø10.5 shoot at 45° on a Ø30.84 trunk refused
+every Extend and Bend). The flex zone is then subdivided in small spheres along
+the axis that stay off the junction. Two guards came with it: a flex vertex's
+move fades in over 3 mm from the fork's boundary, and `closedGuard` refuses a
+result the canonical checker (1e-4 weld) would call open, doubled or collapsed.
+docs/TUBE-EDGE.md, "Limb on a rod".
+
 ## The move
 
 The handle `A` is taken to a new place `A'`. The bone `Q -> A` (length `L`) becomes a

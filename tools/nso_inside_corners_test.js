@@ -126,7 +126,7 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
     try { E.rawVertexBallCorners(L.soup, 2, false, R, { minTurnDeg: 25 }); }
     catch (e) { msg = e.message; }
     T.check('setback refuses a face with one reflex corner',
-            /needs all 6 corners of this face free - 1 /.test(msg), '(' + msg + ')');
+            /needs all 6 corners of this face square - 1 is a curve, reflex or not square/.test(msg), '(' + msg + ')');
     /* 1c. Its two-edge nature, stated as a number: on a convex vertex the
        blend closes to a point on the depth edge, which stays sharp. */
     const cube = E.rawBoxSoup([0, 0, 0], [20, 20, 20]);

@@ -224,7 +224,7 @@ async function cardRun() {
     /* this section is the card's verdict on the lattice planner's lost spots (30 deg lean: the three at the arc's foot); the
        one-trunk Auto (supports-one-trunk, lean 50 deg) reaches one more of them, so the box is off here and its own gate is
        support:onetrunk */
-    await page.evaluate(() => { const e = document.getElementById('sup-one'); if (e) e.checked = false; });
+    await page.evaluate(() => { const e = document.getElementById('sup-one'); if (e) { e.checked = false; e.dataset.testOff = '1'; } });   /* hidden, it reads on unless a test says off */
     await page.waitForFunction(() => NSO_SUPPORTS_CARD.view().areas.length > 0, null, { timeout: 60000 });
     const before = await page.evaluate(() => NSO_SUPPORTS_CARD.view());
     await page.evaluate(() => NSO_SUPPORTS_CARD.generate());
@@ -580,7 +580,8 @@ async function cardRun() {
     const zip = R3.openZip(new Uint8Array(fs.readFileSync(file))), dec = new TextDecoder();
     const model = dec.decode(await zip.read('3D/3dmodel.model'));
     const ms = zip.names().includes('Metadata/model_settings.config') ? dec.decode(await zip.read('Metadata/model_settings.config')) : '';
-    const meshes = zip.names().filter(n => /^3D\/Objects\/object_\d+\.model$/.test(n)).length;
+    // either shape nso-3mf.js writes: SPLIT (a 3D/Objects/object_N.model part per mesh) or INLINE (the meshes in 3D/3dmodel.model)
+    const meshes = zip.names().filter(n => /^3D\/Objects\/object_\d+\.model$/.test(n)).length + (model.match(/<mesh\b/g) || []).length;
     const tw = (ms.match(/key="detect_thin_wall" value="1"/g) || []).length;
     check('the export is a Bambu project: Studio\'s envelope, a mesh part an object, each support with its thin-wall overrides',
       /<metadata name="Application">BambuStudio-[\d.]+<\/metadata>/.test(model) && meshes === b.objects.length && tw === b.objects.length - 1,

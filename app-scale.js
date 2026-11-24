@@ -641,7 +641,8 @@ function NSO_scaleSelectedModel(spec) {
                        material goes in or comes out inside one clean
                        constant-section band and every wall, floor, hole,
                        pocket and lip keeps its size. An axis with no such band
-                       gets no row. A ring or rod shows its one axis under
+                       still gets its row, as a stretch along that axis alone
+                       (NSO_scaleAsItLies). A ring or rod shows its one axis under
                        the same names - Height when the axis is its Z - and
                        its readout, holds and done lines say the same word.
      Outer Ø / Bore Ø / Wall
@@ -667,7 +668,9 @@ function NSO_scaleSelectedModel(spec) {
      Whole x           today's uniform factor. Reset to 1 on every selection,
                        bake and pose change.
      Longest           today's longest-edge target, prefilled with the longest
-                       edge. Hidden when a named field shows the same number.
+                       edge. Hidden when a named field shows the same number -
+                       on every piece but a ring, rod or recognised shape,
+                       since those always have Length and Height.
      Fit to plate      the largest uniform factor that fits the machine.
 
    Every field shows nso_section.js's one display precision (NSO_sectionShow)
@@ -680,13 +683,17 @@ function NSO_scaleSelectedModel(spec) {
    either - dragging, typing, the spinner - runs the verb on the piece as it
    was when the edit began and draws the result as a translucent preview
    standing over the piece, which turns to a ghost; the PIECE ITSELF IS NOT
-   TOUCHED. The preview is a scene helper (nso-helpers.js, owner 'scale-live'):
+   TOUCHED. EVERY FIELD STAYS STAGED: moving Width after Length keeps the
+   Length, and any number of rows can be adjusted before Set - each change
+   re-runs all of them, in the card's row order, on the piece as it was (the
+   uniform rows last: Longest, then Whole x). The preview is a scene helper (nso-helpers.js, owner 'scale-live'):
    not a piece, never picked, packed or exported, not an Undo step. Set (the
    button, or Enter in the field) bakes what the preview shows: one Undo step,
-   however many values were tried on the way. Cancel, Escape, another piece,
-   another field, the mm | in toggle or closing the card drops it. A value the
-   piece refuses says why under the field, in red, and draws nothing; Set stays
-   greyed until the value is one it takes. Fit to plate stays a button and
+   however many values and fields were tried on the way. Cancel, Escape,
+   another piece, the mm | in toggle or closing the card drops it. A value the
+   piece refuses says why under its field, in red, and is left out of the
+   preview (the other fields still draw; with nothing else staged, nothing
+   does); Set stays greyed until every staged value is one it takes. Fit to plate stays a button and
    applies at once.
 --------------------------------------------------------------------------- */
 
@@ -699,29 +706,9 @@ function NSO_scaleSectionOf(m) {
   if (!raw || typeof NSO_sectionRead !== 'function') return null;
   var soup = NSO_scaleSpaceOf(m, raw).f;
   if (NSO_scaleSectionCache && NSO_scaleSectionCache.has(soup)) return NSO_scaleSectionCache.get(soup);
-  var s = NSO_scaleAsItLies(NSO_sectionRead(soup), soup, NSO_scaleBodyRows(m, raw));
+  var s = NSO_scaleAsItLies(NSO_sectionRead(soup), soup);
   if (NSO_scaleSectionCache) NSO_scaleSectionCache.set(soup, s);
   return s;
-}
-
-/* How many of Length / Width / Height the piece had as it was LOADED - its
-   soup turned back by the turns baked into it since (bakedQ, app-core.js).
-   A piece the pose verbs never turned reads as it is. */
-var NSO_scaleBodyCache = (typeof WeakMap === 'function') ? new WeakMap() : null;
-function NSO_scaleBodyRows(m, raw) {
-  if (NSO_scaleBodyCache && NSO_scaleBodyCache.has(raw)) return NSO_scaleBodyCache.get(raw);
-  var p = (m && typeof state !== 'undefined' && state.placed)
-    ? state.placed.find(function (q) { return q && q.sourceId === m.id; }) : null;
-  var soup = raw;
-  if (p && p.bakedQ && typeof THREE !== 'undefined' && typeof nsoRawTurnRows === 'function') {
-    var bq = new THREE.Quaternion(p.bakedQ[0], p.bakedQ[1], p.bakedQ[2], p.bakedQ[3]);
-    if (Math.abs(Math.abs(bq.w) - 1) > 1e-12) soup = nsoTurnRaw(raw, nsoRawTurnRows(bq.invert()));
-  }
-  var r = (soup === raw) ? NSO_sectionRead(raw) : NSO_sectionRead(soup);
-  var v = r && r.verbs, n = v ? ['length', 'width', 'height'].filter(function (k) { return v[k]; }).length : 0;
-  if (r && r.shape === 'round') n = 0;
-  if (NSO_scaleBodyCache) NSO_scaleBodyCache.set(raw, n);
-  return n;
 }
 
 /* THE PIECE'S FRAME. Length, Width and Height are the piece's as it LIES:
@@ -770,44 +757,48 @@ function NSO_scaleSpaceOf(m, raw) {
   return space;
 }
 
-/* A turn keeps the rows. Where the section reader finds a straight run along
-   a frame axis the row is that run's (Extend / Shorten, as ever). A piece
-   turned off its own axes - leaned, most often - has no straight run along a
-   level line any more, and would lose rows it had as it was loaded; when it
-   reads fewer of Length / Width / Height as it lies than it did then
-   (`bodyRows`), every missing one is the piece's extent along that frame axis,
-   and typing a value STRETCHES it there, every point scaled about the middle
-   along that one axis. A piece that had no straight run to begin with (a cone,
-   a blob) is not given one; rings, rods and the recognised shapes keep their
-   own rows. */
-function NSO_scaleAsItLies(s, soup, bodyRows) {
+/* EVERY PIECE HAS LENGTH, WIDTH AND HEIGHT. Where the section reader finds a
+   straight run along a frame axis the row is that run's (Extend / Shorten, as
+   ever: walls, holes and lips keep their size). Where it finds none - a piece
+   turned off its own axes, a pill sliced in half, a cone, a blob - the row is
+   still there: it is the piece's extent along that frame axis (Length the long
+   side of its footprint, Width the short side, Height off the plate), and
+   typing a value STRETCHES it there, every point scaled about the middle along
+   that one axis. So Longest, which is always Length's or Height's number, hides
+   on every such piece and the card reads Offset, Length, Width, Height,
+   Whole x. Rings, rods and the recognised shapes keep their own rows. */
+function NSO_scaleAsItLies(s, soup) {
   if (!s || !s.verbs || s.shape === 'round' || typeof NSO_sectionAxisWord !== 'function') return s;
   var v = s.verbs, b = NSO_scaleRawBounds(soup);
   var have = ['length', 'width', 'height'].filter(function (k) { return v[k]; }).length;
-  if (!b || have === 3 || !(bodyRows > have)) return s;
+  if (!b || have === 3) return s;
   var out = {}, k;
   for (k in s) out[k] = s[k];
   var nv = {};
   for (k in v) nv[k] = Array.isArray(v[k]) ? v[k].slice() : v[k];
   [0, 1, 2].forEach(function (i) {
     var word = NSO_sectionAxisWord(s, i);
-    if (nv[word]) return;
+    if (nv[word] || !(b.span[i] > 0)) return;     // a flat side has nothing to stretch
     nv[word] = { axisIdx: i, axis: 'xyz'.charAt(i), mm: b.span[i], stretch: true };
   });
-  nv.named = ['length', 'width', 'height'].filter(function (n) { return nv[n]; });
+  var lwh = ['length', 'width', 'height'].filter(function (n) { return nv[n]; });
+  nv.named = lwh.slice();
   if (v.outer || v.diameter) nv.named.push(v.outer ? 'outer' : 'diameter');
   if (v.bore) nv.named.push('bore');
   if (v.wall) nv.named.push('wall');
   var longest = Math.max(b.span[0], b.span[1], b.span[2]);
-  nv.longest = !['length', 'width', 'height'].some(function (n) {
+  nv.longest = !lwh.some(function (n) {
     return NSO_sectionShow(nv[n].mm) === NSO_sectionShow(longest);
   });
   nv.longestMm = longest;
   out.verbs = nv;
-  var stretched = ['length', 'width', 'height'].filter(function (n) { return nv[n].stretch; });
-  out.reason = (s.why || s.reason) + ', so ' + stretched.map(function (n) { return n; }).join(', ') +
-    (stretched.length > 1 ? ' stretch' : ' stretches') + ' as it lies' + (nv.offset ? ', an even offset' : '') +
-    ' and whole-piece scaling apply';
+  var and = function (a) { return a.length > 1 ? a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1] : a[0]; };
+  var can = lwh.slice();
+  if (nv.offset) can.push('an even offset');
+  can.push('whole-piece scaling');
+  var stretched = lwh.filter(function (n) { return nv[n].stretch; });
+  out.reason = (s.why || s.reason) + ', so ' + and(can) + ' apply' + (stretched.length
+    ? ' - ' + and(stretched) + (stretched.length > 1 ? ' each scale' : ' scales') + ' it along that side alone' : '');
   return out;
 }
 
@@ -958,32 +949,67 @@ function NSO_scaleFitToPlate() {
    live field shows under itself).
 
    verb: { label, undoType, paint, run(soup) -> engine result, describe(r) } */
-function NSO_scaleCardTry(verb, m, soup) {
+function NSO_scaleCardTry(verb, m, soup) { return NSO_scaleCardTryAll([verb], m, soup); }
+
+/* Several verbs on one soup, in the order given: each runs on what the one
+   before left, all in the piece's frame (NSO_scaleSpaceOf is read once, on the
+   soup the edit began from, and the result turned back once at the end). The
+   card stages every field it has at the same time, so what it previews and
+   what Set bakes is this chain - one result, one commit, one Undo step.
+
+   A verb that names a Length / Width / Height is run against the reading of
+   the soup the chain STARTED from (`ctx.section`): which axis each one is was
+   decided there, and an earlier step that shortens Length below Width must not
+   make "Length" mean the other axis for the step after it.
+
+   One verb: exactly what NSO_scaleCardTry always returned. Several: a
+   combined result, the first refusal's field in `failedKey` (a verb's `key`). */
+function NSO_scaleCardTryAll(verbs, m, soup) {
+  var first = verbs[0];
   var no = function (reason, status, inline) {
     return { ok: false, reason: reason, status: status, inline: inline || status };
   };
   if (!m) return no('no selection', 'Select a piece first');
   soup = soup || ((m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null);
-  if (!soup) return no('no rawTris', verb.label + ' needs a raw piece - unchanged', 'needs a raw piece');
+  if (!soup) return no('no rawTris', first.label + ' needs a raw piece - unchanged', 'needs a raw piece');
   var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
   if (painted > 0) {
-    var p = no('painted faces: ' + painted, 'Scale stood down - ' + painted + ' painted face(s); ' + verb.paint,
+    var p = no('painted faces: ' + painted, 'Scale stood down - ' + painted + ' painted face(s); ' + first.paint,
       painted + ' painted face(s) - clear paint to resize');
     p.painted = painted;
     return p;
   }
   /* in the piece's frame, as it lies (NSO_scaleSpaceOf), and turned back */
+  verbs = NSO_scaleMergeRing(verbs);
+  first = verbs[0];
   var space = NSO_scaleSpaceOf(m, soup);
-  var r = verb.run(space.f);
-  if (!r.ok) {
-    r.inline = NSO_scaleText(r.reason);
-    r.status = verb.label + ' refused - piece unchanged (' + r.inline + ')';
+  var cur = space.f, ctx = verbs.length > 1 ? { section: NSO_scaleSectionOfSoup(space.f) } : null;
+  var said = [], r = null;
+  for (var i = 0; i < verbs.length; i++) {
+    var verb = verbs[i];
+    r = verb.run(cur, ctx);
+    if (!r.ok) {
+      r.inline = NSO_scaleText(r.reason);
+      r.failedKey = verb.keyOf ? verb.keyOf(r) : verb.key;
+      // a merged ring move is refused in the name of the field it blames
+      var said0 = (verb.keys && NSO_SCALE_RING_LABEL[r.failedKey]) || verb.label;
+      r.status = said0 + ' refused - piece unchanged (' + r.inline + ')';
+      return r;
+    }
+    r.said = verb.describe(r);
+    said.push(verbs.length > 1 ? verb.label + ' ' + r.said : r.said);
+    cur = r.tris;
+  }
+  if (verbs.length === 1) {
+    r.tris = space.toRaw(r.tris);
+    r.label = first.label; r.undoType = first.undoType;
+    r.status = first.label + ' done - ' + r.said;
     return r;
   }
-  if (r.tris) r.tris = space.toRaw(r.tris);
-  r.said = verb.describe(r);
-  r.status = verb.label + ' done - ' + r.said;
-  return r;
+  var out = { ok: true, tris: space.toRaw(cur), steps: verbs.length, label: 'Scale', undoType: 'scaleReplace' };
+  out.said = said.join('; ');
+  out.status = 'Scale done - ' + out.said;
+  return out;
 }
 
 /* Try, then one NSO_sculptCommitRaw - one Undo step. */
@@ -1018,6 +1044,7 @@ function NSO_scaleRingVerb(verb, value) {
   var label = NSO_SCALE_RING_LABEL[verb] || verb;
   return {
     label: label, undoType: 'ringReplace', paint: label + NSO_SCALE_FACES_PAINT,
+    ring: verb, value: value,
     run: function (soup) { return NSO_ringApplyRaw(soup, verb, value); },
     describe: function (r) {
       // nso_ring.js's own figures with mm shown (a ring at the card's one
@@ -1026,6 +1053,36 @@ function NSO_scaleRingVerb(verb, value) {
     }
   };
 }
+/* Outer Ø, Bore Ø and Wall staged together are ONE ring move (nso_ring.js's
+   'ring' verb), not three in a row: run one at a time, Outer Ø brought in past
+   where the bore STOOD was refused even with a smaller bore typed beside it,
+   because Outer ran first against the old bore. The merged verb stands where
+   the first of them stood; a refusal names the field nso_ring.js blames. */
+var NSO_SCALE_RING_KEYS = ['outer', 'bore', 'wall'];
+function NSO_scaleMergeRing(verbs) {
+  var ring = verbs.filter(function (v) { return v && NSO_SCALE_RING_KEYS.indexOf(v.ring) >= 0; });
+  if (ring.length < 2) return verbs;
+  var value = { outer: null, bore: null, wall: null }, keys = [];
+  ring.forEach(function (v) { value[v.ring] = v.value; keys.push(v.key || v.ring); });
+  var label = ring.map(function (v) { return v.label; }).join(' + ');
+  var merged = {
+    label: label, undoType: 'ringReplace', paint: label + NSO_SCALE_FACES_PAINT,
+    key: keys[0], keys: keys,
+    run: function (soup) { return NSO_ringApplyRaw(soup, 'ring', value); },
+    keyOf: function (r) {
+      var b = r && r.blame;
+      return b && keys.indexOf(b) >= 0 ? b : keys[keys.length - 1];
+    },
+    describe: ring[0].describe
+  };
+  var out = [], put = false;
+  verbs.forEach(function (v) {
+    if (ring.indexOf(v) < 0) out.push(v);
+    else if (!put) { out.push(merged); put = true; }
+  });
+  return out;
+}
+
 function NSO_scaleRingApply(verb, value) { return NSO_scaleCardApply(NSO_scaleRingVerb(verb, value)); }
 
 /* Length / Width / Height: Extend or Shorten along the piece's own axis that
@@ -1039,8 +1096,8 @@ function NSO_scaleAxisVerb(verb, value) {
   var label = NSO_SCALE_AXIS_LABEL[verb] || verb;
   return {
     label: label, undoType: 'extendReplace', paint: label + NSO_SCALE_FACES_PAINT,
-    run: function (soup) {
-      var s = NSO_scaleSectionOfSoup(soup), dim = s && s.verbs ? s.verbs[verb] : null;
+    run: function (soup, ctx) {
+      var s = (ctx && ctx.section) || NSO_scaleSectionOfSoup(soup), dim = s && s.verbs ? s.verbs[verb] : null;
       if (!dim) {
         return { ok: false, reason: (s ? s.why || s.reason : 'no reading') + ' - no straight run to stretch along its ' +
                  label.toLowerCase() };
@@ -1143,8 +1200,11 @@ if (typeof document !== 'undefined') {
       ['ellC', 'scale-ell-c', 'scale-ell-c-row'],
       ['ringDia', 'scale-torus-ring', 'scale-torus-ring-row'],
       ['tubeDia', 'scale-torus-tube', 'scale-torus-tube-row'],
-      ['factor', 'scale-factor', 'scale-factor-row'],
-      ['longest', 'scale-target', 'scale-longest-row']
+      // The ORDER the staged fields are applied in (see preview()): the
+      // piece's own sizes, then the offset, then the uniform ones - Longest
+      // an absolute target, Whole x a multiplier on whatever the rest left.
+      ['longest', 'scale-target', 'scale-longest-row'],
+      ['factor', 'scale-factor', 'scale-factor-row']
     ];
     var LABEL = { length: 'Length', width: 'Width', height: 'Height', outer: 'Outer Ø', bore: 'Bore Ø', wall: 'Wall',
                   diameter: 'Diameter', offset: 'Offset', factor: 'Whole ×', longest: 'Longest',
@@ -1153,12 +1213,30 @@ if (typeof document !== 'undefined') {
     // What the card last put in each field: the value an edit starts from,
     // and what Escape puts back.
     var prefill = {};
-    // The edit in progress, one field at a time (see edit() below).
+    // The edit in progress: every field the person has moved, held together
+    // (see edit() below).
     var sess = null;
 
     function byId(id) { return document.getElementById(id); }
     function active() { return (typeof getActiveModel === 'function') ? getActiveModel() : null; }
     function fieldOf(k) { for (var i = 0; i < FIELDS.length; i++) if (FIELDS[i][0] === k) return FIELDS[i]; return null; }
+
+    /* SELECT ALL. While a Select all group of two or more pieces stands (app-core.js nsoSelAllPieces) the card is
+       the group's: one row, Whole x, which resizes EVERY piece of it by the same factor, each about its own centre
+       and where it stands. The preview ghosts every piece and stands each result over it; Set bakes them all as
+       ONE Undo step (a stepGroup of the pieces' own scale steps). A piece that refuses the factor (paint, a
+       raw-less piece) names itself under the field and Set waits, so the group is scaled whole or not at all. */
+    function group() {
+      var g = (typeof nsoSelAllPieces === 'function') ? nsoSelAllPieces() : [];
+      if (g.length < 2) return null;
+      var out = [];
+      g.forEach(function (p) {
+        var m = p.sourceId != null ? state.models.find(function (x) { return x.id === p.sourceId; }) : null;
+        if (m && p.mesh) out.push({ p: p, m: m });
+      });
+      return out.length >= 2 ? out : null;
+    }
+    function groupKey(G) { return G ? G.map(function (e) { return e.m.id; }).join(',') : ''; }
 
     // Read only while the card is open. The reading walks the whole soup -
     // about a second on a 49k-triangle piece - and updateEditSize fires on
@@ -1204,7 +1282,7 @@ if (typeof document !== 'undefined') {
       val.factor = '1';
       val.offset = '';
       FIELDS.forEach(function (fd) {
-        if (sess && sess.k === fd[0]) return;
+        if (sess && sess.touched[fd[0]]) return;
         var el = byId(fd[1]);
         prefill[fd[0]] = val[fd[0]] != null ? val[fd[0]] : '';
         if (el) el.value = prefill[fd[0]];
@@ -1230,7 +1308,7 @@ if (typeof document !== 'undefined') {
         on.longest = !rows.some(function (k) { return NSO_sectionShow(vals[k]) === NSO_sectionShow(longest); });
       }
       // The row being typed in stays, whatever the piece it is making reads as.
-      if (sess) on[sess.k] = true;
+      if (sess) Object.keys(sess.touched).forEach(function (k) { on[k] = true; });
       FIELDS.forEach(function (fd) {
         var row = byId(fd[2]);
         if (row) row.hidden = !on[fd[0]];
@@ -1241,12 +1319,17 @@ if (typeof document !== 'undefined') {
     function readout(force) {
       var el = byId('scale-readout');
       if (!el) return;
+      var G = group();
+      if (G) return readoutGroup(el, G, force);
+      if (sess && sess.group) cancel(true);
       var m = active();
       // Another piece selected (or this one changed under it) mid-edit: the
       // preview belongs to the piece it was made on, so it is dropped.
       if (sess && (m !== sess.m || (m && m.rawTris !== sess.soup))) cancel(true);
       if (!cardOpen()) { el.dataset.stale = '1'; return; }
       el.dataset.stale = '0';
+      var fitBtn = byId('btn-scale-fit');
+      if (fitBtn) fitBtn.hidden = false;
       el.textContent = NSO_scaleReadoutText(m);
       lastShape = m ? NSO_scaleShapeOf(m) : null;
       var s = (m && !lastShape) ? NSO_scaleSectionOf(m) : null;
@@ -1259,6 +1342,31 @@ if (typeof document !== 'undefined') {
         populate(s);
       }
     }
+    function readoutGroup(el, G, force) {
+      // the edit belongs to the group it began on: another group, or a piece of it changed under it, drops it
+      if (sess && (!sess.group || sess.key !== groupKey(G) ||
+          sess.group.some(function (e) { return e.m.rawTris !== e.soup; }))) cancel(true);
+      if (!cardOpen()) { el.dataset.stale = '1'; return; }
+      el.dataset.stale = '0';
+      el.textContent = G.length + ' pieces selected (Select all) - Whole \u00d7 resizes every one of them by the same ' +
+        'factor, each about its own centre, where it stands. Set bakes them all; one Undo puts them all back.';
+      lastShape = null; lastReading = null;
+      FIELDS.forEach(function (fd) {
+        var row = byId(fd[2]);
+        if (row) row.hidden = fd[0] !== 'factor';
+      });
+      var fit = byId('btn-scale-fit');
+      if (fit) fit.hidden = true;
+      relabel();
+      var sig = 'group:' + groupKey(G);
+      if (!sess && (force === true || sig !== lastSig || lastSoup !== null)) {
+        lastSig = sig; lastSoup = null;
+        var el2 = byId('scale-factor');
+        prefill.factor = '1';
+        if (el2) el2.value = '1';
+        setSlider('factor');
+      }
+    }
     window.nsoScaleRefresh = function () { readout(true); };
 
     // updateEditSize is not called by every bake (Thicken commits through its
@@ -1269,7 +1377,7 @@ if (typeof document !== 'undefined') {
     var watching = false, seen = null;
     function key() {
       var m = active();
-      return { m: m, soup: m ? m.rawTris : null, sig: signature(m) };
+      return { m: m, soup: m ? m.rawTris : null, sig: signature(m) + '#' + groupKey(group()) };
     }
     function watch() {
       if (!cardOpen()) { watching = false; return; }
@@ -1285,23 +1393,27 @@ if (typeof document !== 'undefined') {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(watch);
     }
 
-    /* ---- staged edits: slider or box -> ghost preview -> Set ----
-       An edit is one field from the first value moved until it is set or
-       dropped. It keeps the piece and the soup it began from, and every value
-       moved to runs its verb on THAT soup, so 60 then 65 gives exactly what 65
-       alone would, and what Set bakes is what the preview showed.
+    /* ---- staged edits: sliders or boxes -> ghost preview -> Set ----
+       An edit is every field moved from the first value moved until it is set
+       or dropped. It keeps the piece and the soup it began from, and each
+       change to ANY field re-runs every staged field's verb, in FIELDS order,
+       on THAT soup - so Length 60 then Width 30 previews both, 60 then 65 gives
+       exactly what 65 alone would, and what Set bakes is what the preview
+       showed. A field moved back to the value it began with stages nothing.
 
        NOTHING TOUCHES THE PIECE UNTIL SET. The preview is a helper in the
        scene, like Hollow's and Foam's: the piece turns to a ghost and the
        result stands over it, seated the way the bake would seat it. It is not
        a piece (never picked, packed or exported) and not an Undo step. Set
        (or Enter) runs the one NSO_sculptCommitRaw - one Undo step, whatever
-       was moved on the way. Cancel, Escape, another piece, another field, the
-       mm | in toggle or closing the card drop it, and the piece was never
-       changed. A value the piece refuses says why under the field, in red,
-       and draws nothing; Set stays greyed until the value is one it takes. */
+       was moved on the way. Cancel, Escape, another piece, the mm | in toggle
+       or closing the card drop it, and the piece was never changed. A value
+       the piece refuses says why under its field, in red, and is left out of
+       the picture (the other fields still draw); Set stays greyed until every
+       staged value is one it takes. */
     var GHOST_OPACITY = 0.2;
     var pv = null;             // the preview on screen: { m, mesh, saved, over }
+    var gpv = [];              // a Select all group's preview: one such slot per piece
     var handles = {};          // per field: nsoLiveSlider's handle (paces the preview)
     var NOTE_IDLE = 'Move a slider or type a value to preview it on the piece. Set bakes it; nothing changes until then.';
 
@@ -1325,16 +1437,20 @@ if (typeof document !== 'undefined') {
       });
       if (mesh) mesh.userData.skipXray = saved.skip;
     }
-    function dropOver() {
-      if (!pv || !pv.over) return;
-      var o = pv.over;
-      pv.over = null;
+    function dropOverOf(slot) {
+      if (!slot || !slot.over) return;
+      var o = slot.over;
+      slot.over = null;
       if (o.parent) o.parent.remove(o);
       if (o.geometry) o.geometry.dispose();
       if (o.material) o.material.dispose();
     }
+    function dropOver() { dropOverOf(pv); }
     function closePreview() {
-      if (!pv) return false;
+      var had = !!pv || gpv.length > 0;
+      gpv.forEach(function (slot) { dropOverOf(slot); ghostOff(slot.mesh, slot.saved); });
+      gpv = [];
+      if (!pv) return had;
       var v = pv;
       dropOver();
       pv = null;
@@ -1348,8 +1464,29 @@ if (typeof document !== 'undefined') {
     function showPreview(m, tris) {
       var p = placedOf(m), mesh = p && p.mesh;
       if (!mesh || typeof THREE === 'undefined' || typeof rawResultToDisplayGeometry !== 'function') return false;
+      if (gpv.length) closePreview();
       if (!pv || pv.m !== m || pv.mesh !== mesh) { closePreview(); pv = { m: m, mesh: mesh, saved: ghostOn(mesh), over: null }; }
       dropOver();
+      return standOver(pv, m, mesh, tris);
+    }
+    /* The group's preview: every piece a ghost, each one's result standing over it. */
+    function showGroupPreview(G, results) {
+      if (typeof THREE === 'undefined' || typeof rawResultToDisplayGeometry !== 'function') return false;
+      if (pv) closePreview();
+      var drew = true;
+      G.forEach(function (e, i) {
+        var mesh = e.p.mesh;
+        if (!mesh) { drew = false; return; }
+        var slot = null;
+        for (var k = 0; k < gpv.length; k++) if (gpv[k].mesh === mesh) slot = gpv[k];
+        if (!slot) { slot = { m: e.m, mesh: mesh, saved: ghostOn(mesh), over: null }; gpv.push(slot); }
+        dropOverOf(slot);
+        if (!standOver(slot, e.m, mesh, results[i].tris)) drew = false;
+      });
+      return drew;
+    }
+    /* One result as a translucent piece standing over `mesh`, held in `slot.over`. */
+    function standOver(slot, m, mesh, tris) {
       var geo = rawResultToDisplayGeometry(tris), sz = new THREE.Vector3();
       geo.boundingBox.getSize(sz);
       var o = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
@@ -1362,10 +1499,10 @@ if (typeof document !== 'undefined') {
       o.renderOrder = 41;
       o.userData.skipXray = true;
       var parent = mesh.parent || (typeof state !== 'undefined' ? state.scene : null);
-      if (!parent) { pv.over = null; geo.dispose(); o.material.dispose(); return false; }
+      if (!parent) { slot.over = null; geo.dispose(); o.material.dispose(); return false; }
       if (typeof nsoHelpers !== 'undefined') nsoHelpers.attach(parent, o, 'scale-live');
       else parent.add(o);
-      pv.over = o;
+      slot.over = o;
       return true;
     }
 
@@ -1377,30 +1514,57 @@ if (typeof document !== 'undefined') {
     }
     function syncButtons() {
       var set = byId('btn-scale-set'), cancelBtn = byId('btn-scale-cancel');
-      if (set) set.disabled = !(sess && sess.last && sess.last.ok);
+      if (set) set.disabled = !(sess && sess.last && sess.last.ok && !sess.refused);
       if (cancelBtn) cancelBtn.disabled = !sess;
     }
     function sliderOf(k) { var fd = fieldOf(k); return fd ? byId(fd[1] + '-slider') : null; }
 
+    // Start the session on the first field moved; every later one joins it.
     function edit(k) {
-      if (sess && sess.k === k) return sess;
-      if (sess) cancel(false);
-      var fd = fieldOf(k), m = active();
-      sess = { k: k, el: byId(fd[1]), start: prefill[k] != null ? prefill[k] : '', m: m,
-               soup: (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null,
-               last: null, verb: null };
+      if (!sess) {
+        var G = group();
+        if (G) {
+          sess = { group: G.map(function (e) {
+                     return { p: e.p, m: e.m, soup: (e.m.rawTris && e.m.rawAxis === 'zup') ? e.m.rawTris : null };
+                   }), key: groupKey(G), m: null, soup: null,
+                   starts: Object.assign({}, prefill), touched: {}, last: null, verbs: [], lastKey: k, marked: {}, refused: 0 };
+          sess.touched[k] = true;
+          return sess;
+        }
+        var m = active();
+        sess = { m: m, soup: (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null,
+                 starts: Object.assign({}, prefill), touched: {}, last: null, verbs: [], lastKey: k, marked: {}, refused: 0 };
+      }
+      sess.touched[k] = true;
+      sess.lastKey = k;
       return sess;
     }
 
-    // The field's text as a verb, in mm; null when it asks for no change
+    // One field's text as a verb, in mm; null when it asks for no change
     // (empty, the value the edit began from, Whole x 1, Offset 0).
-    function verbOf(s) {
-      var t = String(s.el.value).trim(), num = parseFloat(t);
+    function verbOf(s, k) {
+      var el = byId(fieldOf(k)[1]);
+      if (!el) return null;
+      var t = String(el.value).trim(), num = parseFloat(t), start = s.starts[k], v;
       if (t === '' || !isFinite(num)) return null;
-      if (s.k === 'factor') return num === 1 ? null : NSO_scaleCardVerb('factor', num);
-      if (s.k === 'offset') return num === 0 ? null : NSO_scaleCardVerb('offset', NSO_scaleToMm(num));
-      if (s.start !== '' && num === +s.start) return null;
-      return NSO_scaleCardVerb(s.k, NSO_scaleToMm(num));
+      if (k === 'factor') v = num === 1 ? null : NSO_scaleCardVerb('factor', num);
+      else if (k === 'offset') v = num === 0 ? null : NSO_scaleCardVerb('offset', NSO_scaleToMm(num));
+      else if (start !== '' && start != null && num === +start) v = null;
+      else v = NSO_scaleCardVerb(k, NSO_scaleToMm(num));
+      if (v) v.key = k;
+      return v;
+    }
+    // Every staged field's verb, in the order they are applied. A row the
+    // piece does not show stages nothing unless it is one the person moved.
+    function verbsOf(s) {
+      var out = [];
+      FIELDS.forEach(function (fd) {
+        var row = byId(fd[2]);
+        if (row && row.hidden && !s.touched[fd[0]]) return;
+        var v = verbOf(s, fd[0]);
+        if (v) out.push(v);
+      });
+      return out;
     }
 
     // The reason under the field, red, while the value is refused.
@@ -1418,8 +1582,8 @@ if (typeof document !== 'undefined') {
       return p;
     }
     // The reason is part of the field's description only while it shows.
-    function mark(s, text) {
-      var p = whyOf(s.k), el = s.el;
+    function mark(k, text) {
+      var p = whyOf(k), el = byId(fieldOf(k)[1]);
       if (p) { p.textContent = text || ''; p.hidden = !text; }
       if (!el) return;
       if (el.dataset.nsoDescribed == null) el.dataset.nsoDescribed = el.getAttribute('aria-describedby') || '';
@@ -1432,55 +1596,179 @@ if (typeof document !== 'undefined') {
         if (said) el.setAttribute('aria-describedby', said); else el.removeAttribute('aria-describedby');
       }
     }
+    // Each refusal goes under the field that was refused, and only there: a
+    // field that was refused and is not now has its reason taken down.
+    function markSet(s, why) {
+      Object.keys(s.marked || {}).forEach(function (k) { if (!why[k]) mark(k, ''); });
+      Object.keys(why).forEach(function (k) { mark(k, why[k]); });
+      s.marked = why;
+    }
+    function cancelHandles() {
+      Object.keys(handles).forEach(function (k) { if (handles[k]) handles[k].cancel(); });
+    }
 
-    // Draw what the field says now. The piece is not touched.
+    // Draw what every staged field says now. The piece is not touched.
+    //
+    // A field the piece refuses is left out of the picture and says why under
+    // itself, in red; the others still draw, so one bad number does not hide
+    // the rest. Set stays greyed until nothing is refused, because what Set
+    // bakes is exactly what the boxes say.
     function preview(s) {
       if (!s || sess !== s) return;
-      var verb = verbOf(s), r = null;
-      if (verb) {
-        try { r = NSO_scaleCardTry(verb, s.m, s.soup); } catch (err) {
+      if (s.group) return previewGroup(s);
+      var verbs = verbsOf(s), use = verbs.slice(), r = null, why = {}, first = null, n = 0;
+      while (use.length) {
+        try { r = NSO_scaleCardTryAll(use, s.m, s.soup); } catch (err) {
           console.error('[scale]', err);
-          var why = NSO_scaleText((err && err.message) || String(err));
-          r = { ok: false, reason: why, inline: why, status: LABEL[s.k] + ' failed - piece unchanged (' + why + ')' };
+          var msg = NSO_scaleText((err && err.message) || String(err));
+          r = { ok: false, reason: msg, inline: msg, status: 'Scale failed - piece unchanged (' + msg + ')', failedKey: s.lastKey };
         }
+        if (r.ok) break;
+        var bad = r.failedKey;
+        // What Set (Enter) says: the field being typed in, when it is one of
+        // the refused, else the first refusal.
+        if (!first || (bad === s.lastKey && first.failedKey !== s.lastKey)) first = r;
+        if (!bad || !use.some(function (v) { return v.key === bad; })) {
+          // a refusal of the whole piece (paint) or a crash: nothing to draw
+          why[bad || s.lastKey] = r.inline; n++; use = []; r = null; break;
+        }
+        why[bad] = r.inline; n++;
+        use = use.filter(function (v) { return v.key !== bad; });
+        r = null;
       }
-      s.verb = verb; s.last = r;
-      if (r && !r.ok) {                          // a refused value draws nothing
-        closePreview();
-        mark(s, r.inline);
-        note('Nothing to show - ' + r.inline, true);
-      } else if (!r) {                           // back to where it began
-        closePreview();
-        mark(s, '');
-        note(NOTE_IDLE);
-      } else {
-        mark(s, '');
+      s.verbs = verbs; s.refused = n;
+      s.last = n ? first : r;                    // a refusal is what Set would say; none = the result to bake
+      markSet(s, why);
+      if (r && r.ok) {
         var drew = showPreview(s.m, r.tris);
-        note((drew ? 'Preview: ' : 'No preview on the plate: ') + r.said + ' - Set bakes it, Esc drops it.');
+        if (!n) note((drew ? 'Preview: ' : 'No preview on the plate: ') + r.said + ' - Set bakes it, Esc drops it.');
+        else note((drew ? 'Preview of the other fields: ' : 'No preview on the plate: ') + r.said + ' - ' +
+                  Object.keys(why).map(function (k) { return LABEL[k] + ' is refused'; }).join(', ') + '; Set waits for it.', true);
+      } else if (n) {
+        closePreview();
+        var k0 = Object.keys(why)[0];
+        note('Nothing to show - ' + (verbs.length > 1 && LABEL[k0] ? LABEL[k0] + ': ' : '') + why[k0], true);
+      } else {                                   // back to where it began
+        closePreview();
+        note(NOTE_IDLE);
       }
       syncButtons();
+    }
+
+    // The group's preview: Whole x on every piece, each from the soup the edit began on. The first piece that
+    // refuses names itself under the field and nothing is drawn: the group is scaled whole or not at all.
+    function previewGroup(s) {
+      var v = verbOf(s, 'factor');
+      s.verbs = v ? [v] : [];
+      if (!v) {
+        s.last = null; s.refused = 0;
+        markSet(s, {});
+        closePreview();
+        note(NOTE_IDLE);
+        syncButtons();
+        return;
+      }
+      var results = [], bad = null;
+      s.group.forEach(function (e) {
+        var r;
+        try { r = NSO_scaleCardTryAll([v], e.m, e.soup); } catch (err) {
+          console.error('[scale]', err);
+          var msg = NSO_scaleText((err && err.message) || String(err));
+          r = { ok: false, reason: msg, inline: msg };
+        }
+        if (!r.ok && !bad) bad = { e: e, r: r };
+        results.push(r);
+      });
+      var n = s.group.length, factor = parseFloat(byId('scale-factor').value);
+      if (bad) {
+        var name = bad.e.m.name || bad.e.p.name || 'a piece';
+        var why = name + ': ' + (bad.r.inline || bad.r.reason || 'refused');
+        s.refused = 1;
+        s.last = { ok: false, status: 'Scale refused on ' + name + ' - no piece changed (' + (bad.r.inline || bad.r.reason) + ')' };
+        markSet(s, { factor: why });
+        closePreview();
+        note('Nothing to show - ' + why + '. Set waits until every piece takes the factor.', true);
+      } else {
+        s.refused = 0;
+        s.last = { ok: true, results: results, label: 'Scale',
+                   status: 'Scale done - ' + n + ' pieces \u00d7' + factor + ', each in place. One Undo puts them all back.' };
+        markSet(s, {});
+        var drew = showGroupPreview(s.group, results);
+        note((drew ? 'Preview: ' : 'No preview on the plate: ') + n + ' pieces \u00d7' + factor +
+             ' - Set bakes them all (one Undo), Esc drops it.');
+      }
+      syncButtons();
+    }
+
+    // Bake the group: one NSO_sculptCommitRaw per piece, gathered into ONE Undo step.
+    function commitGroup(s) {
+      cancelHandles();
+      preview(s);
+      var r = s.last;
+      if (!r || !r.ok || s.refused) {
+        if (typeof setStatus === 'function') setStatus(r ? r.status : 'Scale: nothing to set - move the slider or type a factor', !!r);
+        return r;
+      }
+      sess = null;
+      closePreview();
+      markSet(s, {});
+      var outer = state.undoStack, failed = [];
+      state.undoStack = [];
+      try {
+        s.group.forEach(function (e, i) {
+          if (!(typeof NSO_sculptCommitRaw === 'function' && NSO_sculptCommitRaw(e.m, r.results[i].tris, 'scaleReplace', null)))
+            failed.push(e.m.name || 'a piece');
+        });
+      } finally {
+        var steps = state.undoStack;
+        state.undoStack = outer;
+        if (steps.length > 1) {
+          pushUndo({ type: 'stepGroup', steps: steps, label: 'Undo: Scale reverted on ' + steps.length + ' pieces',
+                     redoLabel: 'Scale re-applied on ' + steps.length + ' pieces' });
+        } else if (steps.length === 1) pushUndo(steps[0]);
+        else if (typeof updateUndoBtn === 'function') updateUndoBtn();
+      }
+      if (typeof nsoPaintSelLook === 'function') nsoPaintSelLook();      // each bake built a fresh mesh: the group's look back on it
+      syncButtons();
+      note(NOTE_IDLE);
+      if (typeof setStatus === 'function') {
+        setStatus(failed.length ? 'Scale: ' + failed.join(', ') + ' failed to commit - the rest are scaled; Undo puts them back' : r.status,
+                  failed.length > 0);
+      }
+      readout(true);
+      return failed.length ? { ok: false, reason: 'commit failed', failed: failed } : r;
+    }
+
+    // Put every field the edit moved back where it began.
+    function restore(s) {
+      Object.keys(s.touched).forEach(function (k) {
+        var fd = fieldOf(k), el = byId(fd[1]), sl = byId(fd[1] + '-slider');
+        if (el) el.value = s.starts[k] != null ? s.starts[k] : '';
+        if (sl && s.starts[k] != null && s.starts[k] !== '') sl.value = s.starts[k];
+      });
     }
 
     // Bake what the preview shows: one NSO_sculptCommitRaw, one Undo step.
     function commit() {
       var s = sess;
       if (!s) return null;
-      if (handles[s.k]) handles[s.k].cancel();
-      preview(s);                                // the box as it reads now
-      var r = s.last, verb = s.verb;
-      if (!r || !r.ok) {
-        if (typeof setStatus === 'function') setStatus(r ? r.status : LABEL[s.k] + ': nothing to set - move the slider or type a value', !!r);
+      if (s.group) return commitGroup(s);
+      cancelHandles();
+      preview(s);                                // the boxes as they read now
+      var r = s.last;
+      if (!r || !r.ok || s.refused) {
+        if (typeof setStatus === 'function') setStatus(r ? r.status : 'Scale: nothing to set - move a slider or type a value', !!r);
         return r;
       }
       sess = null;
       closePreview();
-      mark(s, '');
-      var ok = typeof NSO_sculptCommitRaw === 'function' && NSO_sculptCommitRaw(s.m, r.tris, verb.undoType, r.status);
+      markSet(s, {});
+      var ok = typeof NSO_sculptCommitRaw === 'function' && NSO_sculptCommitRaw(s.m, r.tris, r.undoType, r.status);
       syncButtons();
       note(NOTE_IDLE);
       if (!ok) {
-        if (s.el) s.el.value = s.start;
-        if (typeof setStatus === 'function') setStatus(verb.label + ' failed to commit - piece unchanged', true);
+        restore(s);
+        if (typeof setStatus === 'function') setStatus(r.label + ' failed to commit - piece unchanged', true);
         readout(true);
         return { ok: false, reason: 'commit failed' };
       }
@@ -1489,20 +1777,18 @@ if (typeof document !== 'undefined') {
       return r;
     }
 
-    // Drop the edit: the piece was never touched, the field goes back.
+    // Drop the edit: the piece was never touched, every field goes back.
     function cancel(quiet) {
       var s = sess;
       if (!s) return false;
       sess = null;
-      if (handles[s.k]) handles[s.k].cancel();
+      cancelHandles();
       var had = closePreview();
-      mark(s, '');
-      if (s.el) s.el.value = s.start;
-      var sl = sliderOf(s.k);
-      if (sl && s.start !== '') sl.value = s.start;
+      markSet(s, {});
+      restore(s);
       syncButtons();
       note(NOTE_IDLE);
-      if (!quiet && typeof setStatus === 'function') setStatus(LABEL[s.k] + ': preview dropped - piece unchanged');
+      if (!quiet && typeof setStatus === 'function') setStatus('Scale: preview dropped - piece unchanged');
       return had || true;
     }
 
@@ -1635,21 +1921,24 @@ if (typeof document !== 'undefined') {
       // A cleared box is "no change": the live slider has no value to hand
       // on, so the preview is cleared here.
       el.addEventListener('input', function () {
-        if (sess && sess.k === k && String(el.value).trim() === '') preview(sess);
+        if (sess && sess.touched[k] && String(el.value).trim() === '') preview(sess);
       });
       // A key can land inside the preview's pacing gap, before the edit has
       // started: Enter then starts it (and sets what the box says), Escape
       // puts the box back.
       var keys = function (e) {
-        var h = handles[k], waiting = h && h.pending() && !(sess && sess.k === k);
+        var h = handles[k], waiting = h && h.pending() && !(sess && sess.touched[k]);
         if (e.key === 'Enter') {
           e.preventDefault();
           if (waiting) edit(k);
-          if (sess && sess.k === k) commit();
+          if (sess) {
+            sess.lastKey = k;                    // a refusal Set reports is this field's, when it has one
+            commit();                            // every staged field, as the boxes read now
+          }
         } else if (e.key === 'Escape') {
           e.preventDefault();
           if (waiting) { e.stopPropagation(); h.cancel(); el.value = prefill[k] != null ? prefill[k] : ''; setSlider(k); }
-          else if (sess && sess.k === k) { e.stopPropagation(); cancel(false); }
+          if (sess) { e.stopPropagation(); cancel(false); }
         }
       };
       el.addEventListener('keydown', keys);
@@ -1726,7 +2015,7 @@ if (typeof document !== 'undefined') {
     // The preview is a scene helper (nso-helpers.js): Clear, leave-tool and an
     // Undo past it all end it through the same close path as Cancel.
     if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('scale-live', {
-      live: function () { return !!pv; },
+      live: function () { return !!pv || gpv.length > 0; },
       close: function () { cancel(true); },
       clear: function () { closePreview(); }
     });

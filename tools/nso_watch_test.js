@@ -494,7 +494,10 @@ async function partE2(page) {
     document.querySelectorAll('.vp-finish-menu .vp-sec').forEach(d => { d.open = true; });
     const set = (id, v) => { const e = document.getElementById(id); e.value = String(v);
       e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); };
-    set('inp-brush-size', 6); set('inp-brush-intensity', 0.6); set('sel-brush-mode', 'carve');
+    set('inp-brush-size', 6); set('inp-brush-intensity', 0.6);
+    { const m = document.getElementById('sel-brush-mode');   // the select no longer offers Carve; the engine mode is what this checks
+      if (!Array.from(m.options).some(o => o.value === 'carve')) m.add(new Option('Carve', 'carve')); }
+    set('sel-brush-mode', 'carve');
     if (!window.nsoBrushArmed()) document.getElementById('btn-brush').click();
   });
   const mark = (await evs(page)).length;
@@ -794,10 +797,10 @@ async function partG(page) {
       overlay: () => state.modelGroup.children.filter(o => o.isMesh && o.renderOrder === 40),
       paintFindings: from => NSOWatch.events().filter(e => e.seq > from && e.kind === 'phantom' && /paint/.test(e.msg)).map(e => e.msg),
       mark: () => NSOWatch.events().length,
-      // Start Join is the Join column button now: a fresh session from it. A card
+      // Start Join is the Assemble column button now: a fresh session from it. A card
       // already open is shut first (Cancel Join) and the observer given its turn,
       // so the press is always a start, never a toggle off.
-      joinStart: async () => { const d = document.getElementById('menu-joins');
+      joinStart: async () => { const d = document.getElementById('menu-assemble');
         if (d.open) { d.open = false; await Promise.resolve(); }
         d.querySelector(':scope > summary').click(); await Promise.resolve(); }
     };

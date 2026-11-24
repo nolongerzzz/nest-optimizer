@@ -224,9 +224,12 @@ for (const mode of ['fillet', 'chamfer']) {
   const r = soften(TUBE, false, 0.9, 'fillet');
   const v = r.err ? null : validate(r.out);
   check('Round R 0.9 on the same tube bakes and is sound', !r.err && v.ok, r.err || v.summary);
-  // The outline's own per-point clamp predates this change and still reads as
-  // a clamp; the bore has no wall across it and takes the R asked for.
-  check('  ...and reports the outline\'s clamp rather than hiding it', !r.err && r.build.radius < 0.9,
+  // The 2 mm wall takes 0.9 from both sides, and both edges get it. The
+  // outline used to clamp itself point by point to the nearest loop point two
+  // steps along its own curve - 1.3 mm on this 96-gon - and built 0.59 while
+  // saying "wall clamp"; that clamp is gone (the wall is what section 3
+  // refuses on, with its number).
+  check('  ...at the R asked, on the outline as well as the bore', !r.err && r.build.radius === 0.9,
     r.err ? '' : 'radius ' + r.build.radius.toFixed(4) + ' asked 0.9');
 }
 
@@ -328,16 +331,23 @@ function solidCylinder() {
      volume and the radius it reports. That engine also emitted sliver lid
      triangles between near-twin points, which left 64 to 88 non-manifold
      edges on every stock cylinder end - the app's seal gate then refused the
-     bake. The slivers are gone; the shape is not touched. */
+     bake. The slivers are gone; the shape is not touched.
+
+     The R 1.1 rows were re-pinned when the outline's per-point clamp went
+     (Soften on curved rims): that engine built 0.5886 when asked 1.1, because
+     it read the 96-gon's point two steps along as the wall across the rod.
+     They are the R asked now, and their volumes are the profile's - Round
+     6283.2 less a quarter round of 1.1 turned round the rod, Bevel less the
+     45 degree band (Pappus, within the 96-gon's facets). R 0.5 is unchanged. */
   const PIN = [
     ['top', 'fillet', 0.5, '770:3957f8a23bd0', 6275.0649, 0.5],
-    ['top', 'fillet', 1.1, '770:ff64e0c6dc06', 6273.6736, 0.5886282091671307],
+    ['top', 'fillet', 1.1, '770:d8f398b758be', 6261.3807, 1.1],
     ['top', 'chamfer', 0.5, '290:f44ff320e675', 6270.9787, 0.5],
-    ['top', 'chamfer', 1.1, '290:6a29e1c059f7', 6268.0308, 0.5886282091671307],
+    ['top', 'chamfer', 1.1, '290:e6db5871c7be', 6242.0882, 1.1],
     ['bottom', 'fillet', 0.5, '770:d45605cda593', 6275.0649, 0.5],
-    ['bottom', 'fillet', 1.1, '770:42a4fe2a66fb', 6273.6736, 0.5886282091671307],
+    ['bottom', 'fillet', 1.1, '770:1fb6e2b23968', 6261.3807, 1.1],
     ['bottom', 'chamfer', 0.5, '290:d3ccf1d90d41', 6270.9787, 0.5],
-    ['bottom', 'chamfer', 1.1, '290:95f59c72b45c', 6268.0309, 0.5886282091671307]
+    ['bottom', 'chamfer', 1.1, '290:65a9a6d3cb66', 6242.0882, 1.1]
   ];
   const fp = (s) => {
     const k = new Set();

@@ -1,7 +1,7 @@
 # Support: one trunk, the way Bambu's tree slim grows (supports-one-trunk)
 
 `opts.oneTrunk` in `nso_support_gridpack.js` (`planOneTrunk`), the Supports card's **One trunk per cluster**
-box and **Interface: Dense (Bambu) / Open** select (`app-supports-card.js`), the sheet's `interfaceLayers`
+box and **Top interface layers** select (0 - 3) (`app-supports-card.js`), the sheet's `interfaceLayers`
 (`nso_support_interface.js`). Gate: `npm run support:onetrunk` (`tools/nso_support_onetrunk_check.js`, ~1.5 min).
 `node tools/nso_support_onetrunk_check.js --export` also writes `tools/supports-onetrunk-out/supp_ref_onetrunk.3mf`
 (the six heads and their supports, git-ignored) for Bambu Studio.
@@ -201,11 +201,44 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     the perimeter spacing grows with the strip a tip stands under, from `STAIR_PERIM_MM` 2.5 at the low end to `STAIR_PERIM_TOP_MM` 4.0 at the top (the Oblique: 13 tips to 10, three along the
     high edge, the stair's crown body 216 mm3 to about 170). (b) The top strips cover the part only where it is within `STAIR_TOP_REACH_MM` 1.1 over the strip's top (`roomAt`'s own field),
     not out into the fillet where the underside curves up to its wall (it ran 1.6 mm clear of the sheet there): the Oblique's stair is 17 strips, top at 12.0, was 18 at 12.2. A Dense strip is also no longer a bead wider than the stack under the part (`planWidth`): the extra bead put a Support wall line beside the interface at the top layers (z 11.8 - 12.0) where Bambu's slice (the owner's screenshot of the same edge) has the interface tapering to two lines and then one, nothing beside it.
+25. **Nothing unreachable: steps, cone tips and thin tips** (the owner's gate before a print: "the generator flags nothing as unreachable"; and, of option A, "thin tips is
+    the answer, and also seems to be how bambu addresses odd angles where an interface cannot be used"). A spot the one-trunk planner finds no route for (the strut's straight drop,
+    the lean, the nudge off a wall) is no longer named unreachable before three questions:
+    - **A step no slicer calls an overhang** (`subThresholdStep`): the part stands within a layer's reach at the threshold angle (0.2 mm / tan 30 = 0.35 mm) sideways of the
+      spot, just under it. The six heads' 15.3 mm planes, where a head's two shells meet 0.25 mm apart over a wall that slants out to 0.04 mm of the spot, were the merged plate's
+      "unreachable 4" and the Negative Sphere's two "gap" spots. The part holds them (`plan.oneTrunk.selfHeld`; the card keeps them as held, `memOf().selfHeld`, with or without a support).
+      Under the column rule (`opts.columnRule`) each is also caught by a **horn** (`hornColumn`, Bambu's: a 0.5 mm twig under the step's edge leaning out at 30 deg, then a thin
+      column to the plate; one per spot within 1.5 mm), listed with the thin columns (`horn: true`) - docs/SUPPORT-GATE.md 4c.
+    - **A cone's tip** (`coneTipCover`): a reached tip of the same area within 2 mm in plan and 1 mm under the spot, with air straight down from the spot to it - the top of a
+      cavity's ceiling, a few tenths of a mm2 of face over the stack under it. Held through that tip (`covered`, `cone: true`).
+    - **A ledge** (`thinColumn`): a thin column, `THIN_TIP_SIDE_MM` 0.85 (one loop of line), straight down, moved off the wall along the spot's own face up to 1.5 mm, its top
+      the gap under the face, its foot flared (r 1.4 mm over 2.5 mm) where there is room. With no way to the plate under the ledge (a notch's floor) it stands on the part, its
+      foot 0.2 mm off the face (Bambu's `support_bottom_z_distance`; Bambu's own thin columns stand in the necks' notches), the one place a column rests on the part with
+      "may rest on the part" off - the plan's reason says so. `plan.oneTrunk.thin`: the card joins each column to its area's first support (a shell of its own) and says the spot
+      held (or rest). An area with no tip left at all but steps and thin columns is planned with no trunk.
+    Measured: six pieces "unreachable 1" -> 0; the six as one piece (the owner's plate) "unreachable 4" -> 0. A 1.4 mm ledge over a 2 mm slot to the plate: three 0.85 mm
+    columns, plate to 0.18 mm under the ledge, every spot held. `support:gate` fails a build with anything unreachable (`--merged` builds the owner's plate).
+
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under
 the tilted plane did not build) and **3 interface layers** over 2 of transition (`SHEET.denseInterfaceLayers`, as Bambu's reference lays every head; it was 2); **Open** is 0.84 mm, the same 2 + 2. The card's default is
-Dense **in the one-trunk build only**: a hand-placed row of three tips (Custom, `support:custom`) formed no sheet at 0.47 mm where it forms one at 0.84, so every other build stays Open. The slicer's labelling takes `supportInterfaceLayers` (default 2) to read a 3-layer sheet.
+Dense **in the one-trunk build only**: a hand-placed row of three tips (Custom, `support:custom`) formed no sheet at 0.47 mm where it forms one at 0.84, so every other build stays Open. The slicer's labelling takes `supportInterfaceLayers` (default 2) to read a 3-layer sheet. The card no longer offers Open: its **Top interface layers** select (0 / 1 / 2 / 3, default 3, as Bambu's) sets `interfaceLayers` and the slicer's `supportInterfaceLayers` (column rule: NI interface layers over the NT = 2 transition; 0 lays transition only).
+
+**Split tip shoots (`TIP_FORK`, `tipForkSpots`, crownTopology's fork).** The owner's 2x Oblique beside Bambu's: Bambu's tips under a slope
+run together in twos and threes a mm or two down (lobed heads, Support 353 mm of filament), NSO's one tip every 3 mm stood one round shoot (243 mm):
+"not a cone, not a cup. Split each tip shoot into multiple". Under the column rule each tip takes up to 2 of the spots it covers (1 - 2.6 mm off it,
+1.4 - 2.6 mm apart, within 1.5 mm of its height) as tips of its own; crownTopology joins them first under a fork - at their centroid, each shoot a
+0.3 mm straight rise and a lean of 30 deg or less - and groups the rest of the tree as before. The Oblique now stands pairs (306 mm). A tip within
+12 mm of the plate keeps its single shoot: the Negative Sphere (tips at 10.8), forked, crowded its joins into the trunk's shoulder and printed
+2.8 mm2 over air (Bambu's 0.2). `opts.noTipForks` turns it off. A shoot keeps 2.8 mm off every other tip and its shoots (closer, the smooth body's blend
+between them sliced as a web of thin walls: the owner's "some webbing"), and only a sloped area (its spots 2 mm or more apart in height) forks: a
+flat face's tips are spanned by the slicer's stack, and the forked Base printed 3 mm2 over air at its trunk. Gate 66/66 (Base 0.5).
+
+**Lines in every tip (nso_slicer.js columnType).** The tube fill starts 1 mm under the part's lowest stack - any support's: a stack has one owner,
+and the 2x Oblique's second tree owned none, so none of its rings had a line ("the tips are still not complete on the other tree"). A ring the
+2.5 mm grid misses (a tip, 1.5 - 2 mm across) takes one line across its middle (COLUMN_TUBE_MID_SNAP_MM). The Oblique's rings from z 16 up with a
+line inside: 304 of 390 (was 171 of 295).
 
 ## 4. Measured (`support:onetrunk`, the six real parts, flat)
 

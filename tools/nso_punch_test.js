@@ -234,7 +234,7 @@ const fingerprint = (s) => { let a = 0; for (let i = 0; i < s.length; i++) a += 
     const r1 = P.plan(slab, hit, { diaMm: 0.5 });
     const r2 = P.plan(slab, hit, { countersink: 'cone' });
     const r3 = P.plan(slab, { point: [100, 100, 5], normal: [0, 0, 1] }, {});
-    const r4 = P.plan(slab, hit, { pattern: 'grid', rows: 30, cols: 30, pitchX: 1, pitchY: 1 });
+    const r4 = P.plan(slab, hit, { pattern: 'grid', rows: 150, cols: 150, pitchX: 1, pitchY: 1 });   // 22,500 > 10,000
     gate('7a refusals in words', !r1.ok && /narrower than two nozzle widths/.test(r1.reason) && !r2.ok && /countersink/.test(r2.reason) &&
       !r3.ok && r3.reason === 'the click is not on this piece' && !r4.ok && /more than one punch makes/.test(r4.reason),
       [r1.reason, r2.reason, r3.reason, r4.reason].join(' | '));
@@ -267,6 +267,94 @@ const fingerprint = (s) => { let a = 0; for (let i = 0; i < s.length; i++) a += 
     gate('8d a refusal still says where the holes would be; a dropped hole where it fell',
       !bad.ok && bad.wouldBe.length === 2 && over.ok && over.droppedAt.length === 1 && near(over.droppedAt[0].point[0], 45, 1e-6) &&
       near(over.frame.o[0], 37, 1e-6));
+  }
+
+  /* 9 ---------------------------------------------- a fine mesh: filter sheets */
+  {
+    // a solid disc Ø40 x 2 (a 128-gon prism), the click at its middle
+    const disc = (() => {
+      const o = [], m = 128, Rd = 20, H = 2, at = (k, z) => { const a = 2 * Math.PI * k / m; return [Rd * Math.cos(a), Rd * Math.sin(a), z]; };
+      for (let k = 0; k < m; k++) {
+        const a0 = at(k, 0), a1 = at(k + 1, 0), b0 = at(k, H), b1 = at(k + 1, H);
+        o.push(0, 0, H, ...b0, ...b1);  o.push(0, 0, 0, ...a1, ...a0);
+        o.push(...a0, ...a1, ...b1);    o.push(...a0, ...b1, ...b0);
+      }
+      return new Float32Array(o);
+    })();
+    const dh = { point: [0, 0, 2], normal: [0, 0, 1] };
+
+    // 9a a pitch of exactly Ø + floor is AT the floor, not under it
+    const slab = box([0, 0, 0], [40, 40, 1.2]), sh = { point: [20, 20, 1.2], normal: [0, 0, 1] };
+    const exact = P.plan(slab, sh, { diaMm: 1, pattern: 'grid', rows: 10, cols: 10, pitchX: 1.8, pitchY: 1.8, anchor: 'centre' });
+    const under = P.plan(slab, sh, { diaMm: 1, pattern: 'grid', rows: 10, cols: 10, pitchX: 1.79, pitchY: 1.79, anchor: 'centre' });
+    gate('9a Ø1 at pitch 1.8 (a 0.8 wall, the floor exactly) passes; 1.79 is refused', exact.ok && !under.ok && /0\.79 mm between/.test(under.reason),
+      exact.reason + ' | ' + under.reason);
+
+    // 9b stagger: odd rows half a pitch along u, and a centred staggered grid still centred on the click
+    const hex = P.plan(slab, sh, { diaMm: 1, pattern: 'grid', rows: 4, cols: 5, pitchX: 1.8, pitchY: 1.8 * Math.sqrt(3) / 2, anchor: 'centre', stagger: true });
+    const xs = hex.ok ? hex.holes.map(H => H.centre[0]) : [], mx = xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+    const row0 = hex.ok ? hex.holes[0].centre[0] : NaN, row1 = hex.ok ? hex.holes[5].centre[0] : NaN;
+    gate('9b stagger: row 2 sits 0.9 along u from row 1, the grid centred on the click, the hex wall 0.8 passes',
+      hex.ok && hex.holes.length === 20 && near(row1 - row0, 0.9, 1e-6) && near(mx, 20, 1e-6), hex.reason + ' mean x ' + mx.toFixed(4));
+
+    // 9c edge 'drop': a hex grid bigger than the disc is trimmed to it, every kept hole a floor from the rim
+    const go = { diaMm: 1, pattern: 'grid', rows: 26, cols: 24, pitchX: 1.8, pitchY: 1.8 * Math.sqrt(3) / 2, anchor: 'centre', stagger: true };
+    const refused = P.plan(disc, dh, go), trim = P.plan(disc, dh, Object.assign({ edge: 'drop' }, go));
+    const worstRim = trim.ok ? Math.min(...trim.holes.map(H => 20 * Math.cos(Math.PI / 128) - Math.hypot(H.centre[0], H.centre[1]) - 0.5)) : -1;
+    gate('9c edge drop trims a grid to a disc: the plain plan refuses at the edge, drop keeps the rest, each a floor from the rim',
+      !refused.ok && /edge/.test(refused.reason) && trim.ok && trim.trimmed > 0 && trim.holes.length + trim.dropped === 26 * 24 &&
+      worstRim >= 0.8 - 1e-3 && /are off the face or within 0.8 mm of its edge and left out/.test(trim.reason),
+      (trim.ok ? trim.holes.length + ' kept, ' + trim.trimmed + ' trimmed, worst rim wall ' + worstRim.toFixed(3) : trim.reason));
+
+    // 9d ...and cut in ONE subtract: the disc loses exactly the cutters' prisms through it
+    if (trim.ok) {
+      const res = await csg.NSO_subtractSoups(disc, concat(P.cutters(trim)));
+      const mm = P.sidesFor(1), prism = mm * 0.25 * Math.tan(Math.PI / mm) * 2;
+      const lost = volume(disc) - (res.ok ? volume(res.soup) : 0), want = trim.holes.length * prism;
+      gate('9d the trimmed sheet cuts in one boolean, the volume lost = holes x prism', res.ok && Math.abs(lost - want) / want < 1e-3,
+        trim.holes.length + ' holes, lost ' + lost.toFixed(2) + ' mm3, want ' + want.toFixed(2));
+    }
+
+    // 9e the neighbour broad phase misses no pair brute force finds
+    let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const bx = Array.from({ length: 400 }, () => {
+      const c = [rnd() * 50, rnd() * 50, rnd() * 5], s = [rnd() * 2, rnd() * 2, rnd() * 3];
+      return { lo: [c[0] - s[0], c[1] - s[1], c[2] - s[2]], hi: [c[0] + s[0], c[1] + s[1], c[2] + s[2]] };
+    });
+    const brute = [];
+    for (let i = 0; i < bx.length; i++) for (let j = i + 1; j < bx.length; j++) {
+      let ok = true;
+      for (let k = 0; k < 3; k++) if (bx[j].lo[k] > bx[i].hi[k] + 0.5 || bx[i].lo[k] > bx[j].hi[k] + 0.5) ok = false;
+      if (ok) brute.push(i + ',' + j);
+    }
+    const sp = P._nearPairs(bx, 0.5).map(p => p.join());
+    gate('9e sweep-and-prune finds every pair brute force does', sp.length === brute.length && sp.join() === brute.join(), sp.length + ' / ' + brute.length);
+
+    // 9f 10,000 holes is one punch, and plans in seconds; 10,001 is refused
+    const big = box([0, 0, 0], [182, 182, 1.2]), bh = { point: [91, 91, 1.2], normal: [0, 0, 1] };
+    const t0 = Date.now();
+    const p10k = P.plan(big, bh, { diaMm: 1, pattern: 'grid', rows: 100, cols: 100, pitchX: 1.8, pitchY: 1.8, anchor: 'centre' });
+    const ms = Date.now() - t0;
+    const over = P.plan(big, bh, { diaMm: 1, pattern: 'grid', rows: 100, cols: 101, pitchX: 1.8, pitchY: 1.8, anchor: 'centre' });
+    gate('9f a 100 x 100 Ø1 sheet plans (under 5 s); 100 x 101 is more than one punch makes', p10k.ok && p10k.holes.length === 10000 && ms < 5000 &&
+      !over.ok && /more than one punch makes \(10000\)/.test(over.reason), ms + ' ms; ' + over.reason);
+
+    // 9g cutter groups: one on a slab, overlap-free sets covering every hole across a tube's bore
+    const R = 15, T = tube(R, 11, 60, 64), a = 75 * Math.PI / 180;
+    const th = { point: [30, R * Math.cos(a), R * Math.sin(a)], normal: [0, Math.cos(a), Math.sin(a)] };
+    const tg = P.plan(T, th, { diaMm: 2, pattern: 'grid', rows: 3, cols: 4, pitchX: 5, pitchY: 5, anchor: 'centre' });
+    const gs = tg.ok ? P.cutterGroups(tg) : [], gSlab = P.cutterGroups(exact);
+    const each = gs.every(g => !P.cuttersOverlap({ holes: g.map(i => tg.holes[i]) }));
+    const covered = [].concat(...gs).sort((x, y) => x - y).join() === (tg.ok ? tg.holes.map((_, i) => i).join() : '-');
+    gate('9g cutterGroups: 1 group on a slab; on a tube several, none meeting inside, every hole once',
+      gSlab.length === 1 && gSlab[0].length === 100 && tg.ok && P.cuttersOverlap(tg) && gs.length > 1 && each && covered,
+      gs.map(g => g.length).join('+'));
+
+    // 9h extent: how far the face runs from the click, for Fill
+    const ex = P.extent(slab, { point: [10, 25, 1.2], normal: [0, 0, 1] }, {});
+    gate('9h extent of a 40 x 40 top clicked at (10, 25): u -10..30, v -25..15', ex.ok && near(ex.u[0], -10, 1e-4) && near(ex.u[1], 30, 1e-4) &&
+      near(ex.v[0], -25, 1e-4) && near(ex.v[1], 15, 1e-4), ex.ok ? ex.u.concat(ex.v).map(x => x.toFixed(2)).join(' ') : ex.reason);
   }
 
   console.log('\n' + rows.map(r => r[0] + '  ' + r[1]).join('\n'));

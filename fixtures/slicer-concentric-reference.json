@@ -1,0 +1,367 @@
+{
+ "source": "concentric.gcode.3mf - Bambu Studio 02.09.01.70, A1 mini 0.4, 0.2 mm layers, 2 walls (outer 0.42, inner 0.45), solid infill 0.42, top 5 / bottom 3 shells, every surface and the solid infill concentric. Seven of its ten shapes (the straight-sided ones: its arcs are not kept). outline: the part (the second layer's outer wall, 0.21 out). solid / top: that layer's fill - how many paths, the outermost ring's box, the innermost path's width and length.",
+ "shapes": [
+  {
+   "name": "hexagon",
+   "layers": 4,
+   "outline": [
+    [
+     141.011,
+     106.199
+    ],
+    [
+     145.882,
+     114.637
+    ],
+    [
+     138.01,
+     128.272
+    ],
+    [
+     122.267,
+     128.272
+    ],
+    [
+     114.395,
+     114.637
+    ],
+    [
+     122.267,
+     101.002
+    ],
+    [
+     138.01,
+     101.002
+    ]
+   ],
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 34,
+    "outerRing": [
+     115.475,
+     101.938,
+     144.802,
+     127.336
+    ],
+    "innerWidth": 0.488,
+    "innerLength": 1.479
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 35,
+    "outerRing": [
+     115.007,
+     101.533,
+     145.27,
+     127.741
+    ],
+    "innerWidth": 0.515,
+    "innerLength": 1.575
+   }
+  },
+  {
+   "name": "octagon",
+   "layers": 4,
+   "outline": [
+    [
+     46.97,
+     102.424
+    ],
+    [
+     53.861,
+     105.278
+    ],
+    [
+     58.472,
+     116.411
+    ],
+    [
+     53.861,
+     127.544
+    ],
+    [
+     42.728,
+     132.155
+    ],
+    [
+     31.595,
+     127.544
+    ],
+    [
+     26.984,
+     116.411
+    ],
+    [
+     31.595,
+     105.278
+    ],
+    [
+     42.728,
+     100.667
+    ]
+   ],
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 37,
+    "outerRing": [
+     27.996,
+     101.679,
+     57.46,
+     131.143
+    ],
+    "innerWidth": 0.491,
+    "innerLength": 0.098
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 38,
+    "outerRing": [
+     27.558,
+     101.241,
+     57.898,
+     131.581
+    ],
+    "innerWidth": 0.547,
+    "innerLength": 0.107
+   }
+  },
+  {
+   "name": "pentagon",
+   "layers": 4,
+   "outline": [
+    [
+     95.805,
+     105.605
+    ],
+    [
+     102.538,
+     114.872
+    ],
+    [
+     91.659,
+     129.845
+    ],
+    [
+     74.057,
+     124.126
+    ],
+    [
+     74.057,
+     105.617
+    ],
+    [
+     91.659,
+     99.898
+    ]
+   ],
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 32,
+    "outerRing": [
+     74.992,
+     100.998,
+     101.382,
+     128.745
+    ],
+    "innerWidth": 0.645,
+    "innerLength": 0.118
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 33,
+    "outerRing": [
+     74.587,
+     100.522,
+     101.882,
+     129.221
+    ],
+    "innerWidth": 0.372,
+    "innerLength": 1.136
+   }
+  },
+  {
+   "name": "rectangle",
+   "layers": 4,
+   "outline": [
+    [
+     106.171,
+     91.617
+    ],
+    [
+     68.239,
+     91.617
+    ],
+    [
+     68.239,
+     72.651
+    ],
+    [
+     106.171,
+     72.651
+    ]
+   ],
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 23,
+    "outerRing": [
+     69.174,
+     73.587,
+     105.235,
+     90.682
+    ],
+    "innerWidth": 0.483,
+    "innerLength": 39.632
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 24,
+    "outerRing": [
+     68.769,
+     73.182,
+     105.64,
+     91.086
+    ],
+    "innerWidth": 0.511,
+    "innerLength": 39.744
+   }
+  },
+  {
+   "name": "square",
+   "layers": 5,
+   "outline": [
+    [
+     55.088,
+     165.292
+    ],
+    [
+     30.277,
+     165.292
+    ],
+    [
+     30.277,
+     140.481
+    ],
+    [
+     55.088,
+     140.481
+    ]
+   ],
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 31,
+    "outerRing": [
+     31.213,
+     141.416,
+     54.153,
+     164.356
+    ],
+    "innerWidth": 0.389,
+    "innerLength": 1.326
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 32,
+    "outerRing": [
+     30.808,
+     141.011,
+     54.558,
+     164.761
+    ],
+    "innerWidth": 0.417,
+    "innerLength": 1.436
+   }
+  },
+  {
+   "name": "triangle_eq",
+   "layers": 4,
+   "outline": [
+    [
+     141.179,
+     149.493
+    ],
+    [
+     141.179,
+     149.493
+    ],
+    [
+     131.363,
+     166.475
+    ],
+    [
+     116.377,
+     140.549
+    ],
+    [
+     146.349,
+     140.549
+    ]
+   ],
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 21,
+    "outerRing": [
+     117.998,
+     141.485,
+     144.728,
+     164.605
+    ],
+    "innerWidth": 0.402,
+    "innerLength": 1.803
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 22,
+    "outerRing": [
+     117.297,
+     141.08,
+     145.429,
+     165.414
+    ],
+    "innerWidth": 0.429,
+    "innerLength": 1.948
+   }
+  },
+  {
+   "name": "triangle_right",
+   "layers": 4,
+   "outline": [
+    [
+     121.935,
+     96.356
+    ],
+    [
+     121.935,
+     72
+    ],
+    [
+     146.291,
+     72
+    ]
+   ],
+   "solid": {
+    "feature": "Internal solid infill",
+    "paths": 17,
+    "outerRing": [
+     122.87,
+     72.935,
+     144.033,
+     94.098
+    ],
+    "innerWidth": 0.397,
+    "innerLength": 2.001
+   },
+   "top": {
+    "feature": "Top surface",
+    "paths": 18,
+    "outerRing": [
+     122.465,
+     72.53,
+     145.01,
+     95.075
+    ],
+    "innerWidth": 0.424,
+    "innerLength": 2.163
+   }
+  }
+ ]
+}

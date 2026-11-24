@@ -105,10 +105,12 @@ function findLarge() {
 
 const PLAN = [];
 const MENU = { 'Import': 'menu-import', 'Measure': 'menu-measure', 'Move': 'menu-move', 'Rotate': 'menu-rotate', 'Tip': 'menu-tip',
-  'Align': 'menu-align', 'Gen+': 'menu-gen', 'Export': 'menu-export', 'Scale': 'menu-scale', 'Cut': 'menu-cut', 'Crop': 'menu-crop',
-  'Connect': 'menu-connect', 'Join': 'menu-joins', 'Seat': 'menu-seat', 'Supports': 'menu-supports', 'Add': 'menu-add',
+  'Align': 'menu-assemble', 'Gen+': 'menu-gen', 'Export': 'menu-export', 'Scale': 'menu-scale', 'Cut': 'menu-cut', 'Crop': 'menu-crop',
+  'Connect': 'menu-connect', 'Draw': 'menu-connect', 'Join': 'menu-assemble', 'Seat': 'menu-assemble', 'Supports': 'menu-supports', 'Add': 'menu-add',
   'Subtract': 'menu-bit', 'Shape': 'menu-shape', 'Paint': 'menu-paint', 'Surface & edges': 'menu-surface', 'Sculpt': 'menu-sculpt',
-  'Check & repair': 'menu-repair' };
+  'Check & repair': 'menu-repair',
+  // the card regroup (2026-11-16)
+  'Generate': 'menu-gen', 'Print': 'menu-supports', 'Punch': 'menu-punch', 'Fill & fix': 'menu-fillfix' };
 function V(sec, card, id, label, o) {
   const it = Object.assign({ sec, card, id, label, setup: 'one', menu: MENU[card] || null }, o || {});
   PLAN.push(it);
@@ -178,14 +180,11 @@ function buildPlan() {
   for (const [id, l] of [['btn-stock-box', 'Box'], ['btn-stock-cylinder', 'Cylinder'], ['btn-stock-sphere', 'Sphere'], ['btn-stock-capsule', 'Capsule'],
                          ['btn-stock-ellipsoid', 'Ellipsoid'], ['btn-stock-torus', 'Torus'], ['btn-stock-tube', 'Tube'], ['btn-stock-cone', 'Cone']])
     V(TOP, 'Gen+', id, 'Stock: ' + l, { setup: 'none', run: press([id]) });
-  const wheelSet = async x => { await x.fill('inp-wheel-height', 60); await x.fill('inp-wheel-radius', 30); await x.fill('inp-wheel-wall', 3); };
+  const wheelSet = async x => { await x.slider('rng-wheel-scale', 0.5); };
   const ball = async x => { await wheelSet(x); await x.click('btn-wheel-ball'); await x.wait(400); };
-  V(TOP, 'Gen+', 'btn-wheel-ball', 'Wheel: Ball (height 60, radius 30)', { pre: wheelSet, run: press(['btn-wheel-ball']) });
+  V(TOP, 'Gen+', 'btn-wheel-ball', 'Wheel: Starter Ball (scale mid)', { pre: wheelSet, run: press(['btn-wheel-ball']) });
+  V(TOP, 'Gen+', 'btn-wheel-flatten', 'Wheel: Flatten', { pre: ball, run: press(['btn-wheel-flatten']) });
   V(TOP, 'Gen+', 'btn-wheel-open', 'Wheel: Open', { pre: ball, run: press(['btn-wheel-open']) });
-  V(TOP, 'Gen+', 'btn-wheel-pull', 'Wheel: Pull (height 30, +6 mm)', { pre: async x => { await ball(x); await x.click('btn-wheel-open'); await x.wait(400); await x.fill('inp-wheel-pull-z', 30); await x.fill('inp-wheel-pull-dr', 6); },
-    run: press(['btn-wheel-pull']) });
-  V(TOP, 'Gen+', 'btn-wheel-trim', 'Wheel: Trim', { pre: ball, run: press(['btn-wheel-trim']) });
-  V(TOP, 'Gen+', 'btn-wheel-rim', 'Wheel: Rim +', { pre: ball, run: press(['btn-wheel-rim']) });
   V(TOP, 'Gen+', 'btn-relief-pick', 'Picture: Choose picture…', { setup: 'none', run: async x => { await x.chooser('btn-relief-pick', x.png()); } });
   V(TOP, 'Gen+', 'btn-relief-make', 'Picture: Make piece', { setup: 'none', pre: async x => { await x.chooser('btn-relief-pick', x.png()); await x.wait(800); }, run: press(['btn-relief-make']) });
   V(TOP, 'Gen+', 'btn-relief-undo', 'Picture: Undo', { setup: 'none', pre: async x => { await x.chooser('btn-relief-pick', x.png()); await x.wait(800); await x.click('btn-relief-make'); await x.wait(800); }, run: press(['btn-relief-undo']) });
@@ -234,7 +233,6 @@ function buildPlan() {
   V(COL, 'Cut', 'btn-cut-right-side-out', 'Turn it right-side-out, then Cut', { run: press(['btn-cut-right-side-out']) });
   for (const [id, l] of [['btn-crop-shape-box', 'Box'], ['btn-crop-shape-cylinder', 'Cylinder'], ['btn-crop-shape-sphere', 'Sphere']])
     V(COL, 'Crop', id, l + ' then CROP', { run: arm(id, [], ['btn-crop']) });
-  V(COL, 'Crop', 'btn-crop-shape-piece', 'Piece (click the other piece) then CROP', { setup: 'two', run: async x => { await x.click('btn-crop-shape-piece'); await x.wait(200); await x.pick(1, 0); await x.click('btn-crop'); } });
   V(COL, 'Crop', 'btn-crop-shape-outline', 'Outline (click the piece) then CROP', { run: async x => { await x.click('btn-crop-shape-outline'); await x.wait(200); await x.pick(0, 0); await x.click('btn-crop'); } });
   V(COL, 'Crop', 'crop-box-drag', 'Box: drag its body, then CROP', { run: async x => {
     await x.click('btn-crop-shape-box'); await x.wait(300);
@@ -247,7 +245,7 @@ function buildPlan() {
   for (const sh of ['String', 'Ribbon', 'Tube', 'Tapered']) V(COL, 'Connect', 'btn-connect-go', sh + ': pick two anchors, Set', { setup: 'two', run: conn(sh) });
   V(COL, 'Connect', 'btn-connect-go', 'String, ends: Ball', { setup: 'two', run: conn('String', 'Ball') });
   V(COL, 'Connect', 'btn-connect-go', 'String, kept as its own piece', { setup: 'two', run: async x => { await x.flag('input[value="separate"]'); await conn('String')(x); } });
-  V(COL, 'Connect', 'btn-connect-cancel', 'Cancel', { setup: 'two', run: async x => { await x.pick(0, 0); await x.wait(200); await x.click('btn-connect-cancel'); } });
+  V(COL, 'Connect', 'btn-connect-cancel', 'Cancel', { setup: 'two', run: async x => { await x.select('sel-connect-shape', { label: 'String' }); await x.pick(0, 0); await x.wait(200); await x.click('btn-connect-cancel'); } });
   V(COL, 'Connect', 'btn-stock-attach', 'Attach (a Stock blank, click a face)', { pre: async x => { await x.click('btn-stock-cylinder'); await x.wait(400); await x.pick(0, 0); }, run: arm('btn-stock-attach', [1]) });
   V(COL, 'Connect', 'btn-reattach', 'Reattach', { run: press(['btn-reattach']) });
   V(COL, 'Join', 'join-slot-a', 'Pick piece A (a side wall)', { setup: 'two', run: async x => { await x.click('join-slot-a'); await x.pick(0, 0, false); } });
@@ -274,11 +272,11 @@ function buildPlan() {
   V(COL, 'Supports', 'btn-sup-remove', 'Remove (click a support)', { pre: async x => { await x.click('btn-sup-all'); await x.wait(800); }, run: arm('btn-sup-remove', [0, 1]) });
   V(COL, 'Supports', 'btn-sup-none', 'Remove all', { pre: async x => { await x.click('btn-sup-all'); await x.wait(800); }, run: press(['btn-sup-none']) });
   const hollowed = async x => { await x.click('btn-hollow'); await x.wait(1200); };
-  V(COL, 'Add', 'btn-fill', 'Fill / Densify (after Hollow)', { pre: hollowed, run: press(['btn-fill']) });
-  V(COL, 'Add', 'btn-foam', 'Foam (after Hollow; hold the mouse on the piece)', { pre: hollowed, run: async x => { await x.click('btn-foam'); await x.wait(300); const p = x.pt(0, 0); if (p) await x.hold(p, 1500); else x.note('no point on the piece'); } });
-  V(COL, 'Add', 'btn-foam-all', 'Foam: Fill it all', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-all']) });
-  V(COL, 'Add', 'btn-foam-set', 'Foam: Fill it all, Set', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-all'); await x.wait(500); }, run: press(['btn-foam-set']) });
-  V(COL, 'Add', 'btn-foam-cancel', 'Foam: Cancel', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-cancel']) });
+  V(COL, 'Fill & fix', 'btn-fill', 'Fill / Densify (after Hollow)', { pre: hollowed, run: press(['btn-fill']) });
+  V(COL, 'Fill & fix', 'btn-foam', 'Foam (after Hollow; Hollows mode, hold the mouse on the piece)', { pre: hollowed, run: async x => { await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-mode-hollow'); await x.wait(300); const p = x.pt(0, 0); if (p) await x.hold(p, 1500); else x.note('no point on the piece'); } });
+  V(COL, 'Fill & fix', 'btn-foam-all', 'Foam: Fill it all', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-mode-hollow'); await x.wait(300); }, run: press(['btn-foam-all']) });
+  V(COL, 'Fill & fix', 'btn-foam-set', 'Foam: Fill it all, Set', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-all'); await x.wait(500); }, run: press(['btn-foam-set']) });
+  V(COL, 'Fill & fix', 'btn-foam-cancel', 'Foam: Cancel', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-cancel']) });
   V(COL, 'Add', 'btn-thicken-out', 'Thicken out (arms the live ghost, then Set)', { run: press(['btn-thicken-out', 'btn-thicken-set']) });
   V(COL, 'Add', 'btn-thicken-in', 'Thicken in (arms the live ghost, then Set)', { run: press(['btn-thicken-in', 'btn-thicken-set']) });
   V(COL, 'Add', 'btn-thicken-cancel', 'Thicken: arm, then Cancel', { run: press(['btn-thicken-out', 'btn-thicken-cancel']) });
@@ -287,11 +285,11 @@ function buildPlan() {
   V(COL, 'Add', 'btn-bridge-go', 'Bridge: two points, Set', { setup: 'two', run: async x => { await x.click('btn-bridge'); await x.pick(0, 0); await x.wait(200); await x.pick(1, 0); await x.wait(300); await x.click('btn-bridge-go'); } });
   V(COL, 'Add', 'btn-bridge-cancel', 'Bridge: Cancel', { setup: 'two', run: async x => { await x.click('btn-bridge'); await x.pick(0, 0); await x.wait(200); await x.click('btn-bridge-cancel'); } });
   V(COL, 'Add', 'btn-close-go', 'Close: click the rim, Set', { run: arm('btn-close', [0, 1], ['btn-close-go']) });
-  V(COL, 'Add', 'btn-patch', 'Patch (click a hole)', { run: arm('btn-patch', [0, 1]) });
+  V(COL, 'Fill & fix', 'btn-patch', 'Patch (click a hole)', { run: arm('btn-patch', [0, 1]) });
   V(COL, 'Subtract', 'btn-subtract', 'Subtract B from A', Object.assign({ run: press(['btn-subtract']) }, two));
   V(COL, 'Subtract', 'btn-extract-bit', 'Extract bit', Object.assign({ run: press(['btn-extract-bit']) }, two));
-  V(COL, 'Subtract', 'btn-carve', 'Carve (click a face)', { run: arm('btn-carve', [0]) });
-  V(COL, 'Subtract', 'carve-drag', 'Carve (drag a groove)', { run: async x => { await x.click('btn-carve'); await x.wait(200); await x.dragAt(x.pt(0, 1), x.pt(0, 3)); } });
+  V(COL, 'Sculpt', 'btn-carve', 'Carve (click a face)', { run: arm('btn-carve', [0]) });
+  V(COL, 'Sculpt', 'carve-drag', 'Carve (drag a groove)', { run: async x => { await x.click('btn-carve'); await x.wait(200); await x.dragAt(x.pt(0, 1), x.pt(0, 3)); } });
   V(COL, 'Subtract', 'btn-hollow', 'Hollow', { run: press(['btn-hollow']) });
   V(COL, 'Subtract', 'btn-hollow-safe', 'Hollow to safe min', { run: press(['btn-hollow-safe']) });
   V(COL, 'Subtract', 'btn-lift', 'Lift (click a feature)', { run: arm('btn-lift', [0, 1]) });
@@ -318,7 +316,7 @@ function buildPlan() {
   V(COL, 'Surface & edges', 'btn-skin-patch', 'Skin patch', { run: press(['btn-skin-patch']) });
   V(COL, 'Surface & edges', 'btn-trace-raster', 'Trace raster (choose a picture)', { run: async x => { await x.chooser('btn-trace-raster', x.png()); } });
   V(COL, 'Surface & edges', 'btn-texture', 'Texture', { run: press(['btn-texture']) });
-  for (const [mode, l] of [[0, 'Carve'], [1, 'Emboss'], [2, 'Smooth here']])
+  for (const [mode, l] of [[0, 'Emboss'], [1, 'Smooth here']])
     V(COL, 'Sculpt', 'btn-brush', 'Brush: ' + l + ' (drag across the piece)', { run: async x => {
       await x.select('sel-brush-mode', { index: mode }); await x.click('btn-brush'); await x.wait(300);
       await x.dragAt(x.pt(0, 1), x.pt(0, 2), { steps: 12 }); } });
@@ -379,7 +377,7 @@ function buildPlan() {
   const watching = async x => { await x.click('btn-watch'); await x.wait(300); };
   V(COL, 'Seat', 'btn-flip-port', 'Flip port (Watch on)', Object.assign({ run: press(['btn-flip-port']) }, seatTwo, { pre: async x => { await watching(x); await seatTwo.pre(x); } }));
   V(COL, 'Shape', 'btn-pull', 'Pull (drag a spot, Watch on)', { pre: watching, run: async x => { await x.click('btn-pull'); await x.wait(300); const a = x.pt(0, 0); await x.dragAt(a, a && { x: a.x + 30, y: a.y - 25 }, { steps: 10 }); } });
-  for (const [mode, l] of [[0, 'Carve'], [1, 'Emboss'], [2, 'Smooth here']])
+  for (const [mode, l] of [[0, 'Emboss'], [1, 'Smooth here']])
     V(COL, 'Sculpt', 'btn-brush', 'Brush: ' + l + ' (Watch on)', { pre: watching, run: async x => {
       await x.select('sel-brush-mode', { index: mode }); await x.click('btn-brush'); await x.wait(300);
       await x.dragAt(x.pt(0, 1), x.pt(0, 2), { steps: 12 }); } });
@@ -844,7 +842,9 @@ async function worker(key, items) {
           const e = await G('edit', () => page.evaluate(() => state.editId));
           if (e == null) X.note('a click on the piece did not select it');
         }
-        if (it.menu) { await G('card', () => LARGE ? page.evaluate(m => document.querySelector('#' + m + ' > summary').click(), it.menu) : page.click('#' + it.menu + ' > summary', { timeout: TMO })).catch(() => X.note('card would not open')); await sleep(150); }
+        // Crop has no slab: the Cut / Crop slab, then the switch's Crop (2026-11-16)
+        const openBy = it.menu === 'menu-crop' ? ['#menu-cut > summary', '#btn-cut-mode-crop'] : ['#' + it.menu + ' > summary'];
+        if (it.menu) { await G('card', async () => { for (const sel of openBy) await (LARGE ? page.evaluate(q => document.querySelector(q).click(), sel) : page.click(sel, { timeout: TMO })); }).catch(() => X.note('card would not open')); await sleep(150); }
         if (it.pre) await it.pre(X);
         if (process.env.QA_TRACE) process.stderr.write(JSON.stringify({ placed: await page.evaluate(() => state.placed.map(p => [p.sourceId, p.name])), hits: X.H && X.H.map(a => a.length), join: await page.evaluate(() => ({ sess: state.joinSession, edit: state.editId, partner: state.joinPartnerId, armed: state.joinArmed })) }) + '\n');
         tp('pre done'); const fp0 = await X.fp(); tp('fp0');

@@ -617,7 +617,7 @@ if (typeof document !== 'undefined') (function () {
     }
     if (window.nsoFoam && window.nsoFoam.on && window.nsoFoam.on()) window.nsoFoam.cancel();
     // The other Shape panels are sessions of their own; one is open at a time.
-    ['btn-bend', 'btn-tube-edge'].forEach(function (id) {
+    ['btn-bend', 'btn-tube-edge', 'btn-cylinders'].forEach(function (id) {
       var b = el(id);
       if (b && b.getAttribute('aria-expanded') === 'true') b.click();
     });

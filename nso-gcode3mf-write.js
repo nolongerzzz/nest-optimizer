@@ -185,7 +185,7 @@
       pauses: 0, supportFeature: false
     };
     var inBody = text.indexOf('; EXECUTABLE_BLOCK_START') < 0;
-    var label = null, x = 0, y = 0, z = 0, w = 0, absXY = true, relE = false;
+    var label = null, x = 0, y = 0, z = 0, w = 0, absXY = true, relE = false, tower = false;
     var current = -1, layer = -1;
     var seen = {};
     function widen(b, px, py) {
@@ -203,12 +203,14 @@
       if (line.charAt(0) === ';') {
         if (line === '; CHANGE_LAYER') {
           layer++; s.layers = layer + 1;
-          if (current >= 0) s.filamentByLayer[layer] = [current];
         } else if ((m = /^; start printing object, unique label id: (\d+)/.exec(line))) {
           label = m[1];
           if (!seen[label]) { seen[label] = true; s.labelsSeen.push(label); }
         } else if (/^; stop printing object/.test(line)) label = null;
         else if ((m = /^; LINE_WIDTH: ([\d.]+)/.exec(line))) w = parseFloat(m[1]);
+        /* the prime tower's moves (Studio's WIPE_TOWER_START / _END) are no object's: not in a layer's filaments, not in a footprint */
+        else if (line === '; WIPE_TOWER_START') tower = true;
+        else if (line === '; WIPE_TOWER_END') tower = false;
         else if (/^; FEATURE: Support/.test(line)) s.supportFeature = true;
         continue;
       }
@@ -225,10 +227,6 @@
           s.loads[f] = (s.loads[f] || 0) + 1;
           if (s.firstFilament === null) s.firstFilament = f;
           current = f;
-          if (layer >= 0) {
-            var list = s.filamentByLayer[layer] || (s.filamentByLayer[layer] = []);
-            if (list.indexOf(f) < 0) list.push(f);
-          }
         }
         continue;
       }
@@ -240,7 +238,13 @@
       if (v.Z != null) z = absXY ? v.Z : z + v.Z;
       var extruding = v.E != null && (relE ? v.E > 0 : true);
       if (extruding && z > s.maxZ) s.maxZ = z;
-      if (layer === 0 && extruding && (nx !== x || ny !== y)) {
+      /* a layer's filaments are the ones that print on it (Studio's layer_filament_lists: the 3-colour pyramid's change layer is the new
+         filament's alone) - not the one it starts loaded with, nor a purge at the chute */
+      if (extruding && !tower && layer >= 0 && current >= 0 && (nx !== x || ny !== y)) {
+        var list = s.filamentByLayer[layer] || (s.filamentByLayer[layer] = []);
+        if (list.indexOf(current) < 0) list.push(current);
+      }
+      if (layer === 0 && extruding && !tower && (nx !== x || ny !== y)) {
         // A one-object plate has no "start printing object" labels; its layer-1
         // extrusion is kept apart and belongs to the one object.
         var b = label ? (s.layer1[label] || (s.layer1[label] = [Infinity, Infinity, -Infinity, -Infinity]))
@@ -388,7 +392,7 @@
       byKey[key].push(prev);
     }
     d.layerFilamentLists = groups.map(function (k) {
-      return { filament_list: k, layer_ranges: byKey[k].map(function (r) { return r.start + ' ' + r.end; }).join(' ') };
+      return { filament_list: k, layer_ranges: byKey[k].map(function (r) { return r.start + ' ' + r.end; }).join(',') };   /* Studio: "0 41,107 147" */
     });
 
     // Objects: the G-code's label ids, named from what was passed.
@@ -436,15 +440,25 @@
     d.isSeqPrint = cfg('print_sequence') === 'by object';
     d.layerHeight = parseFloat(cfg('layer_height')) || 0.2;
 
-    // Layer-1 footprint per object (plate_1.json) and "outside".
+    // Layer-1 footprint per object (plate_1.json) and "outside". The G-code's moves are the nozzle's: the printer's extruder_offset (the
+    // P1S's 0x2) is added back, as Studio's footprints are the plate's (the owner's pyramid: 111.5306 where its G-code says 109.531).
+    var offM = /^\s*(-?[\d.]+)\s*x\s*(-?[\d.]+)/.exec(String(cfg('extruder_offset') || '').split(/[;,]/)[0]);
+    var ox = offM ? +offM[1] : 0, oy = offM ? +offM[2] : 0;
     var all = [Infinity, Infinity, -Infinity, -Infinity];
     var solo = !labels.length && d.objects.length === 1 ? body.layer1Unlabelled : null;
     d.bboxObjects = d.objects.map(function (o) {
-      var b = body.layer1[o.identify_id] || solo;
-      if (!b) return null;
+      var b0 = body.layer1[o.identify_id] || solo;
+      if (!b0) return null;
+      var b = [b0[0] + ox, b0[1] + oy, b0[2] + ox, b0[3] + oy];
       all = [Math.min(all[0], b[0]), Math.min(all[1], b[1]), Math.max(all[2], b[2]), Math.max(all[3], b[3])];
-      return { area: (b[2] - b[0]) * (b[3] - b[1]), bbox: b.slice(), id: Number(o.identify_id), name: o.name };
+      return { area: (b[2] - b[0]) * (b[3] - b[1]), bbox: b, id: Number(o.identify_id), name: o.name };
     }).filter(Boolean);
+    /* the prime tower is listed as Studio lists it: id 1000, "wipe_tower", its box with the brim, and the area of the object before it */
+    if (opts.wipeTower && opts.wipeTower.bbox && d.bboxObjects.length) {
+      var tb = opts.wipeTower.bbox.slice();
+      all = [Math.min(all[0], tb[0]), Math.min(all[1], tb[1]), Math.max(all[2], tb[2]), Math.max(all[3], tb[3])];
+      d.bboxObjects.push({ area: d.bboxObjects[d.bboxObjects.length - 1].area, bbox: tb, id: 1000, name: 'wipe_tower' });
+    }
     d.bboxAll = isFinite(all[0]) ? all : [0, 0, 0, 0];
     var area = strs(cfg('printable_area')).map(function (p) { return p.split('x').map(Number); });
     var height = parseFloat(cfg('printable_height'));

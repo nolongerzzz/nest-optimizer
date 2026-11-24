@@ -276,6 +276,19 @@ in-house slicer's output for it.
   before OrbitControls sees it, so `enableZoom` stays on and middle-drag and
   two-finger touch still dolly about the target. `gcode:gscope-zoom`
   (`tools/gcode-test/gscope-zoom-drive-check.mjs`) holds it.
+- **Every drag re-seats the target** (`app-core.js` `reseatOrbitTarget` /
+  `installOrbitReseat`, shared with the plate view). Pan moves a point at the
+  target's depth one pixel per pixel, and wheel zoom, pan and orbit all keep
+  the ratio of the target's depth to what is on screen - so a long bout of
+  them left the target far in front of the toolpath and a pan crawled at a
+  fraction of the pointer ("dragging uphill") until Frame. Now the press that
+  starts an orbit, pan or dolly first slides the target along the view line
+  to the depth of what it grabs: for a pan the drawn point (or bed) under the
+  pointer, which then follows the pointer exactly; for an orbit or dolly what
+  is at the centre of the view, else under the pointer. The camera does not
+  move, so the picture does not change; with nothing under the pointer the
+  target stays. `camera:reseat` (`tools/nso_orbit_reseat_test.js`) and
+  `pan:drive` hold it.
 - **The slice settings** (nozzle, layer, walls, infill, pattern, support
   angle) sit behind a `Slice settings` disclosure, collapsed by default. Their
   values persist across every Normal / Slice view round trip.

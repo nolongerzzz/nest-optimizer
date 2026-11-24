@@ -246,6 +246,8 @@ var NSO_MICROSCOPE = (function () {
       zBottom: zBottom,
       parsed: res.parsed,
       objects: null,
+      // OBJECT_ID -> the OBJECT_ID of the head it supports (NSO's slice: each support is an object of its own); see headOf
+      pieceHeads: res.pieceHeads || null,
       // Swept chains, keyed by first:last move - see NSOGcodeSolid.buildSolid.
       // Per document, because a chain key means nothing in another file.
       solidCache: new Map(),
@@ -483,7 +485,7 @@ var NSO_MICROSCOPE = (function () {
   /**
    * Read one file into the view. Resolves with the document, or null on a
    * failure that has already been reported. A file that opens is the
-   * IMPORTED file: the one thing a close does not throw away (close()).
+   * IMPORTED file: the one thing that comes back even after a close that kept nothing (close()).
    */
   function load(filename, arrayBuffer) {
     return loadFile(filename, arrayBuffer).then(function (d) {
@@ -664,19 +666,34 @@ var NSO_MICROSCOPE = (function () {
   // still has the beads to sweep. Dragged onto a plate that holds a document,
   // a piece joins it (setDownOn). Nothing the user reads says 'lens' or 'take'.
 
+  // PLATES 3 TO 6 (the owner: "allow multi plate preview, since we have up to 6 plates"): the main view has up to six beds,
+  // and a bed's Preview lands on G-scope's plate of the same number (openFile / openSlice, opts.plate), so two beds'
+  // supports can be looked at - and Compared - side by side. Plates 3 to 6 stand only while they hold something (or
+  // are the active one), right of plate 2 in number order; COMPARE's plate ('cmp', labelled "Compare") stands last.
   var plateName = 'lens';                         // the ACTIVE plate
-  var PLATES = ['lens', 'take', 'cmp'];            // plate 1, plate 2 and plate 3 (COMPARE's: it shows only while it holds something)
-  var plateSaved = { lens: null, take: null, cmp: null };   // a plate's stash while it is NOT active
+  var PLATES = ['lens', 'take', 'p3', 'p4', 'p5', 'p6', 'cmp'];   // plates 1 to 6, then COMPARE's (it shows only while it holds something)
+  var BED_PLATES = PLATES.slice(0, 6);           // G-scope's plate N is the main view's bed N
+  var plateSaved = { lens: null, take: null, p3: null, p4: null, p5: null, p6: null, cmp: null };   // a plate's stash while it is NOT active
   var plateListeners = [];                       // fn(name) after the active plate changed
-  var SLOT = { lens: 0, take: 1, cmp: 2 };       // left to right
-  var PLATE_LABEL = { lens: 'Plate 1', take: 'Plate 2', cmp: 'Plate 3' };
+  var PLATE_LABEL = { lens: 'Plate 1', take: 'Plate 2', p3: 'Plate 3', p4: 'Plate 4', p5: 'Plate 5', p6: 'Plate 6', cmp: 'Compare' };
   function pn(name) { return PLATES.indexOf(name) >= 0 ? name : 'lens'; }
-  /** The plates standing: 1 and 2 always, 3 while it holds a compare (or is the active one). */
-  function livePlates() { return PLATES.filter(function (n) { return n !== 'cmp' || n === plateName || !!plateDoc('cmp'); }); }
+  /** The plates standing: 1 and 2 always; 3 to 6 and Compare's while they hold something (or are the active one). */
+  function livePlates() { return PLATES.filter(function (n) { return n === 'lens' || n === 'take' || n === plateName || !!plateDoc(n); }); }
+  /** Where plate `name` stands, left to right among the plates standing (a plate not standing: where it would stand). */
+  function slotOf(name) {
+    var live = livePlates(), i = live.indexOf(name);
+    if (i >= 0) return i;
+    var at = PLATES.indexOf(name);
+    return live.filter(function (n) { return PLATES.indexOf(n) < at; }).length;
+  }
+  /** G-scope's plate for the main view's bed `n` (1 to 6), or null. */
+  function bedPlate(n) { n = Math.round(+n); return n >= 1 && n <= BED_PLATES.length ? BED_PLATES[n - 1] : null; }
   var importedDoc = null;                        // the file Import opened, kept across a close
 
-  /** "Plate 1" / "Plate 2". */
+  /** "Plate 1" ... "Plate 6", "Compare". */
   function plateTitle(name) { return PLATE_LABEL[pn(name)]; }
+  /** '1' ... '6', or 'compare'. */
+  function plateNumber(name) { name = pn(name); return name === 'cmp' ? 'compare' : String(PLATES.indexOf(name) + 1); }
 
   /** A plate's document, active or not (null: the plate is empty). */
   function plateDoc(name) {
@@ -756,7 +773,7 @@ var NSO_MICROSCOPE = (function () {
   /** Plate 1's document, whichever plate is active. */
   function lensDoc() { return plateDoc('lens'); }
 
-  /** The plate a drag copies to: 1 and 2 are each other's; plate 3 (a compare) copies to plate 1. */
+  /** The plate a drag copies to: 1 and 2 are each other's; plates 3 to 6 and Compare's copy to plate 1. */
   function otherPlate() { return plateName === 'lens' ? 'take' : 'lens'; }
 
   /** Plate centre to plate centre, mm: a plate's side and a gap. */
@@ -764,7 +781,7 @@ var NSO_MICROSCOPE = (function () {
 
   /** Where plate `name` stands, along view X, with the active plate at the origin. */
   function plateOffset(name) {
-    return (SLOT[pn(name)] - SLOT[plateName]) * plateSpacing();
+    return (slotOf(pn(name)) - slotOf(plateName)) * plateSpacing();
   }
 
   /** A plate's three scene groups, active or not. */
@@ -892,7 +909,7 @@ var NSO_MICROSCOPE = (function () {
   /** The side both plates take: what either holds decides it (both grow together). */
   function sizePlates() {
     var was = plateSide;
-    plateSide = Math.max(sideFor(plateDoc('lens')), sideFor(plateDoc('take')), sideFor(plateDoc('cmp')));
+    plateSide = Math.max.apply(null, PLATES.map(function (n) { return sideFor(plateDoc(n)); }));
     return plateSide !== was;
   }
 
@@ -1030,10 +1047,10 @@ var NSO_MICROSCOPE = (function () {
     if (t) {
       t.title = 'Empty ' + plateTitle(plateName) + ', the active plate - ' + plateTitle(otherPlate()) + ' is not touched. ' +
                 'An emptied plate is ready for Import or Read plate';
-      t.dataset.plate = plateName === 'take' ? '2' : plateName === 'cmp' ? '3' : '1';
+      t.dataset.plate = plateNumber(plateName);
     }
     var vp = $('ms-viewport');
-    if (vp) vp.dataset.plate = plateName === 'take' ? '2' : plateName === 'cmp' ? '3' : '1';
+    if (vp) vp.dataset.plate = plateNumber(plateName);
     syncExportRow();
   }
   function syncPlate() { syncPlateUI(); badgeFor(); syncCard(); syncCompare(); }
@@ -1635,6 +1652,18 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
+   * The piece a click on line `sg` takes (a copy): its OBJECT_ID's shown lines - or, in a Compare Pieces pick, the body
+   * under the pointer with its supports (its island), not every body that shares its OBJECT_ID, and not the head
+   * without the supports NSO's slice prints as objects of their own.
+   */
+  function pieceOfSeg(sg) {
+    var shown = shownMemo();
+    if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
+    var isle = cmpPick && cmpPick.shape === 'piece' ? islandOf(shown, sg) : null;
+    return (isle || shown.byObj.get(sg.obj)).slice();
+  }
+
+  /**
    * What a click here would take, in the current mode: { items, source, point,
    * label } or null. Items are a slice's segments or a mesh's objects - the one
    * selection every export and pull already reads.
@@ -1654,9 +1683,7 @@ var NSO_MICROSCOPE = (function () {
         t = selectByBox([gcodeBoxOf(tb)]);
         return { items: t, source: 'box', point: lh.point, box: tb, label: 'region', seg: sg };
       }
-      var shown = shownMemo();
-      if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
-      return { items: shown.byObj.get(sg.obj).slice(), source: 'pick', point: lh.point, label: 'piece', seg: sg };
+      return { items: pieceOfSeg(sg), source: 'pick', point: lh.point, label: 'piece', seg: sg };
     }
     var oh = objectHitAt(e);
     if (!oh) return null;
@@ -3440,8 +3467,10 @@ var NSO_MICROSCOPE = (function () {
     rc.near = v.camera.near;
     rc.far = v.camera.far;
     rc.params.Line.threshold = Math.max(0.05, v.camera.position.distanceTo(v.controls.target) * 0.006);
-    // both plates: what is drawn on either, then either floor
-    var hits = rc.intersectObjects([v.overviewGroup, v.detailGroup, v.highlightGroup].concat(plateGroups(otherPlate())).concat(plateName === 'cmp' ? [] : plateGroups('cmp')), true);
+    // every plate: what is drawn on any, then any floor
+    var others = [];
+    livePlates().forEach(function (n) { if (n !== plateName) others = others.concat(plateGroups(n)); });
+    var hits = rc.intersectObjects([v.overviewGroup, v.detailGroup, v.highlightGroup].concat(others), true);
     for (var i = 0; i < hits.length; i++) {
       // ray.at(distance), not hit.point: on the ray itself, so the pixel holds
       if (drawnAt(hits[i])) return rc.ray.at(hits[i].distance, new THREE.Vector3());
@@ -3474,6 +3503,23 @@ var NSO_MICROSCOPE = (function () {
     var el = v.renderer.domElement;
 
     v.host.addEventListener('wheel', onWheel, { capture: true, passive: false });
+
+    /* Each orbit / pan / dolly drag first slides the target along the view
+       line to the depth of what it grabs (app-core.js's reseatOrbitTarget,
+       shared with the main viewport): a pan, the toolpath or floor under the
+       pointer, which then follows the pointer exactly; an orbit, what is at
+       the centre of the view. Without it, long bouts of wheel zoom, pan and
+       orbit left the target far in front of the toolpath, and a pan crawled
+       at a fraction of the pointer until Frame. The picture does not move. */
+    installOrbitReseat(v.controls, el, function (p) {
+      var rect = el.getBoundingClientRect();
+      var at = p.pan ? wheelAnchor(p.x, p.y)
+        : (wheelAnchor(rect.left + rect.width / 2, rect.top + rect.height / 2) || wheelAnchor(p.x, p.y));
+      if (!at) return false;
+      var c = v.controls;
+      return reseatOrbitTarget(v.camera, c, at, Math.max(c.minDistance, v.camera.near * 2),
+        Math.min(c.maxDistance, v.camera.far), null);
+    });
 
     el.addEventListener('pointerdown', function (e) {
       v.mouseDownPos = [e.clientX, e.clientY];
@@ -4124,9 +4170,101 @@ var NSO_MICROSCOPE = (function () {
   function shownMemo() {
     var key = [featureSig(), CLEARED.size, zr ? zr.lo + ':' + zr.hi + ':' + (zr.part < 1 ? 'p' + scrubTop().cut : '') : ''].join('/');
     if (!shownKept || shownKept.doc !== doc || shownKept.segs !== doc.segments || shownKept.cleared !== CLEARED || shownKept.key !== key) {
-      shownKept = { doc: doc, segs: doc.segments, cleared: CLEARED, key: key, list: shownSegments(), byObj: new Map() };
+      shownKept = { doc: doc, segs: doc.segments, cleared: CLEARED, key: key, list: shownSegments(), byObj: new Map(), islands: new Map() };
     }
     return shownKept;
+  }
+
+  /**
+   * The ISLAND a shown segment stands in: the lines of its piece (same OBJECT_ID) that touch it, layer on layer - one body
+   * with its supports. A slicer may print many bodies under one id (Bambu's slice of supp_ref_2x is one merged STL: six heads
+   * and every tree under OBJECT_ID 318), so a Compare pick by id alone took the whole plate. Lines touch when they pass
+   * through the same ISLAND_CELL_MM cell on one layer, or neighbouring cells on layers up to ISLAND_DZ_MM below (a support's
+   * own layers interleave with the part's). Kept with what is shown: lines switched off do not join islands.
+   */
+  var ISLAND_CELL_MM = 1, ISLAND_DZ_MM = 0.65;
+  function islandOf(shown, sg) {
+    // the piece is the head with its supports: NSO's slice prints each support as an object of its own (Bambu prints
+    // a head's supports under the head's label), so its lines are grouped by headOf first, then split into islands
+    var heads = headsOf(doc), key = headOf(heads, sg.obj);
+    var kept = shown.islands.get((heads ? 'h' : 'o') + key);
+    if (!kept) {
+      var group = shown.list.filter(function (x) { return headOf(heads, x.obj) === key; });
+      kept = { of: islandsOf(group), groups: new Map() };
+      shown.islands.set((heads ? 'h' : 'o') + key, kept);
+    }
+    var root = kept.of.get(sg);
+    if (root == null) return null;
+    if (!kept.groups.has(root)) {
+      var list = [];
+      kept.of.forEach(function (r, s) { if (r === root) list.push(s); });
+      kept.groups.set(root, list);
+    }
+    return kept.groups.get(root);
+  }
+
+  /**
+   * OBJECT_ID -> the OBJECT_ID of the head it supports, for a slice whose supports are objects of their own (a Map, or
+   * null when nothing says so): NSO's slice from the Supports card (the document's nsoPlateSlice: its labels name each
+   * id's plate piece, and a support piece names its host) or from G-scope's Slice switch (pieceHeads, as it sliced).
+   */
+  function headsOf(d) {
+    if (!d) return null;
+    if (d.pieceHeads) return d.pieceHeads;
+    var rec = d.nsoPlateSlice;
+    if (!rec || !rec.labels || !rec.pieces) return null;
+    if (d.headsKept && d.headsKept.rec === rec) return d.headsKept.map;
+    var labelOf = {}, map = new Map();
+    rec.labels.forEach(function (l) { labelOf[l.index] = l.id; });
+    rec.labels.forEach(function (l) {
+      var p = rec.pieces[l.index];
+      if (!p || !p.support || p.hostSourceId == null) return;
+      var h = rec.pieces.findIndex(function (q) { return q && !q.support && q.sourceId === p.hostSourceId; });
+      if (h >= 0 && labelOf[h] != null) map.set(String(l.id), String(labelOf[h]));
+    });
+    d.headsKept = { rec: rec, map: map };
+    return map;
+  }
+  /** The head an OBJECT_ID stands for: its host when it is a support, else itself (keys compared as strings). */
+  function headOf(heads, obj) {
+    var k = obj == null ? '' : String(obj);
+    return heads && heads.has(k) ? heads.get(k) : k;
+  }
+
+  /** Map segment -> its island's number, for one piece's shown segments (union-find over a grid of cells per layer). */
+  function islandsOf(segs) {
+    var n = segs.length, par = new Int32Array(n), i;
+    for (i = 0; i < n; i++) par[i] = i;
+    function find(a) { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; }
+    function join(a, b) { a = find(a); b = find(b); if (a !== b) par[a] = b; }
+    var zs = [], seen = new Set();
+    segs.forEach(function (s) { if (!seen.has(s.z)) { seen.add(s.z); zs.push(s.z); } });
+    zs.sort(function (a, b) { return a - b; });
+    var lvOf = new Map();
+    zs.forEach(function (z, k) { lvOf.set(z, k); });
+    var lv = new Int32Array(n), ord = [];
+    for (i = 0; i < n; i++) { lv[i] = lvOf.get(segs[i].z); ord.push(i); }
+    ord.sort(function (a, b) { return lv[a] - lv[b]; });
+    var C = ISLAND_CELL_MM, cell = new Map(), OFF = 1024, W = 4096;
+    function key(l, ix, iy) { return (l * W + ix) * W + iy; }
+    ord.forEach(function (si) {
+      var s = segs[si], l = lv[si];
+      var len = Math.hypot(s.x1 - s.x0, s.y1 - s.y0), k = Math.max(1, Math.ceil(len / (C / 2)));
+      for (var t = 0; t <= k; t++) {
+        var ix = Math.floor((s.x0 + (s.x1 - s.x0) * t / k) / C) + OFF, iy = Math.floor((s.y0 + (s.y1 - s.y0) * t / k) / C) + OFF;
+        var kk = key(l, ix, iy), o = cell.get(kk);
+        if (o == null) cell.set(kk, si); else join(si, o);
+        for (var b = 1; b <= 6 && l - b >= 0 && s.z - zs[l - b] <= ISLAND_DZ_MM; b++) {
+          for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+            var q = cell.get(key(l - b, ix + dx, iy + dy));
+            if (q != null) join(si, q);
+          }
+        }
+      }
+    });
+    var out = new Map();
+    for (i = 0; i < n; i++) out.set(segs[i], find(i));
+    return out;
   }
 
   function clipPlanes() { return view ? view.clip : []; }
@@ -4162,6 +4300,7 @@ var NSO_MICROSCOPE = (function () {
     syncZRangeUI();
     syncTakeBand();
     syncRenderRow();
+    syncFilament();
   }
   /**
    * The top handle moved inside its layer: the whole layers below are as built, so
@@ -4497,7 +4636,7 @@ var NSO_MICROSCOPE = (function () {
   // --- the gap ruler -------------------------------------------------------------
   //
   // Click one line, click another: the exact gap between them, read off the two
-  // lines as they are drawn (so on plate 3, side by side or split, it is the gap
+  // lines as they are drawn (so on the Compare plate, side by side or split, it is the gap
   // as it stands in view). Seen from above - what a bead rests on, or keeps clear
   // of, is a bird's-eye matter - plus the height between them. A third click starts
   // again. Nothing is selected, isolated or moved.
@@ -4544,7 +4683,7 @@ var NSO_MICROSCOPE = (function () {
     var pos = mesh.geometry.attributes.position;
     mesh.updateMatrixWorld(true);
     if (pk.mv) {
-      // a bead piece (plate 3's, and any piece dragged onto a plate): the bead's own prism, read where it stands now.
+      // a bead piece (the Compare plate's, and any piece dragged onto a plate): the bead's own prism, read where it stands now.
       // The move's ends carry its direction and length; the prism's corners say where it is (they give the centre).
       var b = pk.bead * 36;
       if (b + 36 > pos.count) return null;
@@ -4635,7 +4774,7 @@ var NSO_MICROSCOPE = (function () {
     gapDraw();
   }
 
-  /** A click: the line under the pointer on a slice, the bead under it on plate 3's pieces. True when one was picked. */
+  /** A click: the line under the pointer on a slice, the bead under it on the Compare plate's pieces. True when one was picked. */
   function gapClick(e) {
     if (doc.kind === 'toolpath') {
       var lh = lineHitAt(e);
@@ -5699,7 +5838,7 @@ var NSO_MICROSCOPE = (function () {
     cancelPull();
     var me = plateTitle(plateName);
     var n = doc ? (doc.kind === 'mesh' ? doc.objects.length : 1) : 0;
-    if (doc && showsImport(doc) && !showsImport(plateDoc(otherPlate()))) importedDoc = null;
+    if (doc && showsImport(doc) && !PLATES.some(function (n) { return n !== plateName && showsImport(plateDoc(n)); })) importedDoc = null;
     clearHover();
     emptyPlate(plateName);
     if (sizePlates()) placePlates();
@@ -6059,28 +6198,62 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * CLOSE (and BACK, and every export that leaves G-scope) end the visit
-   * whole. Nothing of it survives but an imported file: plate 2 is thrown
-   * away, plate 1 is emptied, the Display set, the render mode, REGION and the
-   * open ▾ menu or Export card go back to their defaults (the Slice settings
-   * fold and take the printer profile again: app-gscope-slice.js), and the next open starts from a
-   * fresh read of the plate - or of the imported file, if plate 1 was showing
-   * it (or a slice made from it) when G-scope closed.
+   * CLOSE (and BACK, and every export that leaves G-scope) puts G-scope away and KEEPS ITS PLATES: plate 1, plate 2
+   * plates 3 to 6, and the Compare plate (a compare, with its state) are as they were left when the G-scope button opens it again, on the
+   * plate that was showing - so the owner can go back and forth between the main view and G-scope. What a close does
+   * end: a Compare pick half made, the drag in hand, the open ▾ menu or Export card, REGION. Plate 1 is the active
+   * plate while G-scope is put away, so a file or a slice opened from the main view (Preview, Import) lands on plate 1
+   * as it always has, and the other plates are untouched. A plate 1 that is a read of the main plate, or empty, is read
+   * again on the next open (the main plate may have changed since); anything else on it - an import, a slice - is kept.
+   * With nothing on any plate a close is the old end of the visit: everything back to its defaults.
    */
+  var keptPlate = null;           // the plate that was showing when G-scope was put away with its plates kept
   function close() {
     cancelPull();
+    if (cmpPick) comparePickCancel(true);
     var panel = $('microscope');
     if (panel) panel.hidden = true;
     var btn = $('btn-microscope');
     if (btn) btn.classList.remove('is-on');
     if (view) view.running = false;
     loop++;                       // retires any frame already in flight
-    if (!showsImport(lensDoc()) && !showsImport(plateDoc('take'))) importedDoc = null;
+    if (!PLATES.some(function (n) { return showsImport(plateDoc(n)); })) importedDoc = null;
     shellCardClose();
+    var any = PLATES.some(function (n) { return !!plateDoc(n); });
+    if (view && any) {
+      clearHover();
+      setMode('piece');
+      keptPlate = plateName;
+      if (plateName !== 'lens') showPlate('lens', { quiet: true });
+      return;
+    }
+    keptPlate = null;
     reset();
     FEATURE_OFF = new Set(['Travel']);
     renderMode = 'toolpath';
     setMode('piece');
+  }
+
+  /**
+   * The G-scope button after a close that kept the plates: every plate as it was left, on the plate that was showing.
+   * Plate 1, when it is a read of the main plate or empty, is read again (an empty main plate empties it). Null when
+   * nothing was kept.
+   */
+  function resumeKept() {
+    if (keptPlate == null || !PLATES.some(function (n) { return !!plateDoc(n); })) { keptPlate = null; return null; }
+    var back = keptPlate;
+    keptPlate = null;
+    openPanel();
+    if (!view) return null;
+    if (plateName !== 'lens') showPlate('lens', { quiet: true });
+    var ld = lensDoc();
+    /* a read of the main plate is read again; an EMPTY plate 1 keeps nothing, so it reads the main plate too (CLEAR then CLOSE: the next
+       open shows the plate, as G-scope opened from the main view does) */
+    if ((!ld || ld.source === 'plate') && !openPlate()) emptyPlate('lens');
+    if (!plateDoc(back) && back !== 'lens') back = 'lens';
+    if (back !== plateName) showPlate(back);
+    else { syncPlate(); redrawDoc(false); }
+    return plateDoc(plateName) || lensDoc() || true;
   }
 
   /** Is this plate's document the imported file - as opened, re-opened, or a slice made from it? */
@@ -6190,9 +6363,67 @@ var NSO_MICROSCOPE = (function () {
     return false;
   }
 
+  /* THE FILAMENT READOUT (the owner: "a side by side filament readout in the top centre box, whatever the comparison is"). While the
+     Compare plate holds two sliced pieces - two plates, two pieces, two lassos, two selections - the head box grows a table under its file
+     line: each piece's filament (metres and grams) over the moves it shows - the Features list's checked line types and the slider's band -
+     in total and line type by line type, and how much more or less the orange one takes than the blue. Grams at FIL_DENSITY (PLA's 1.24) of
+     a FIL_DIAMETER_MM filament: the moves carry their filament length (E), the rest is arithmetic. */
+  var FIL_DIAMETER_MM = 1.75, FIL_DENSITY = 1.24, filCache = null;
+  function filamentOf(moves, band) {
+    var by = {}, tot = 0;
+    for (var i = 0; i < moves.length; i++) {
+      var m = moves[i];
+      if (!(m.e > 0) || FEATURE_OFF.has(m.feature)) continue;
+      if (band && (m.z < band[0] - 1e-6 || m.z > band[1] + 1e-6)) continue;
+      by[m.feature] = (by[m.feature] || 0) + m.e;
+      tot += m.e;
+    }
+    return { tot: tot, by: by };
+  }
+  /** { a, b: { name, tot, by: { feature: filament mm } }, band, names: [features] } of the Compare plate's two pieces as shown, or null. */
+  function compareFilament() {
+    if (!compareLive() || !compare.a.moves || !compare.b.moves || !compare.a.moves.length || !compare.b.moves.length) return null;
+    var band = zRangeFull() ? null : zBandMm(), key = [compare.a.moves.length, compare.b.moves.length, featureSig(), band ? band.join(':') : 'all'].join('/');
+    if (filCache && filCache.key === key && filCache.a === compare.a && filCache.b === compare.b) return filCache.out;
+    var A = filamentOf(compare.a.moves, band), B = filamentOf(compare.b.moves, band), seen = {};
+    Object.keys(A.by).concat(Object.keys(B.by)).forEach(function (f) { seen[f] = true; });
+    var out = { a: Object.assign({ name: compare.a.name }, A), b: Object.assign({ name: compare.b.name }, B), band: band, names: Object.keys(seen).sort(function (x, y) { return ((B.by[y] || 0) + (A.by[y] || 0)) - ((B.by[x] || 0) + (A.by[x] || 0)); }) };
+    filCache = { key: key, a: compare.a, b: compare.b, out: out };
+    return out;
+  }
+  function filGrams(mm) { return mm * Math.PI * (FIL_DIAMETER_MM / 2) * (FIL_DIAMETER_MM / 2) / 1000 * FIL_DENSITY; }
+  function filWords(mm) { return (mm / 1000).toFixed(mm < 10000 ? 2 : 1) + ' m · ' + filGrams(mm).toFixed(filGrams(mm) < 10 ? 2 : 1) + ' g'; }
+  function filDelta(a, b) {
+    if (!(b > 0)) return a > 0 ? 'only orange' : '';
+    if (!(a > 0)) return 'only blue';
+    var d = (a - b) / b * 100;
+    if (Math.abs(d) < 0.05) return 'same';
+    return (d > 0 ? '+' : '') + d.toFixed(Math.abs(d) < 10 ? 1 : 0) + ' %';
+  }
+  function syncFilament() {
+    var box = $('ms-head-fil'), head = $('ms-head');
+    if (!box) return;
+    var r = compareFilament();
+    box.hidden = !r;
+    if (head) head.classList.toggle('has-fil', !!r);
+    if (!r) { box.innerHTML = ''; return; }
+    var esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+    var short = function (n) { return String(n).replace(/^Plate \d+: /, ''); };
+    var sw = function (c) { return '<i class="ms-fil-sw" style="background:#' + ('000000' + c.toString(16)).slice(-6) + '"></i>'; };
+    var row = function (label, a, b, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><th>' + esc(label) + '</th><td>' + (a > 0 ? filWords(a) : '-') + '</td><td>' + (b > 0 ? filWords(b) : '-') + '</td><td class="ms-fil-d">' + filDelta(a, b) + '</td></tr>'; };
+    var h = '<table class="ms-fil"><thead><tr><th>Filament' + (r.band ? ' <span class="ms-fil-band">z ' + r.band[0].toFixed(2) + ' - ' + r.band[1].toFixed(2) + '</span>' : '') + '</th>' +
+      '<th title="' + esc(r.a.name) + '">' + sw(TINT_A) + esc(short(r.a.name)) + '</th><th title="' + esc(r.b.name) + '">' + sw(TINT_B) + esc(short(r.b.name)) + '</th><th>orange vs blue</th></tr></thead><tbody>';
+    h += row('Shown', r.a.tot, r.b.tot, 'ms-fil-tot');
+    if (r.names.length > 1) r.names.forEach(function (f) { h += row(f, r.a.by[f] || 0, r.b.by[f] || 0); });
+    h += '</tbody></table>';
+    box.innerHTML = h;
+    box.title = 'The line types checked in the Features list' + (r.band ? ', inside the slider\'s band' : '') + '. Grams at ' + FIL_DENSITY + ' g/cm3, a ' + FIL_DIAMETER_MM + ' mm filament.';
+  }
+
   /** The compare row's buttons and its readout. */
   function syncCompare() {
     gapRefresh();
+    syncFilament();
     var live = compareLive(), why = compareReason();
     var row = $('ms-compare-row'), body = $('ms-compare-body'), tg = $('ms-compare-toggle');
     if (row) row.style.display = live || (plateDoc('lens') && plateDoc('take')) ? '' : 'none';
@@ -6221,16 +6452,16 @@ var NSO_MICROSCOPE = (function () {
     if (tn) { tn.classList.toggle('active', !!(live && compare.tinted)); tn.setAttribute('aria-pressed', live && compare.tinted ? 'true' : 'false'); }
     if (!rd) return;
     if (live && compare.split) {
-      rd.textContent = 'Stack split on plate 3 (' + compare.split.cols.length + ' layers, interface and transition' + (compare.overlaid ? ', overlaid: each column\'s two layers lie over each other' : ': ours in the back row, the reference in front') + '). A stop beside the slider shows one layer alone. Join stack puts the pair back.';
+      rd.textContent = 'Stack split on the Compare plate (' + compare.split.cols.length + ' layers, interface and transition' + (compare.overlaid ? ', overlaid: each column\'s two layers lie over each other' : ': ours in the back row, the reference in front') + '). A stop beside the slider shows one layer alone. Join stack puts the pair back.';
     } else if (live) {
-      rd.textContent = (compare.overlaid ? 'Overlaid' : 'Side by side') + ' on plate 3: ' + compare.a.name.replace(/^Plate 1: /, '') +
+      rd.textContent = (compare.overlaid ? 'Overlaid' : 'Side by side') + ' on the Compare plate: ' + compare.a.name.replace(/^Plate 1: /, '') +
         ' (orange) and ' + compare.b.name.replace(/^Plate 2: /, '') + ' (blue). Blue moved by ' +
         compare.dx.toFixed(2) + ', ' + compare.dy.toFixed(2) + ', ' + compare.dz.toFixed(2) + ' mm from where Overlay put it.';
     } else if (cmpPick) {
       rd.textContent = cmpPick.note || comparePickText(cmpPick);
     } else {
       rd.textContent = why ? 'Compare: ' + why + '.' :
-        'Plates sets both whole plates on plate 3, side by side. Pieces: click a piece on each plate. Lasso: draw a loop round a piece on each. Selected takes what is selected on each.';
+        'Plates sets both whole plates on the Compare plate, side by side. Pieces: click a piece on each plate. Lasso: draw a loop round a piece on each. Selected takes what is selected on each.';
     }
   }
 
@@ -6251,7 +6482,7 @@ var NSO_MICROSCOPE = (function () {
     if (!box.isEmpty()) frameBox(box, new THREE.Vector3().fromArray(FRAME_DIR));
   }
 
-  /** Two specs set down on plate 3 side by side, plate 1's in orange at the left and plate 2's in blue at the right (a compare there before is replaced). */
+  /** Two specs set down on the Compare plate side by side, plate 1's in orange at the left and plate 2's in blue at the right (a compare there before is replaced). */
   function compareFromSpecs(specA, specB, home, what) {
     compare = null;
     clearSteps('cmp');
@@ -6264,7 +6495,7 @@ var NSO_MICROSCOPE = (function () {
     if (!a || !b) {
       emptyPlate('cmp');
       showPlate(home);
-      say('Compare: the ' + what + ' could not be set down on plate 3.', true);
+      say('Compare: the ' + what + ' could not be set down on the Compare plate.', true);
       return null;
     }
     compare = { a: a, b: b, step: 0.1, dx: 0, dy: 0, dz: 0, overlaid: false, tinted: true };
@@ -6272,11 +6503,11 @@ var NSO_MICROSCOPE = (function () {
     redrawDoc();
     compareFrame();
     syncCompare();
-    say('Side by side on plate 3: ' + plateTitle('lens') + '\'s ' + what + ' in orange, ' + plateTitle('take') + '\'s in blue. Overlay lays them over each other.');
+    say('Side by side on the Compare plate: ' + plateTitle('lens') + '\'s ' + what + ' in orange, ' + plateTitle('take') + '\'s in blue. Overlay lays them over each other.');
     return { a: a, b: b };
   }
 
-  /** What is selected on plate 1 and on plate 2, copied onto plate 3 (a compare there before is replaced; plates 1 and 2 are not touched). */
+  /** What is selected on plate 1 and on plate 2, copied onto the Compare plate (a compare there before is replaced; plates 1 and 2 are not touched). */
   function compareStart() {
     var why = compareReason();
     if (why) { say('Compare: ' + why + '.', true); return null; }
@@ -6301,7 +6532,7 @@ var NSO_MICROSCOPE = (function () {
     return items && items.length ? pullSpec({ items: items, source: 'pick' }) : null;
   }
 
-  /** COMPARE, PLATES: both whole plates on plate 3, side by side. */
+  /** COMPARE, PLATES: both whole plates on the Compare plate, side by side. */
   function compareStartPlates() {
     var why = compareReason();
     if (why) { say('Compare: ' + why + '.', true); return null; }
@@ -6317,7 +6548,7 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * COMPARE, PIECES / LASSO: pick a piece on plate 1, then on plate 2; the second pick sets both on plate 3 side by side.
+   * COMPARE, PIECES / LASSO: pick a piece on plate 1, then on plate 2; the second pick sets both on the Compare plate side by side.
    * Pieces: a click on a piece. Lasso: a loop drawn freehand round a piece on the plate takes everything inside its
    * cylinder - every layer, every line type that is shown - so a whole piece comes with its supports.
    * cmpPick is the step the picks are at: { shape: 'piece' | 'lasso', step: 'lens' | 'take', lens: the first spec, home: the plate it began on }.
@@ -6328,7 +6559,7 @@ var NSO_MICROSCOPE = (function () {
     return 'Compare ' + (cp.shape === 'lasso' ? 'lasso' : 'pieces') + ': ' + (cp.step === 'lens' ? how + ' on plate 1.' : 'now ' + how + ' on plate 2.') +
       (cp.shape === 'lasso' ? ' Any shape - it closes when you let go; everything inside, every layer, comes along. Esc cancels.' : '');
   }
-  /** The plate to pick on must be in view: if its middle is off the screen (the camera was left on plate 3), frame the plates again. */
+  /** The plate to pick on must be in view: if its middle is off the screen (the camera was left on the Compare plate), frame the plates again. */
   function pickInView() {
     if (!view || !doc) return;
     var q = new THREE.Vector3(0, 0, 0).project(view.camera);
@@ -6584,7 +6815,7 @@ var NSO_MICROSCOPE = (function () {
     splitFollow();
     compareFrame();
     syncCompare();
-    say('Side by side again on plate 3: Plate 1\'s piece in orange at the left, Plate 2\'s in blue at the right. Overlay lays them over each other.');
+    say('Side by side again on the Compare plate: Plate 1\'s piece in orange at the left, Plate 2\'s in blue at the right. Overlay lays them over each other.');
     return true;
   }
 
@@ -6712,7 +6943,7 @@ var NSO_MICROSCOPE = (function () {
 
   /**
    * SPLIT STACK: strictly a view, an extension of Side by side. The pair's interface and transition layers pulled apart and laid out next to each other
-   * on plate 3, one column per layer: ours in a row at the back, the reference in a row in front, layer 1 at the left, every layer at one height. A column
+   * on the Compare plate, one column per layer: ours in a row at the back, the reference in a row in front, layer 1 at the left, every layer at one height. A column
    * pairs ours with the reference's layer within SPLIT_PAIR_MM of its Z (a layer only one side has stands in a column alone). The pair itself stays, hidden:
    * Overlay, Side by side, the nudges, Colours and Measure act on it as ever, and the layers follow (overlaid, a column's two layers lie over each other).
    * The stops beside the slider are these columns, not Z levels: a click shows that column alone, the same stop again shows all. The button again joins them.
@@ -6820,13 +7051,13 @@ var NSO_MICROSCOPE = (function () {
     if (!La.length && !Lb.length) { say('Split stack: no interface or transition layers in this pair.', true); return null; }
     compare.split = { pieces: [], cols: [], hidden: [compare.a.name, compare.b.name], solo: null };
     var pieces = splitBuild();
-    if (!pieces || !pieces.length) { compare.split = null; say('Split stack: the layers could not be set down on plate 3.', true); return null; }
+    if (!pieces || !pieces.length) { compare.split = null; say('Split stack: the layers could not be set down on the Compare plate.', true); return null; }
     setSelection([], 'pick');
     var cmpNow = compare;
     pushStep(function () { return compare === cmpNow && !!cmpNow.split && !!compareJoin(); });
     compareFrame();
     syncCompare();
-    say('Stack split on plate 3: ' + compare.split.cols.length + ' layers (interface and transition), ours in the back row (orange), the reference in front (blue), bottom layer at the left, wrapping to the next band after 6. Overlay, Measure and the nudges work as before; a stop beside the slider shows one layer alone. The button again joins them.');
+    say('Stack split on the Compare plate: ' + compare.split.cols.length + ' layers (interface and transition), ours in the back row (orange), the reference in front (blue), bottom layer at the left, wrapping to the next band after 6. Overlay, Measure and the nudges work as before; a stop beside the slider shows one layer alone. The button again joins them.');
     return pieces;
   }
   function compareJoin() {
@@ -6878,7 +7109,7 @@ var NSO_MICROSCOPE = (function () {
     } catch (err) { return false; }
   }
 
-  /** Plate 3 emptied: the compare is gone and plate 3 with it; plate 1 is active. */
+  /** The Compare plate emptied: the compare is gone and its plate with it; plate 1 is active. */
   function compareClear() {
     var picking = !!cmpPick;
     comparePickCancel(true);
@@ -6895,15 +7126,13 @@ var NSO_MICROSCOPE = (function () {
     return true;
   }
 
-  /** Both plates empty, plate 1 active. */
+  /** Every plate empty, plate 1 active. */
   function reset() {
     compare = null;
     cmpPick = null;
     cancelPull();
     if (view && plateName !== 'lens') showPlate('lens', { quiet: true });
-    emptyPlate('cmp');
-    emptyPlate('take');
-    emptyPlate('lens');
+    PLATES.slice().reverse().forEach(emptyPlate);
     plateSide = BED_GRID;
     clearHover();
     if (view) { applyClip(); applyDisplay(); ensurePlates(); }
@@ -7094,8 +7323,9 @@ var NSO_MICROSCOPE = (function () {
     // ▾ Read plate is how you go back to the plate from one.
     bind('btn-microscope', 'click', function () {
       if (isOpen()) { close(); return; }
-      // Every open is a fresh one (close() ended the last visit whole): the
-      // imported file if one is loaded, else the plate read again.
+      // The plates a close kept, as they were left (plate 1 read again when it is the main plate's read)
+      if (resumeKept()) return;
+      // Nothing kept: the imported file if one is loaded, else the plate read again.
       if (importedDoc && reopenImport()) return;
       if (openPlate()) return;
       openPanel();
@@ -7215,12 +7445,26 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
+   * opts.plate (1 to 6): the main view's bed a Preview came from - its slice lands on G-scope's plate of that number,
+   * the other plates kept as they are (a Preview from bed 2 no longer takes bed 1's off plate 1). Without it, the
+   * active plate, as ever.
+   */
+  function toBedPlate(opts) {
+    var target = opts && opts.plate != null ? bedPlate(opts.plate) : null;
+    if (!target || !view || target === plateName) return;
+    cancelPull();
+    if (cmpPick) comparePickCancel(true);
+    showPlate(target);
+  }
+
+  /**
    * A file handed over by the app's own Import (app-core.js handleFiles):
    * into G-scope, and NOT onto the plate. A slice is something you look
    * through; what leaves the view does so through Export, by choice.
    */
-  function openFile(filename, arrayBuffer) {
+  function openFile(filename, arrayBuffer, opts) {
     openPanel();
+    toBedPlate(opts);
     return load(filename, arrayBuffer).then(function (d) {
       if (d) say('G-scope: ' + filename + ' open - nothing was added to the plate');
       return d;
@@ -7231,20 +7475,22 @@ var NSO_MICROSCOPE = (function () {
     mount: mount,
     open: openPanel,
     openFile: openFile,
+    /** A slice the app made (the plate's one slice, for the Slice switch): opened as a file is, but not the IMPORTED file - it is the plate's. */
+    openSlice: function (filename, arrayBuffer, opts) { openPanel(); toBedPlate(opts); return loadFile(filename, arrayBuffer); },
     isSliced: function (arrayBuffer) {
       return threeMFHasToolpath(arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer));
     },
     close: close,
     isOpen: isOpen,
     /** Both plates empty, and an imported file forgotten too: the next open reads the plate. */
-    reset: function () { importedDoc = null; reset(); },
+    reset: function () { importedDoc = null; keptPlate = null; reset(); },
     load: load,
     openPlate: openPlate,
     openObjects: openObjects,
     openToolpathResult: openToolpathResult,
     /** The G-code OBJECT_IDs the selection is made of; and a re-read of which Export rows show (a slice from the plate says so after it opens). */
     selectedObjectIds: selectedObjectIds,
-    refreshExport: function () { syncExportRow(); syncShell(); },
+    refreshExport: function () { syncExportRow(); syncShell(); syncCard(); },   /* ...and the switch: a plate's slice has Normal (the plate) */
     plateObjects: plateObjects,
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },
@@ -7256,7 +7502,7 @@ var NSO_MICROSCOPE = (function () {
       return o;
     },
     isIsolated: function () { return isolated; },
-    pressTargetAt: function (x, y) { var t = pressTarget({ clientX: x, clientY: y }); return t ? { source: t.source, count: t.items.length, selected: !!t.selected } : null; },
+    pressTargetAt: function (x, y) { var t = pressTarget({ clientX: x, clientY: y }); return t ? { source: t.source, count: t.items.length, selected: !!t.selected, obj: t.seg ? t.seg.obj : null } : null; },
     mode: function () { return mode; },
     addBoxAt: function (gx, gy, gz, r, h, ry, a) {
       // A capture box placed by G-code coordinates rather than by a click, so a
@@ -7291,6 +7537,8 @@ var NSO_MICROSCOPE = (function () {
     compareSideBySide: compareSideBySide,
     compareNudge: compareNudge,
     compareFrame: compareFrame,
+    /** The Compare plate's filament, side by side, as the head box shows it: { a, b: { name, tot, by }, band, names } (filament mm), or null. */
+    compareFilament: function () { var r = compareFilament(); return r ? JSON.parse(JSON.stringify(r)) : null; },
     compareTint: compareTint,
     compareClear: compareClear,
     compareDiff: compareDiff,
@@ -7427,6 +7675,11 @@ var NSO_MICROSCOPE = (function () {
     shownPieces: function () { return doc && doc.kind === 'mesh' ? shownObjects().map(function (o) { return o.name; }) : []; },
     // --- the two plates (docs/GSCOPE.md) ---
     plate: function () { return plateName; },
+    /** The plates standing, left to right ('lens', 'take', 'p3' ... 'p6', 'cmp'). */
+    livePlates: livePlates,
+    /** G-scope's plate for the main view's bed n (1 to 6). */
+    bedPlate: bedPlate,
+    plateTitle: plateTitle,
     showPlate: showPlate,
     activatePlate: activatePlate,
     plateOffset: function (n) { return plateOffset(n); },
@@ -7470,6 +7723,16 @@ var NSO_MICROSCOPE = (function () {
       }
       isolate();                                  // a click on a piece isolates it, as clickTarget does
       return currentSelection;
+    },
+    /** A click on line `segId` of the active slice, taken as the 3D view takes one (piece mode, no REGION), without the
+     *  ray: the same piece (pieceOfSeg), selected as a 'pick' - a Compare Pieces pick hears it as it hears a click. */
+    pickSegment: function (segId) {
+      if (!doc || doc.kind !== 'toolpath' || isolated || mode === 'select') return [];
+      var sg = doc.segments[segId];
+      if (!sg || !segShown(sg)) return [];
+      removeAllBalls();
+      setSelection(pieceOfSeg(sg), 'pick');
+      return currentSelection.length;
     },
     getView: function () { return view; },
     /** Switch a control off without dropping the keyboard (app-gscope-slice.js's switch uses it). */

@@ -1,0 +1,8 @@
+{
+  "printer": "Bambu Lab P1S",
+  "nozzle": "0.4",
+  "studio_version": "02.09.01.70",
+  "file": "project_test.3mf",
+  "sha256": "0f6e5dc39403aa4a2d55addf932107e4c0b9818f7616cad24cef6e6043d1c746",
+  "source": "The owner's mouse1.3mf: a project saved by Bambu Studio 02.09.01.70 (mouse1.stl, Bambu PLA Basic @BBL P1S 0.4 nozzle, 0.20mm Standard @BBL X1C, Textured PEI Plate, tree slim). Its slice, mouse1.gcode.3mf beside it, is where the P1S's start and end G-code are frozen from (tools/print-planner/freeze.js)."
+}

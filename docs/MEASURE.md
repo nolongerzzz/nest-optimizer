@@ -4,8 +4,10 @@
 `tools/nso_measure_test.js`.
 
 Click two points on the pieces and read the distance between them in
-millimetres, or switch to **Edge** and click one edge for its length. The
-number is drawn on the piece, not only written to the status line.
+millimetres (or inches - see section 5), or switch to **Edge** and click one
+edge for its length. The number is drawn on the piece, not only written to the
+status line. Section 5 adds a 300 mm / 12 in **ruler** you drag over the
+viewport and line a piece up against.
 
 ---
 
@@ -278,3 +280,210 @@ anything in `app-measure.js`.
 | the piece afterwards | 12 tris, 8000 mm³, 0 painted faces | unchanged |
 
 `npm run measure` runs both halves; `npm test` includes it.
+
+---
+
+## 5. Inches, and the ruler
+
+`app-measure.js` (the unit), `app-ruler.js` (the ruler), and gates A8-A10 and
+C1-C10 in `tools/nso_measure_test.js`.
+
+### The unit
+
+**Inches** in the Measure card prints every length in inches: the chip on the
+piece, the status line (the per-axis deltas too), and the ruler's marks. It is a
+*print* choice. The scene is millimetres and stays millimetres: `readout().mm`
+and `dx / dy / dz` are mm whatever the box says, `readout().text` is what is
+printed, `readout().unit` and `.value` say how. The inch is exactly 25.4 mm.
+Inches get four decimals under 100 mm and three above it (the same line `formatMm`
+drops a decimal at); `0.0001 in` is `0.00254 mm`, the same order as the
+`0.001 mm` the mm form prints. The choice is remembered per browser
+(`nso.measure.unit`), and nothing else is.
+
+### The ruler
+
+**Ruler** shows a 300 mm ruler, or a 12 in one (304.8 mm) when Inches is on. It is
+drawn on the screen, not in the scene: one transparent canvas over the viewport,
+so no scene object is made, there is nothing for `nsoHelpers` to sweep, and it is
+not a bake.
+
+- **Drag it anywhere.** Grab the bar (the thin strip the marks hang from) and move
+  it over the whole viewport. It never turns - the bar is level on the screen and
+  the marks read left to right along the screen's horizontal. It can go partly off
+  any edge (so a ruler wider than the view can be slid along), never so far that
+  there is nothing left to grab.
+- **Only the bar takes the pointer.** The marks and numbers are click-through, so
+  you orbit, pan, zoom and click the piece under the ruler. That is the use: set
+  the ruler beside an edge, then move the *piece* until the edge sits on a mark.
+  `C5` checks it with `elementFromPoint` and with a real orbit drag.
+- **The bar's buttons:** `mm`/`in` (the same switch as the Inches box), `⇅` (flip
+  the marks to the other side of the bar, so they face the piece) and `×`.
+- **Guides** run a faint line down the viewport from every numbered mark.
+- Marks thin out and thicken with the zoom: a level is left out when its spacing
+  would be under 4.5 px, and numbers go every 10 mm (every 5 when zoomed in; every
+  whole inch). Position, flip and Guides are remembered per browser (`nso.ruler.v1`).
+
+### What the scale means
+
+The camera is a perspective one, so the screen has no single mm-per-pixel: a thing
+twice as far away is half the size. A ruler laid on the glass is therefore true at
+**one distance from the camera**, and this one says which, in the caption on the bar:
+
+| caption | the scale is true at | when |
+|---|---|---|
+| *true at the pick* `· N mm up` | the point you picked (an edge: its middle) | a point or edge is picked |
+| *true at the surface under it* `· N mm up` | the **nearest** surface under the visible part of the ruler: a piece **or a ghost / preview** | nothing picked, over something |
+| *true at the plate (0 up)* | the plate | nothing picked, nothing under the ruler |
+
+The caption says **how high** the scale is true at (`N mm up` above the plate). That
+number is the whole story: "at the plate" and "30 mm up" are different rulers, and a
+part 30 mm tall reads about 10 % long on the first (a 160 mm part read as ~176 mm, and
+as ~185 mm when zoomed in closer, because the same 30 mm is a bigger share of a
+shorter camera distance). The default is a *guess* at the right height; **a pick is the
+exact answer**.
+
+The distance is the depth *along the view direction*, so every point on a plane
+square to the view shares one scale. The default is sampled with a grid of rays (16 along the visible ruler, 3 rows down
+through the band the marks hang in) at most every 100 ms, and **not while the bar is in hand** (sliding it over a 20 mm piece
+would otherwise re-scale it by 6 % under the pointer); it settles on release.
+
+This is the honest consequence, and worth stating plainly: in a tilted view the
+plate recedes, so the scale under a ruler at the top of the screen is smaller than
+under one at the bottom, and a piece's top face is nearer the camera than the plate
+it stands on. **For an exact reading, look straight down at the face and pick the
+point or edge** - the lamps below tell you when you are.
+
+### Align point and Align edge
+
+Two more entries in the Measure mode select. They find the same things Two points
+and Edge do - same snap (corner, then edge, then face), same edge chain, same
+anchors (so a pick follows the piece when it moves and drops itself, saying so, when
+the piece is re-baked) - and hand them to the ruler instead of drawing a line:
+
+- **Align point** drops a plumb line from the point to the ruler and prints where
+  along the ruler it lands.
+- **Align edge** does the same for both ends, shades the edge's shadow on the ruler
+  and prints `from -> to` and the span, and two lamps:
+  - **tilt** - how far the edge is from lying along the ruler, `+` when it climbs to
+    the right, lit within 0.5 deg;
+  - **depth delta** - how far apart the edge's two ends are in distance from the
+    camera, as a share of that distance, lit within 0.5 %. 0 % means the edge is
+    square to the view.
+
+  Both lit and the span on the ruler *is* the edge's length. If either is out, orbit
+  until it is: `C7` shows the same 20 mm edge reading 20.000 from straight above and
+  something else (with both lamps out) from the ordinary 3/4 view.
+- **Zero here** slides the ruler along so its 0 sits on the picked point (an edge:
+  its left end), leaving its height alone. Then the marks read straight off it.
+- Hovering previews what a click would pick (a ring, or an edge with its two ends)
+  and **deliberately shows no number**: before a pick the scale is the surface
+  under the ruler, and the thing under the pointer may be a different distance from
+  the camera (the first cut read 85.2 mm for an 80 mm edge on a 20 mm piece, 6 %
+  high, for exactly this reason). The number is for a pick, which sets the scale
+  to its own depth. A hover is skipped on a piece with over 60 000 edges (it walks
+  them all each time; a click, which runs once, still works).
+
+Esc clears the pick, as it clears a measurement. Leaving Measure clears it too, but
+leaves the ruler up: the ruler is not a measure mode.
+
+### Colour and order
+
+Lime, Measure's, throughout: the ruler, its marks, the helpers and the flags in the
+card. The canvas sits at `z-index` 20 (bar 22, buttons 23), above the WebGL canvas,
+under the measurement chip (30) and the viewport's menus (50).
+
+### Validation
+
+`A8` units (25.4, the two decimals rule, sign, bare deltas). `A9` the marks, against
+hand-counted figures: 0-300 numbered every 10 mm with nothing past 300; 61 marks at
+3 px/mm; 301 at 6; 0..12 in whole inches, 193 marks down to 1/16 at 3 px/mm and
+never 1/32; clipping, a ruler half off-screen, no wall of marks at any zoom; and the
+pinhole scale (600 px at 300 mm and 45 deg is 2.4142). `A10` tilt and depth, from
+axis-aligned cases whose answers are known (45, -45, 90, either end first, 3-4-5).
+
+`C1-C10` run it in Chromium: the card; the number in inches on the chip and status
+line and back; 300 mm and 304.8 mm; dragging to all four corners and past them;
+click-through by `elementFromPoint` and by an orbit that starts under the marks;
+and, looking straight down at `box-20mm`, **Zero here on one corner then the corner
+20 mm along reads `20.000` on the ruler** (and `0.7874` in), the 20 mm edge spans
+`20.000` with tilt 0 and both lamps lit, the piece slides 30 mm and both marks move
+30 mm along the ruler, and the 3/4 view puts both lamps out. Re-baking drops the
+pick with a reason, and the piece is afterwards still 12 triangles of 8000 mm3.
+
+---
+
+## 6. Beside a live tool
+
+Measure and the ruler can be used **during** a ghost being manipulated or a live
+card doing work (Crop's box, the Wheel's handles, Cut's blade, Surface texture,
+Foam...) without ending it. Three things used to get in the way, and each has its
+own answer.
+
+**Opening the Measure card shut the card in use.** The page has a one-panel rule
+(`app-join.js`): opening any drop-down shuts every other, because they all open at
+the same spot. Closing a panel ends its session - Cut's cutter, Surface texture's
+preview - so Measure ended exactly the work it was meant to serve. Measure's card is
+now **the one exemption**, in both directions: opening it shuts nothing, and nothing
+shuts it. Every other pair is untouched (D5 checks two other cards still shut each
+other). The places that asked "is some other panel open?" (the Join and Subtract
+sessions, the toast placement in `app-findings.js`) ignore it for the same reason.
+
+**Two panels at one spot would sit on top of each other.** `app-measure.js` docks
+the Measure panel to the *right* of whichever panel is open (`dock()`, kept current
+by a mutation observer on `open` and a resize observer on the panels, so a panel
+that grows - Gen+ with its Stock shelf - moves it), and puts it back at the shared
+spot when it is alone. The panel in use is never moved. Measure's panel is stacked
+above the others (`z-index` 96), so in a window too narrow for both it is the one
+still reachable.
+
+**A press on a handle must not also be a measurement.** With Measure armed, a press
+on a ghost's handle is the ghost's: Crop, Tube edge and Bend stop the event before
+it reaches the canvas, the Wheel `preventDefault`s it, and Foam claims a press on its
+piece. Which listener runs first depends on when each was bound, so Measure does not
+rely on order: it stands down for a press that is `defaultPrevented` or that
+`nsoWheelTakesPointer` / `nsoFoamTakesPointer` report as theirs (`claimedElsewhere`).
+A press that lands on the piece clear of the ghost is still a measurement.
+
+Arming Measure still turns off the **click-waiting** modes (Paint, Carve, the
+brushes, Seat here, Center lock, the Soften and Cap pick) - two of those armed
+would fight over one click, and that is unchanged. It no longer clears a **live**
+Soften card's face pick, which is a preview rather than a mode waiting for a click.
+A tool that arms *after* Measure still turns Measure off, as before.
+
+What to expect while a ghost is up: a press on its body or handles belongs to it
+(you cannot measure *through* a ghost), and Esc is heard by both Crop and Measure.
+
+**Validation** - `D1-D5` in `tools/nso_measure_test.js`: a real Crop box, Measure's
+card opened over it, armed, the box's `x+` handle dragged with the real mouse (the
+box grows 20.00 -> 22.27 and nothing is measured), then two clicks clear of the
+ghost measure 40.000 mm and the box has not moved; the ruler dragged with the ghost
+up; presses claimed by preventDefault / Wheel / Foam are not measurements and an
+unclaimed one is; Cut's live cutter surviving Measure being opened and armed; the
+panels side by side, and Measure returning to the shared spot when alone.
+
+
+---
+
+## 7. Ghosts: reading what is about to be made
+
+A generator card's live preview (Gen+ > Custom shape, Fittings, Fasteners - the
+ghost in `app-piece-preview.js`) is a scene object, not a placed piece, and until
+this section Measure could not see it. Two consequences, both found from a
+screenshot of a 70 x 160 mm Custom shape with the ruler on it reading about 180:
+
+1. **The ruler said "true at the plate"** over a 25-30 mm-tall preview, because its
+   "what is under me" ray only asked the placed pieces. It now asks ghosts too
+   (and, in a view where the ruler is wider than the screen, samples the visible part
+   rather than a clamped edge), and the caption names the height.
+2. **Nothing could be picked on a ghost**, so there was no way to get an exact reading
+   on one. A ghost is now measurable like a piece: Two points, Edge, Align point and
+   Align edge all work on it, in world millimetres. Its anchor is held by reference
+   and ends - saying why - when the card rebuilds the preview (new geometry), the way
+   a re-baked piece ends a pick.
+
+Honest limit that remains: with nothing picked the default can still be wrong by the
+height difference between where it sampled and the edge you are reading. A tray
+viewed from above has a rim 25 mm up and a floor 2 mm up; the rays went down through
+its open middle and the default came out ~16 mm up, an 80 mm rim reading as ~86. The
+caption said `16 mm up`, which is the tell; picking a rim corner (`Align point`) and
+`Zero here` reads it as 80.000. Gates `E1-E3`.

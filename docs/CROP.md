@@ -6,7 +6,7 @@
 ```
 node tools/nso_crop_engine_test.js      the copy engine: shapes, Outline, refusals, the plate (crop:engine)
 node tools/nso_crop_card_drive.js       the card, with a real mouse: every shape, the handles, CROP, Undo, Escape (crop:drive)
-node tools/nso_crop_shapes_drive_check.js   Cylinder, Piece and Outline copies measured against the meshes as drawn (crop:shapes)
+node tools/nso_crop_shapes_drive_check.js   Cylinder and Outline copies measured against the meshes as drawn (crop:shapes)
 node tools/nso_wire_crop_test.js        a copy is a real piece: export, Undo, paint, refusal, Split (wire:crop)
 node tools/nso_crop_test.js             the slab crop that G-scope and Detach still use (crop:test)
 ```
@@ -15,12 +15,16 @@ All are in `npm test`.
 
 ## The card
 
-Crop is one tool: **pick a shape, drag it to size, press CROP.** The card is a
-**Shape** row (Box, Cylinder, Sphere, Piece, Outline), **one readout line**, **CROP**
-and **Cancel**. Nothing else - no field to type a size into, no checkbox, no axis
-button. `page:manifest` fails if a control finds its way back in.
+Crop has no slab of its own: it shares the column's **Cut / Crop** slab with Cut, and a
+Cut | Crop switch at the top of either card swaps one for the other at the same spot
+(`app-cut-crop-toggle.js`; docs/handoff/card-regroup.md).
 
-Opening the card arms the piece selection (as Cut does, with no blade). Pick a
+Crop is one tool: **pick a shape, drag it to size, press CROP.** The card is a
+**Shape** row (Box, Cylinder, Sphere, Cookie-Cutter, Outline, Wall, Lasso), **one readout line**, **CROP**
+and **Cancel**, and under them **Lift** (below). Nothing else - no field to type a size
+into, no checkbox, no axis button. `page:manifest` fails if a control finds its way back in.
+
+Opening the card arms the piece selection (as Cut does, with no blade). **Pieces move as ever while the card is open and idle** - no shape picked and Lift not armed: a drag on a piece moves it. With a shape up, or Lift armed, a press on a piece is the tool's (`cropCardIdle` in `app-core.js`; `crop:drive` 6b). Pick a
 shape and it appears **centred on the selected piece at half its size**,
 translucent, with grab handles. Orbit between grabs: a press that lands on no
 handle and no shape is the orbit's.
@@ -30,8 +34,10 @@ handle and no shape is the orbit's.
 | Box | centred, each side half the piece's | one on each face. It drags along the face's normal and the opposite face stays put |
 | Cylinder | vertical, Ø half the narrower footprint, half the height | an end on each end (slide along the axis, the far end stays), one on the side (Ø). Pull an end round past 45° of the axis and the axis turns to follow it: the axis is whichever of x, y, z the pointer last followed on the screen |
 | Sphere | Ø half the piece's smallest side | one on the surface (Ø) |
-| Piece | nothing yet: click another piece to be the cutter | none (it is the other piece) |
+| Cookie-Cutter | nothing yet: click another piece to be the cutter (the piece being cropped is refused in words) | none (it is the other piece) |
 | Outline | nothing yet: click a piece for its footprint, or **Shift-click** a triangle for its rim loop | `d1` (outer offset) and `d2` (inner offset), dragged along the surface normal at the outline's boundary, and `z1`, `z2`, the two heights |
+| Wall | nothing yet: **click a flat wall** of the piece | `line`: one handle, on the middle of the wall's top edge, dragged out of the wall or into it |
+| Lasso | nothing yet: **drag a loop** round what to copy, on the screen | none: draw again to replace the loop |
 
 The body itself slides the shape: across the plate by default, **straight up and
 down with Shift held**. The shape is kept in the plate frame, so it stays put if the
@@ -45,9 +51,96 @@ by a ray; the nearest wins.
 
 **The readout** follows live from `NSO_Crop.planOn`: `Box 40 × 22 × 15 mm · holds
 698 faces, 1.2 cm³`, `Cylinder Ø20 × 30 mm along Z · holds …`, `Sphere Ø24 mm · holds
-…`, `Piece <name> · holds …`, `Outline of <name>, +1.0 / −0.8 mm, z 2.0 → 14.5 mm ·
+…`, `Lasso, 29-point loop · holds …`, `Outline of <name>, +1.0 / −0.8 mm, z 2.0 → 14.5 mm ·
 holds …` (` rim` after the name for a rim). A refusal replaces "holds …" with the
 engine's words, in the refusal colour, and CROP goes off.
+
+**Wall** is the manual version of what Lift is meant to find by itself: take a bump (or any
+feature) off a wall, cleanly. Click the piece's wall and a straight line appears along it - the
+wall's own outline, carried out to where the line is, drawn in yellow with its plane faintly
+filled (from the side that plane *is* the line). The wall is every triangle joined to the one
+clicked in the same plane (within 0.02 mm and 1°, however it is tessellated), and its outline is
+the **outermost** loop of that patch, so whatever stands on the wall - a bump's base is a hole in
+the patch - is inside the outline. CROP copies what stands **outside the line**, over that
+outline: with the line flush on the wall, the bump and nothing else. The original is untouched;
+Subtract the copy from it for a clean, flat wall.
+
+The line starts flush on the wall (0). Move it by:
+
+- the **handle**, dragged along the wall's normal (a thin rail through it, like the others): out,
+  to take only the top of the bump; into the wall (negative), to take a skin of the wall as well;
+- a **click on the piece**: the line goes through the point clicked. Zoom in beside the bump,
+  look at it from the side, and click on the wall behind it; a click on the bump's top puts the
+  line at the bump's height (and the readout says nothing stands outside it);
+- a **Shift-click** on another wall of the piece picks that one instead (the line back at 0).
+
+**Wall is for flat walls.** On a sphere, or a cone's slope, a click lands on one facet of the curve, and
+Wall says so in words - "that is a curved surface, not a flat wall" - and draws nothing, rather than lay a line on
+a sliver. A patch is read as a facet of a curve when it is **small - under 1% of the piece's whole surface - and
+over half its border (by length) meets triangles that bend away from it by under 20°**, as neighbouring facets of a
+curve do. How many triangles it is does not matter: where a bump meets a curve, the facets round its foot are re-cut
+into coplanar groups of up to nine triangles, and a click there is refused too (`crop:engine` 6d clicks every
+triangle of the sphere and the cone). A flat wall's edges are corners, a face with fillets round it is large, and a
+small flat end - a pin's top, a bump's top - has corners round it, so all of those are walls. A cone's flat base is
+a wall like any other. Taking a bump off a curved base is not what
+this tool does yet.
+
+The test pieces are in `fixtures/crop-wall/` (`block_bump.stl`, `sphere_bump.stl`, `cone_bump.stl`, `cylinder_bump.stl`, written by
+`node tools/nso_crop_wall_fixtures.js`): a 40 × 20 × 10 block with a 4 × 4 mm square bump 2 mm proud on its +x wall,
+an R15 sphere with a dome bump (R3, 3 mm proud) at +x, and an R15 × 25 cone with a Ø4 pin square to its slope,
+4 mm proud, 8 mm up, and an R15 × 30 cylinder with the same pin, 4 mm proud, half way up. Load them with Import to try Wall and Lift on them.
+
+The readout: `Wall 20 × 10 mm, line +0.00 mm · holds 12 faces, 0.03 cm³`. The engine keeps the
+line 0.5 µm outside where it is set (`DEFAULTS.wallNudgeMm`): a plane within a millionth of a mm
+of the wall's own face (the noise of a rotated float32 mesh) leaves the kernel a film that the
+sliver clean-up folds into the copy, and half a micron clear of it the copy is the bump alone.
+The engine's `{ kind: 'wall', o, n, u, ring, off, reach? }` and `NSO_Crop.wallFace(soupP, tri)`
+are in the engine section; `crop:engine` 6c checks them against the closed forms of a block with
+a 4 × 4 × 2 bump (32 mm³ at the wall, 16 at 1 mm out, 232 at 1 mm in), `crop:drive` 5b with a real
+mouse.
+
+**Wall on a bump: the loop.** A flat line cannot lie on a curve, so a click on a **bump** - a patch too small to be a wall (under
+5% of the piece's surface): a dome on a sphere, a pin on a cone, the top of a block's bump - draws the **loops of edges round it**
+instead, and picks the outermost, where it meets what it stands on (the foot). A pin shows two: its end rim, then its foot. Every
+loop is drawn (the picked one bright, with the bump tinted; the others dim) and **clicking a drawn edge picks that loop** - as does
+a click within 8 px of any crease edge of the piece. The line is that loop exactly: it bends with the surface and has no handle.
+CROP copies **what is inside it, triangle for triangle as it is, and closes the underside with a surface that continues the base's
+curve across the loop** - Lift's own fill (`nso_lift_curved.js`, the fill that repairs the piece a lift leaves), made of exactly the
+triangles the loop encloses, so Lift's detection - the part that was failing - is not in it. The copy is what stands out of the body:
+60.31 mm³ for the sphere's dome against 60.48 by the kernel (0.3%), 50.73 for the cone's pin against 50.69 (0.08%), the block's bump
+32.00 exactly (`crop:engine` 6e, `crop:drive` 5b). The piece is untouched; Subtract the copy from it for a clean surface where the
+bump was.
+
+How the loops are found (`NSO_Crop.bumpLoops`): the piece is cut into smooth patches (triangles that bend under 30° across a shared
+edge); the patch under the click is grown outward, patch by patch, while what it meets is not the surface it stands on (a patch at
+least three times the bump's area and 5% of the piece's surface); each stage's boundary is a candidate loop. A click on the surface
+itself finds no bump and says so. The underside is fitted with `relaxMm` 0.02: the fill's other term pulls toward the real
+neighbours' far corners, which on a cone's fan of 30 mm triangles are 25 mm away (it gave 3258 mm³ for a 50 mm³ pin). Two
+changes in `nso_lift_curved.js` make that fit right on such a mesh: the base samples round a root are limited to the corners
+within the root's reach plus two rings, and **points are sampled across long triangles near the root** (a cone's fan has corners
+only at its apex and rim, so the fit passed exactly through a handful of far points and said nothing of the surface beside the
+pin - the underside came out 0.5 mm off the cone, now 0.006). A mesh whose triangles are under 2 mm is unchanged (Lift's own
+`lift:curved-test`, 483 gates, `lift:test`, `lift:auto-test`, `lift:curved-surface-test` all pass).
+
+**Lasso** is a loop drawn freehand on the screen (a plain left-drag; **Alt-drag orbits**,
+as a press that draws cannot also orbit). It is kept as the rays from the camera it was
+drawn in through its corners - the loop is simplified to at most 240 corners - so it is a
+**cone**: what is copied is what the loop *sees*, front to back, cut off just short of the
+piece and just past it. The cone stays where it was drawn when the view is orbited (its
+translucent drawing comes back from the kernel like Outline's band). A press that does not
+travel round anything (under 80 px²) keeps the old loop, Escape mid-loop drops the loop
+being drawn, and a loop that crosses itself keeps both lobes (the engine widens it by 5
+microns so the lobes overlap, not pinch). The engine's `{ kind: 'lasso', eye, dirs, near?, far? }`
+is `nso_crop.js`'s "lasso" cutter; it is checked against the closed form of a frustum
+(`crop:engine` 6b) and the card by a real mouse (`crop:drive` 8: every vertex of the copy
+falls inside the loop on the screen).
+
+**Lift** is the card's last button, and it reads like CROP. It opens the Lift panel in the
+card (`app-lift-plate.js`, docs/LIFT.md section 7): the count of features found, *How far
+out counts*, Strip, and **Detach flange** (part of Lift, with its readout) - and pressing it
+again folds the panel away. Lift and a shape never run together: pressing Lift puts the
+shape away, picking a shape folds Lift away, and shutting the card folds Lift away too.
+`page:manifest` allows these controls, and only these, in the Lift package.
 
 **CROP** is `NSO_Crop.copy`: the copy lands where it was cut from, **selected**; one
 Undo takes it off; the original is untouched. **The shape stays**, on the piece it
@@ -62,12 +155,12 @@ does closing the card.
 |---|---|
 | Crop X / Crop Z, the Box from / to fields, the Box tick | the dragged Box |
 | Circle (Click centre, Ø) | Cylinder (drag the side for Ø, an end for the length; any axis) |
-| Piece region (Pick piece, Grow) | the Piece shape (click the cutter); Grow is Outline's offsets |
+| Piece region (Pick piece, Grow) | Outline (click the piece for its footprint) and its offsets, or Lasso. Or **Cookie-Cutter** (the engine's `piece` kind): another piece is the cutter, the copy is where the two overlap. It left the card on 2026-11-07 and came back under this name on 2026-11-16 - it was the card's first intended use |
 | Keep inside / Keep outside | Crop always copies what the shape holds; the original is never cut. To have the original without that part, Subtract the copy from it |
 | the slab crop itself (remove a slab, slide the far part back, seal the joint) | gone from the card. Crop copies; G-scope's Crop on its layer range and Detach's cap still use `NSO_cropRaw` / `NSO_cropSeal` (below) |
 | Move region (Up, Across, Lift, Lock in) | removed from Crop, with `NSO_cropMoveRaw` and the code under it: **CROP, grab the copy (grab-drop), JOIN if a weld is wanted.** `crop:move` and `wire:crop-move` are retired with it; the kernel union they ran is Join's (`csg:node`, `integration`), and every copy is checked by `crop:engine` |
-| Detach flange | the **Subtract** card, under Split to parts. Same ids (`btn-detach`, `detach-readout`), same behaviour |
-| Reattach | the **Connect** card, its last row (under Attach's row once that lands). Same id (`btn-reattach`), same behaviour; its readout is Detach's, in the Subtract card, and the status line |
+| Detach flange | part of **Lift**, in the Crop card (below). Same ids (`btn-detach`, `detach-readout`), same behaviour |
+| Reattach | the **Connect** card, its last row (under Attach's row once that lands). Same id (`btn-reattach`), same behaviour; its readout is Detach's, in Lift's panel, and the status line |
 | the hidden axis selector `#edit-axis` | moved into the Cut card, where the cut code reads it |
 
 Two things the card needed of the rest of the app, both fixed where they were:

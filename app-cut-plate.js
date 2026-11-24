@@ -270,10 +270,11 @@ function cutPlateSync() {
   const readout = document.getElementById('cut-plate-readout');
   if (readout) readout.textContent = cutPlateReadout(st.height, st.keep, plan, pieces);
   const btn = document.getElementById('btn-cut');
-  if (btn) btn.disabled = !plan.cut;
+  if (btn) btn.disabled = !plan.cut || (typeof cutBladeHidden === 'function' && cutBladeHidden());
   if (!state.cutPlateHelper || !state.cutPlateHelper.parent) cutPlateBuildHelper(pieces);
   cutPlatePlaceHelper(st.height);
   cutPlateUpdateSection(pieces, plan);
+  if (typeof cutApplyHide === 'function') cutApplyHide();
   return plan;
 }
 
@@ -397,6 +398,8 @@ function cutPlateRun() {
       const before = typeof snapshotPlacedPose === 'function' ? snapshotPlacedPose(idx) : null;
       const oldOff = m.centerOffset ? { x: m.centerOffset.x, z: m.centerOffset.z } : null;
       NSO_sculptCommitRaw(m, d.kept, 'plateCutReplace', null);
+      // the commit made the piece a new mesh; its white edge (if it is selected) goes onto it, not left on the old one
+      if (typeof refreshOutline === 'function') refreshOutline(pl);
       const dx = oldOff && m.centerOffset ? m.centerOffset.x - oldOff.x : 0;
       const dz = oldOff && m.centerOffset ? m.centerOffset.z - oldOff.z : 0;
       // A piece the cut leaves the same footprint (the usual case) is not moved at all: its Undo is the plain geometry

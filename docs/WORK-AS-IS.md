@@ -17,7 +17,7 @@ kernel the verbs use (`NSO_shellMergeCore`, `nso_csg.js`) - and the verb runs on
 | verb | runs on | the piece on the plate |
 |---|---|---|
 | Crop (the card's copy; a Piece cutter too) | the merged raw soup | untouched, byte for byte |
-| Extract bit | the merged soup, for its inside tests | untouched |
+| Extract bit | the merged soup, for the void's hull and the boolean that takes the piece from it | untouched |
 | Subtract B from A | both pieces merged where they need it | A is replaced by the result, as ever |
 | Join | the kernel union of the merged pieces (the planar fuse and the plate weld would stack the shells, so they stand down) | replaced by the result |
 | Connect (weld), Bridge (sheet, string) | the plan as picked; the weld swaps in the merged pieces | replaced by the result |

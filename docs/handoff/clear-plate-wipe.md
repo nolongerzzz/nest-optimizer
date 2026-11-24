@@ -29,3 +29,13 @@ re-places pieces and keeps `state.models`. Remove (button, right-click Delete, t
 Pieces x) already drops the model with its last copy, and one Undo puts it back.
 The plate lock (`state.plateLock`, one flag for the whole arrangement) is not a
 model id and is left as it was.
+
+**A fresh start when it is the only plate in play (2026-11-07).** Before the wipe,
+`clearPlateOnly` counts the plates that have pieces on them (`nsoPlatesInPlay()`:
+the active plate's `state.placed` plus each other bed's list, from
+`NSO_BEDS.info()`). With one or none, nothing is left in play anywhere, so it runs
+`leaveTool()` (app-input-mode.js, the double-click-on-the-canvas gesture): every
+armed mode disarmed, the cutter, every tool, card and menu closed, the helpers
+taken out. With pieces on two or more plates the other plates' work is still in
+play, so Clear plate is exactly what it was above. Gate 10 of
+`tools/nso_clear_plate_wipe_test.js` covers both.

@@ -191,8 +191,10 @@ function cutMeshOf(m) {
 
 // The nearest and farthest allowed plane, in mm from the low end, on the grid.
 function cutEndLimits(span) {
-  let lo = Math.ceil(CUT_END_MM * 10 - 1e-9) / 10;
-  let hi = Math.floor((span - CUT_END_MM) * 10 + 1e-9) / 10;
+  // The Plane blade (app-cut-plane.js) shaves an end off flat and may stand one grid step from it; every other blade keeps CUT_END_MM.
+  const end = (typeof cutPlaneOn === 'function' && cutPlaneOn()) ? CUT_PLANE_END_MM : CUT_END_MM;
+  let lo = Math.ceil(end * 10 - 1e-9) / 10;
+  let hi = Math.floor((span - end) * 10 + 1e-9) / 10;
   if (!(hi >= lo)) lo = hi = Math.round(span * 5) / 10;   // too short to cut: park mid-piece
   return { lo: lo, hi: hi };
 }
@@ -296,7 +298,7 @@ function cutFrame(model) {
    so such a piece keeps the local frame bit for bit. With nothing to measure
    (no placed mesh, no nso-bounds), the geometry box decides, as it did. */
 function cutTravel(m, mesh, toLocal, bbox) {
-  const f = (mesh && typeof nsoBounds !== 'undefined' && nsoBounds.pieceFrame) ? nsoBounds.pieceFrame(mesh) : null;
+  const f = (mesh && typeof nsoBounds !== 'undefined' && nsoBounds.pieceFrame) ? nsoBounds.pieceFrame(mesh, { walls: true }) : null;   // walls: a piece whose side walls run along its own axes is squared to them (nso-bounds.js WALLS ALONG THE BODY)
   if (!f || !toLocal) return { axis: cutLongAxis(bbox), base: 0 };
   const loc = v => v.clone().transformDirection(toLocal);
   const up = loc(new THREE.Vector3(0, 1, 0));
@@ -395,6 +397,8 @@ function getCutSpan(model) {
 }
 
 function getCutMm() {
+  const fs = typeof cutFollowSliderState === 'function' ? cutFollowSliderState() : null;
+  if (fs) return Math.round(fs.val * 10) / 10;                  // Follow strand: mm along the cord, from the section's start
   const f = cutFrame(getActiveModel());
   return f ? cutMmAt(state.cutT, f.span) : 0;
 }
@@ -445,20 +449,28 @@ function getCutPlaneLocal(model) {
 // click: state.cutBladeAt, the click in the piece's frame and the face it
 // landed on. The blade goes in against that face; with no click yet it comes
 // down from the top of the section, centred.
+/** The sized blade takes only the strand under it: with Follow strand on (one box for both, and on by default once the sized
+    blade is picked). `strand` is the same switch
+    without the following, kept for the checks that exercise one without the other; the card does not set it. */
+function cutStrandOn(b) { return !!(b && (b.follow || b.strand === true)); }
+
 function cutBladeState() {
-  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: true,
+  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: false, follow: true, nfollow: false, slice: 1.5, followDir: 1,
     width: NSO_Notch.DEFAULTS.width, depth: NSO_Notch.DEFAULTS.depth, kerf: NSO_Notch.DEFAULTS.kerf,
     nwidth: NSO_Notch.NOTCH_DEFAULTS.width, ndepth: NSO_Notch.NOTCH_DEFAULTS.depth };
   return state.cutBlade;
 }
 
-/** 'full' | 'sized' | 'notch' | 'plate'. Sized and notch both cut a box (b.sized). Plate is the whole-plate blade
-    (app-cut-plate.js): a level plane across every piece, not a blade on one. */
+/** 'full' (the card's Chop) | 'sized' (Dice) | 'notch' | 'plane' | 'plate'. Sized and notch both cut a box (b.sized). Plane is the
+    plain blade with one side thrown away (app-cut-plane.js). Plate is the whole-plate blade (app-cut-plate.js): a level plane across
+    every piece, not a blade on one. */
 function cutSetBladeMode(mode) {
   const b = cutBladeState();
   const was = b.mode;
-  b.mode = mode === 'sized' || mode === 'notch' || mode === 'plate' ? mode : 'full';
+  b.mode = mode === 'sized' || mode === 'notch' || mode === 'plate' || mode === 'plane' ? mode : 'full';
   b.sized = b.mode === 'sized' || b.mode === 'notch';
+  // Follow is a box of its own on each blade: a place on the cord is the blade's, and goes when the blade does
+  if (b.mode !== was && typeof cutFollowOn === 'function' && !cutFollowOn()) state.cutFollowAt = null;
   if ((was === 'plate') !== (b.mode === 'plate') && typeof cutPlateModeChanged === 'function') cutPlateModeChanged();
 }
 
@@ -511,6 +523,19 @@ function cutBladeSpec(info) {
     if (p) p.applyMatrix4(info.turn);
     if (nrm) nrm.transformDirection(info.turn);
   }
+  /* A face lying in the cut plane gives no way in - a flat blade (mitre 90, bevel 90) and a click on the top of a
+     wall - and with the blade flat "down from above" is no way in either: the plate vertical is the plane's own
+     normal. The click is over the wall; the blade goes in through the section's edge nearest it, against that
+     edge's outward side - near a wall's inner edge, the inside face. */
+  if (p && m) {
+    const inPlane = v => { const o = v.toArray(); o[k] = 0; return Math.hypot(o[0], o[1], o[2]); };
+    const noLean = !nrm || inPlane(nrm) < NSO_Notch.LEAN_MIN * nrm.length();
+    if (noLean && inPlane(info.upCut) < NSO_Notch.LEAN_MIN) {
+      const qq = p.toArray(); qq[k] = info.plane;
+      const ed = NSO_Notch.edgeEntry(cutSectionOf(m, info, k), k, qq);
+      if (ed) { p = new THREE.Vector3().fromArray(ed.point); nrm = new THREE.Vector3().fromArray(ed.normal); }
+    }
+  }
   const entry = NSO_Notch.entryFor(k, nrm ? nrm.toArray() : null, info.upCut.toArray());
   const C = info.bbox.getCenter(new THREE.Vector3());
   const dName = AX[entry.dAxis];
@@ -535,7 +560,7 @@ function cutBladeSpec(info) {
   const q = [0, 0, 0];
   q[k] = info.plane; q[entry.wAxis] = wCentre; q[entry.dAxis] = dStart;
   let strand = null, strands = 0;
-  if ((notch || b.strand !== false) && m) {
+  if ((notch || cutStrandOn(b)) && m) {
     const clusters = cutSectionOf(m, info, k);
     const near = NSO_Notch.nearestCluster(clusters, q);
     if (near) { strand = clusters[near.index]; strands = clusters.length; }
@@ -543,7 +568,9 @@ function cutBladeSpec(info) {
   let box, sizes = s, miss = false;
   if (notch && strand) {
     const nb = NSO_Notch.notchBox({ axis: k, dAxis: entry.dAxis, wAxis: entry.wAxis, sign: entry.sign,
-      plane: info.plane, depth: s.depth, kerf: s.kerf }, strand);
+      plane: info.plane, depth: s.depth, kerf: s.kerf,
+      // the click on the plane: a section with an inside (a channel, a U) is notched at the face clicked, not its outer edge
+      wCentre: p ? wCentre : null, dStart: p ? dStart : null }, strand);
     box = nb.box;
     sizes = { width: nb.spec.width, depth: s.depth, kerf: s.kerf };
   } else {
@@ -551,15 +578,24 @@ function cutBladeSpec(info) {
       plane: info.plane, wCentre: wCentre, dStart: dStart, width: s.width, depth: s.depth, kerf: s.kerf });
     if (notch) miss = true;                              // nothing under the plane to notch
   }
+  /* Notch From / To (app-cut-notch-span.js): the ends typed are kept exactly. The slider steps in 0.1 mm, so the
+     middle they ask for can sit off its grid; the notch carries that remainder (b.nshift) along the plane's normal -
+     for as long as the slider stays where From / To put it. */
+  let shift = 0;
+  if (notch && b.nshift && b.nshiftAt != null && Math.abs(b.nshiftAt - info.mm) < 1e-9) {
+    shift = b.nshift;
+    box = { min: box.min.slice(), max: box.max.slice() };
+    box.min[k] += shift; box.max[k] += shift;
+  }
   const r = v => Math.round(v * 1000) / 1000;
   const lat = [0, 1, 2].filter(i => i !== k);
-  const key = b.mode + ':' + k + ':' + sizes.kerf + ':' + lat.map(i => r(box.min[i]) + '~' + r(box.max[i])).join(':') +
+  const key = b.mode + ':' + k + ':' + sizes.kerf + ':' + r(shift) + ':' + lat.map(i => r(box.min[i]) + '~' + r(box.max[i])).join(':') +
     (strand ? ':S' + lat.map(i => r(strand.min[i]) + '~' + r(strand.max[i])).join(':') : '');
   const up = info.upCut.getComponent(entry.dAxis);
   const from = Math.abs(up) > 0.7 ? (entry.sign * up < 0 ? 'down from the top' : 'up from below') : 'in from the side';
   return { box: box, entry: entry, sizes: sizes, key: key, from: from, wCentre: wCentre, dStart: dStart,
-           q: q, notch: notch, miss: miss, strand: strand, strands: strands,
-           isolate: !!strand && (notch || b.strand !== false) };
+           q: q, notch: notch, miss: miss, strand: strand, strands: strands, shift: shift,
+           isolate: !!strand && (notch || cutStrandOn(b)) };
 }
 
 /** For Cut: the plane the blade is drawn at - the same frame, the same number. */
@@ -571,6 +607,8 @@ function getCutPlaneForSplit(model) {
 }
 
 function setCutMm(mm) {
+  // Follow strand: the slider, the box and the nudges slide the blade along the cord (cutFollowScrubMm).
+  if (typeof cutFollowSliderState === 'function' && cutFollowSliderState()) { cutFollowScrubMm(Number(mm)); return; }
   const m = getActiveModel();
   const f = cutFrame(m);
   if (!f) return;
@@ -679,13 +717,12 @@ function syncCutMiterUI() {
   const deg = cutMiterDeg();
   const turn = document.getElementById('cut-dial-turn');
   if (turn) turn.setAttribute('transform', 'rotate(' + deg + ' 50 50)');
-  const text = document.getElementById('cut-dial-deg');
-  if (text) text.textContent = deg + '°';
   const dial = document.getElementById('cut-miter-dial');
   if (dial) dial.setAttribute('aria-valuenow', String(deg));
-  const input = document.getElementById('cut-miter-deg');
-  if (input && document.activeElement !== input) input.value = String(deg);
+  const input = document.getElementById('cut-miter-deg');                 // the wheel's centre: its readout and its box
+  if (input && document.activeElement !== input) input.value = deg + '°';
   syncCutBevelUI();
+  if (typeof syncCutRotateUI === 'function') syncCutRotateUI();
 }
 
 /* The bevel dial: the blade, seen end-on along its horizontal line with the
@@ -701,17 +738,16 @@ function syncCutBevelUI() {
     darts.setAttribute('transform', 'rotate(' + at + ' 50 50)');
     darts.dataset.at = String(at);
   }
-  const text = document.getElementById('cut-bevel-dial-deg');
-  if (text) text.textContent = deg + '°';
   const dial = document.getElementById('cut-bevel-dial');
   if (dial) dial.setAttribute('aria-valuenow', String(deg));
   const input = document.getElementById('cut-bevel-deg');
-  if (input && document.activeElement !== input) input.value = String(deg);
+  if (input && document.activeElement !== input) input.value = deg + '°';
 }
 
 function syncCutUI() {
   syncCutMiterUI();
   if (state.cutBlade && state.cutBlade.sized) syncCutBladeUI();
+  if (typeof cutNotchSpanSync === 'function') cutNotchSpanSync();
   const m = getActiveModel();
   const slider = document.getElementById('cut-slider');
   const input = document.getElementById('cut-mm');
@@ -737,9 +773,21 @@ function syncCutUI() {
     input.max = String(info.hi);
     if (document.activeElement !== input) input.value = mm.toFixed(1);
   }
+  // Follow strand: the slider and the box are the cord's own section - 0 at its start, the thumb where the blade is.
+  const fol = typeof cutFollowSliderState === 'function' ? cutFollowSliderState() : null;
+  if (fol) {
+    const r1 = v => (Math.round(v * 10) / 10).toFixed(1);
+    if (slider) { slider.min = '0'; slider.max = r1(fol.max); slider.value = r1(fol.val); }
+    if (input) { input.min = '0'; input.max = r1(fol.max); if (document.activeElement !== input) input.value = r1(fol.val); }
+  }
   // A clean split: the two sides are the plane's distance from each end and
   // add back to the piece. No kerf comes off.
-  if (readout && info.blade) {
+  if (readout && info.blade && fol) {
+    const bl = info.blade, r1 = v => (Math.round(v * 10) / 10).toFixed(1);
+    readout.textContent = (bl.notch ? 'NOTCH, FOLLOWING THE STRAND - ' : 'FOLLOWING THE STRAND - ') + r1(fol.val) + ' of ' + r1(fol.len) + ' mm along this stretch (let go and it moves on from here); ' +
+      (bl.notch ? 'a nick ' + bl.sizes.kerf + ' wide, ' + bl.sizes.depth + ' deep' : 'kerf ' + bl.sizes.kerf + ', ' + bl.sizes.width + ' wide, ' + bl.sizes.depth + ' deep') +
+      (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
+  } else if (readout && info.blade) {
     const bl = info.blade;
     const tail = (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
     if (bl.notch) {
@@ -753,6 +801,11 @@ function syncCutUI() {
         bl.sizes.depth + ' deep, ' + bl.from + ' (' + axis.toUpperCase() + ')' +
         (bl.isolate ? ', single strand' + (bl.strands > 1 ? ' (1 of ' + bl.strands + ')' : '') : '') + tail;
     }
+  } else if (readout && typeof cutPlaneOn === 'function' && cutPlaneOn()) {
+    const lowOff = cutPlaneTakesLow(mm, span), off = lowOff ? mm : span - mm;
+    readout.textContent = 'PLANE @ ' + mm.toFixed(1) + ' mm - takes ' + off.toFixed(1) + ' mm off the ' + (lowOff ? 'low' : 'high') + ' end, keeps ' +
+      (span - off).toFixed(1) + ' mm  (' + axis.toUpperCase() + ')' +
+      (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
   } else if (readout) {
     readout.textContent =
       'RED LINE @ ' + mm.toFixed(1) + ' mm (no kerf) -> ' +
@@ -792,6 +845,38 @@ function removeCutHelper() {
    runs on every selection change while the card is open. */
 let cutterWasTool = null;
 
+/* HIDE BLADE. The blade (the per-piece one with its tab, and the whole-plate one) is not drawn and answers no press, so a piece can be
+   turned without the blade moving about on screen. While it is hidden a click on a piece only picks it (app-core.js), and Cut is off:
+   nobody should cut at a plane they cannot see. It is a toggle for use in the card, not a setting: it survives an Undo (the card stays open) and nothing else - the card's closing clears it and the
+   blade is out whenever the card opens (openCutter). */
+function cutBladeHidden() { return !!state.cutHideBlade; }
+
+/** Apply the hide to what is drawn, the Cut button and the box; cheap, so every update calls it. */
+function cutApplyHide() {
+  const hide = cutBladeHidden();
+  if (state.cutHelper) state.cutHelper.visible = !hide;
+  if (state.cutPlateHelper) state.cutPlateHelper.visible = !hide;
+  if (typeof document === 'undefined') return;
+  const box = document.getElementById('chk-cut-hide-blade');
+  if (box) box.checked = hide;
+  const btn = document.getElementById('btn-cut');
+  if (btn && hide) {
+    btn.disabled = true;
+    btn.title = 'The blade is hidden: show it (untick Hide blade) to cut.';
+  }
+}
+
+function cutSetHideBlade(on) {
+  state.cutHideBlade = !!on;
+  if (state.cutHideBlade) { state.cutDragging = false; state.cutFollowDragging = false; }
+  cutApplyHide();
+  if (typeof updateCutterUI === 'function') updateCutterUI();
+  if (typeof syncCutBladeUI === 'function') syncCutBladeUI();
+  setStatus(state.cutHideBlade
+    ? 'Blade hidden: turn or move the piece without it. Untick Hide blade to cut.'
+    : 'Blade shown.');
+}
+
 function updateCutterUI() {
   if (cutterWasTool && !state.cutterOpen) {
     const menu = document.getElementById(cutterWasTool === 'crop' ? 'menu-crop' : 'menu-cut');
@@ -805,16 +890,15 @@ function updateCutterUI() {
     status.textContent = cutting
       ? (typeof cutPlateOn === 'function' && cutPlateOn()
         ? 'Whole plate: the blade crosses every piece. Set its height, then Cut.'
-        : getActiveModel() && state.cutHelper
-        ? 'Click the piece to move the blade; slide, nudge or angle it, then Cut.'
-        : 'Click a piece to drop a square blade on it.')
+        : '')                                  // no instructions on the card: the line is empty and takes no room (styles.css, :empty)
       : 'Cutter off.';
   }
-  if (cutBtn) cutBtn.disabled = !cutting || !getActiveModel() || !state.cutHelper;
+  if (cutBtn) cutBtn.disabled = !cutting || !getActiveModel() || !state.cutHelper || cutBladeHidden();
   if (cutting && typeof cutPlateOn === 'function' && cutPlateOn()) cutPlateSync();   // the plate blade needs no picked piece
   const tools = document.getElementById('cutter-tools');
   if (tools) tools.classList.toggle('is-open', cutting);
   syncCutRightSideOutButton();
+  cutApplyHide();
 }
 
 /** Is the cutter live for `tool` ('cut' or 'crop')? */
@@ -847,7 +931,10 @@ function openCutter(tool) {
   state.cutPlumb = null;
   state.cutBlade = null;
   state.cutBladeAt = null;
-  state.cutRotate = false;
+  state.cutFollowAt = null;
+  state.cutHideBlade = false;                  // Hide blade is a toggle for use in the card: the blade is out whenever the card opens
+  state.cutRotateAxis = 'h';
+  if (typeof cutRotateRef !== 'undefined') cutRotateRef.idx = -1;
   state.editId = null;
   state.selectedIndex = -1;
   if (state.controls) state.controls.enabled = true;
@@ -870,10 +957,11 @@ function openCutter(tool) {
 }
 
 function closeCutter(silent) {
+  if (typeof cutRotateSettle === 'function') cutRotateSettle();
   const was = state.cutterOpen ? (state.cutTool || 'cut') : null;
   state.cutterOpen = false;
   state.cutTool = null;
-  state.cutRotate = false;                 // the rings were Cut's to show; they go with it
+  state.cutFollowAt = null;                // Follow strand's place on the cord goes with the blade
   state.cutRightSideOutOffer = null;
   state.cutDragging = false;
   state.moveDragging = false;
@@ -888,7 +976,6 @@ function closeCutter(silent) {
   // Pieces are not cleared or rebuilt: the cutter is the blade only.
   state.previewMesh = null;
   updateCutterUI();
-  const rr = document.getElementById('cut-rotate-rings'); if (rr) rr.hidden = true;
   if (typeof nsoRotate !== 'undefined' && nsoRotate.refresh) nsoRotate.refresh();
   syncCutBladeUI();
   if (!silent) setStatus((was === 'crop' ? 'Crop' : 'Cut') + ' off - blade gone. Pieces unchanged.');
@@ -916,6 +1003,7 @@ function cutWireCards() {
         // this piece": opening Join or Scale next works on the piece just
         // cut, and Join's A, set before its card opened, survives.
         const keepIndex = state.selectedIndex, keepId = state.editId;
+        state.cutHideBlade = false;                 // the card is shut: the next opening starts with the blade shown
         closeCutter(false);
         if (keepIndex >= 0 && state.placed && state.placed[keepIndex] && typeof selectPlaced === 'function') {
           selectPlaced(keepIndex);
@@ -980,16 +1068,15 @@ function cutWireMiterDial() {
     ev.preventDefault();
     ev.stopPropagation();
   });
-  const typed = document.getElementById('cut-miter-deg');
-  if (typed) typed.addEventListener('change', function () {
-    const v = parseFloat(typed.value);
-    setCutMiter(isFinite(v) ? v : 0);
-  });
+  cutWireDialInput('cut-miter-deg', { read: cutMiterDeg, apply: setCutMiter, nudge: function (d) { setCutMiter(cutMiterDeg() + d); }, sync: syncCutUI });
   const square = document.getElementById('btn-cut-square');
   if (square) square.addEventListener('click', function () { setCutMiter(0); });
+  const quarter = document.getElementById('btn-cut-miter-90');
+  if (quarter) quarter.addEventListener('click', function () { setCutMiter(90); });
   cutWireMiterStep('btn-cut-miter-minus', -1);
   cutWireMiterStep('btn-cut-miter-plus', 1);
   cutWireBevelDial();
+  cutWireRotateDial();
   syncCutMiterUI();
 }
 
@@ -1024,8 +1111,10 @@ function cutWireBevelDial() {
   dial.dataset.nsoWired = '1';
   let press = null;
   function angleAt(ev) {
-    const r = dial.getBoundingClientRect();
-    const dx = ev.clientX - (r.left + r.width / 2), dy = ev.clientY - (r.top + r.height / 2);
+    // The pivot is (50, 50) in the wheel's own units: the middle of a full wheel, the middle of the flat edge of the half wheel.
+    const r = dial.getBoundingClientRect(), ctm = dial.getScreenCTM && dial.getScreenCTM();
+    const px = ctm ? 50 * ctm.a + 50 * ctm.c + ctm.e : r.left + r.width / 2, py = ctm ? 50 * ctm.b + 50 * ctm.d + ctm.f : r.top + r.height / 2;
+    const dx = ev.clientX - px, dy = ev.clientY - py;
     return { a: (Math.atan2(dx, -dy) * 180) / Math.PI, centre: Math.hypot(dx, dy) < r.width * 0.18 };
   }
   dial.addEventListener('pointerdown', function (ev) {
@@ -1071,16 +1160,347 @@ function cutWireBevelDial() {
     ev.preventDefault();
     ev.stopPropagation();
   });
-  const typed = document.getElementById('cut-bevel-deg');
-  if (typed) typed.addEventListener('change', function () {
-    const v = parseFloat(typed.value);
-    setCutBevel(isFinite(v) ? v : 0);
-  });
+  cutWireDialInput('cut-bevel-deg', { read: cutBevelDeg, apply: setCutBevel, nudge: function (d) { setCutBevel(cutBevelDeg() + d); }, sync: syncCutUI });
   const plumb = document.getElementById('btn-cut-plumb');
   if (plumb) plumb.addEventListener('click', function () { cutPlumb(); });
   cutWireMiterStep('btn-cut-bevel-minus', -1, 'bevel');
   cutWireMiterStep('btn-cut-bevel-plus', 1, 'bevel');
   syncCutBevelUI();
+}
+
+/* The Rotate piece wheel, beside the Mitre wheel: turns the PIECE about the axis ticked under it - Horizontal (the plate's
+   vertical, the default), Front/back or Side/side (the two leans, level lines of the piece's footprint) - the rotate rings'
+   own motions (nsoRotate.turn, app-rotate-handles.js: the pose buttons' path, with the position lock and one Undo point),
+   for a small piece worked close up. It stands in for the rings, which Cut no longer shows. The ticks are exclusive
+   (one axis at a time), kept in state.cutRotateAxis.
+
+   The handle shows where the piece stands on that axis: Horizontal, its heading clockwise seen from above (0 = as it was
+   loaded, [0, 360)); a lean, its tilt from level (0 = flat, signed). The wheel is a jog: a press does nothing until the
+   pointer moves, then the piece follows the pointer's turn about the wheel from where it was (the Mitre wheel jumps to
+   the press, which a piece must not), resting on the 45 degree ticks. The box takes a reading; the arrows, and the
+   - / + buttons (1 degree, Shift 0.1, Alt 5), step it. The blade goes with the piece. */
+const CUT_ROTATE_AXES = { h: 'chk-cut-rot-h', fb: 'chk-cut-rot-fb', ss: 'chk-cut-rot-ss' };
+
+function cutRotateAxis() { return state.cutRotateAxis === 'fb' || state.cutRotateAxis === 'ss' ? state.cutRotateAxis : 'h'; }
+
+/** The ring (app-rotate-handles.js) that is the ticked axis, as the session holds it (cutRotateSession). */
+function cutRotateRing() {
+  const t = cutRotateSession();
+  return t ? t.ring : 'turn';
+}
+
+/** The piece's turn in its BODY frame: the pose on the mesh after the turns baked into its geometry since it was loaded
+    (nsoBakedQ) - the frame the rotate rings' own scale is read in, so a reading is the same before and after a bake. */
+function cutRotateBodyQ(p) {
+  p.mesh.updateMatrixWorld(true);
+  return typeof nsoBakedQ === 'function' ? p.mesh.quaternion.clone().multiply(nsoBakedQ(p)) : p.mesh.quaternion.clone();
+}
+
+function cutRotatePiece() {
+  const p = state.placed && state.placed[state.selectedIndex];
+  return p && p.mesh ? p : null;
+}
+
+/** The piece's heading on the plate, clockwise seen from above, in degrees [0, 360): 0 is the piece lying as it was
+    loaded, its own X along the plate's X. Read off the axis of the piece that lies nearest the plate (X, then Z, then Y),
+    so it still reads on a piece that has been tipped. Null with no piece picked. */
+function cutPieceHeadingRaw() {
+  const p = cutRotatePiece();
+  if (!p) return null;
+  const q = cutRotateBodyQ(p), axes = [[1, 0, 0, 0], [0, 0, 1, -90], [0, 1, 0, 0]];
+  for (let i = 0; i < axes.length; i++) {
+    const v = new THREE.Vector3(axes[i][0], axes[i][1], axes[i][2]).applyQuaternion(q);
+    if (Math.hypot(v.x, v.z) > 0.7) return ((((Math.atan2(v.z, v.x) * 180) / Math.PI + axes[i][3]) % 360) + 360) % 360;
+  }
+  return null;
+}
+
+/** THE SESSION. What the wheel turns the piece about, and what its reading is measured on, picked ONCE and held while the wheel
+    is the one moving the piece:
+      ring  the rotate ring that is the ticked axis. For a lean it is the along / across lean of the piece's footprint AS
+            IT LAY WHEN THE SESSION BEGAN: the footprint of a piece tipping over changes shape (a near-square one swaps its
+            long side), and the ring named from it afresh each step would turn the piece about a different axis each time -
+            tilting freely instead of spinning one way;
+      A     that ring's axis in the world, held, so every step is a turn about the SAME line;
+      k, sgn  the piece's own axis that is its upright and which way up, so 0 is "as it lay when you started" and the lean
+            reads true: 45, 90 (on edge), 135, 180 ... It is not re-picked from whichever axis is most nearly vertical now
+            (a reading that followed it would jump at 45 and fall to 0 at 90, standing on edge).
+    The line (ring, A) is picked again whenever the piece's turn is not the one the wheel last left it in - an Undo or Redo, the
+    Rotate menu, another tool - since a lean's ring is named from the footprint as it lies. The reference (k, sgn) is kept
+    for the piece and the axis, in the piece's body frame, so a lean read as 70 is read as 70 again after Undo then Redo. */
+const cutRotateRef = { idx: -1, axis: null, ring: 'turn', A: null, k: 0, sgn: 1, q: null };
+function cutRotateSession() {
+  const p = cutRotatePiece();
+  if (!p || typeof nsoRotate === 'undefined' || !nsoRotate.ringAxis) return null;
+  p.mesh.updateMatrixWorld(true);
+  const r = cutRotateRef, axis = cutRotateAxis();
+  const same = r.idx === state.selectedIndex && r.axis === axis;
+  const keep = same && !!r.q && !!r.A && p.mesh.quaternion.angleTo(r.q) < 1e-5;
+  if (!keep) {
+    // The line: the ticked axis's ring and its axis in the world, as the piece lies NOW (a lean's ring is named from its footprint).
+    let ring = 'turn';
+    if (axis !== 'h' && nsoRotate.leanNames) { const n = nsoRotate.leanNames(); ring = axis === 'fb' ? n.along : n.across; }
+    const a = nsoRotate.ringAxis(ring) || [0, 1, 0];
+    r.ring = ring; r.A = new THREE.Vector3(a[0], a[1], a[2]); r.q = p.mesh.quaternion.clone();
+    // The reference: the piece's own upright, picked when the piece or the axis is new - and kept through an Undo, a Redo,
+    // a bake, so the reading does not re-base when the pose comes back.
+    if (!same) {
+      const bq = cutRotateBodyQ(p);
+      const ys = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(function (e) { return new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(bq).y; });
+      let best = 0;
+      ys.forEach(function (y, k) { if (Math.abs(y) > Math.abs(ys[best]) + 1e-9) best = k; });
+      r.idx = state.selectedIndex; r.axis = axis; r.k = best; r.sgn = ys[best] < 0 ? -1 : 1;
+    }
+  }
+  return r;
+}
+/** The session's reading frame (for a drag, taken at the press and kept). */
+function cutRotateFix() { const t = cutRotateSession(); return t ? { A: t.A, k: t.k, sgn: t.sgn } : null; }
+
+/** Put down whatever turn the wheel has in hand: the piece is stood on the plate. The wheel keeps the piece pivoting in
+    place, through the plate, for as long as you are using it; this is where that ends - another axis ticked, Cut pressed,
+    the card closed, a click anywhere outside the card. */
+function cutRotateSettle() {
+  if (typeof nsoRotate !== 'undefined' && nsoRotate.seatNow && nsoRotate.holdingTurn && nsoRotate.holdingTurn()) nsoRotate.seatNow();
+}
+
+/** A lean's reading: how far the piece's upright axis has tipped from the vertical about the lean's axis, in degrees
+    (-180, 180], the sense a turn of the wheel clockwise gives (so + is what the + button does). 0 is level. */
+function cutPieceTiltRaw(fix) {
+  const p = cutRotatePiece();
+  if (!p || !fix) return null;
+  p.mesh.updateMatrixWorld(true);
+  const e = [[1, 0, 0], [0, 1, 0], [0, 0, 1]][fix.k];
+  const v = new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(cutRotateBodyQ(p)).multiplyScalar(fix.sgn);
+  const up = new THREE.Vector3(0, 1, 0);
+  const phi = Math.atan2(fix.A.dot(new THREE.Vector3().crossVectors(up, v)), up.dot(v));    // right-handed about A, from up to v
+  return -phi * 180 / Math.PI;
+}
+
+/** The wheel's reading for the ticked axis: heading [0, 360) for Horizontal, tilt (-180, 180] for a lean. */
+function cutRotateReadingRaw(fix) {
+  return cutRotateAxis() === 'h' ? cutPieceHeadingRaw() : cutPieceTiltRaw(fix || cutRotateFix());
+}
+function cutRotateReading() {
+  const r = cutRotateReadingRaw();
+  if (r == null) return null;
+  const v = Math.round(r * 10) / 10;
+  return cutRotateAxis() === 'h' ? v % 360 : (Object.is(v, -0) ? 0 : v);
+}
+function cutPieceHeading() { return cutRotateReading(); }
+
+/** A reading dragged: on a 45 degree tick inside 3 degrees of one, else as it is. */
+function cutRotateDetent(deg) {
+  const tick = Math.round(deg / 45) * 45;
+  return Math.abs(deg - tick) <= 3 ? tick : deg;
+}
+function cutRotateWrap(d) {
+  while (d > 180) d -= 360;
+  while (d <= -180) d += 360;
+  return d;
+}
+
+const cutRotateDial = { dragging: false, undoAt: 0 };
+
+function syncCutRotateUI() {
+  const lean = cutRotateAxis() !== 'h';
+  const deg = cutRotateReading();
+  const turn = document.getElementById('cut-rotate-turn');
+  if (turn) turn.setAttribute('transform', 'rotate(' + (deg == null ? 0 : deg) + ' 50 50)');
+  const dial = document.getElementById('cut-rotate-dial');
+  if (dial) {
+    dial.setAttribute('aria-valuenow', String(deg == null ? 0 : deg));
+    dial.setAttribute('aria-valuemin', lean ? '-180' : '0');
+    dial.setAttribute('aria-valuemax', lean ? '180' : '359.9');
+  }
+  /* The wheel's centre is its readout AND its box (an input over the middle of the rail): it shows the reading with its degree
+     sign as the wheel turns, and is left alone while it is being typed in. */
+  const input = document.getElementById('cut-rotate-deg');
+  if (input && document.activeElement !== input) input.value = deg == null ? '-' : deg + '°';
+  Object.keys(CUT_ROTATE_AXES).forEach(function (k) {
+    const el = document.getElementById(CUT_ROTATE_AXES[k]);
+    if (el) el.checked = k === cutRotateAxis();
+  });
+}
+
+/** Turn the selected piece `cw` degrees the way the wheel's clockwise is (about the ticked axis). One Undo point for a
+    press or a run of presses (`fresh` true starts a step of its own - a drag's first move - false carries on one), none if
+    the piece is locked. */
+function cutRotateBy(cw, fresh) {
+  const idx = state.selectedIndex, p = cutRotatePiece();
+  if (!p) { setStatus('Rotate piece: pick a piece first', true); return false; }
+  if (typeof nsoRotate === 'undefined' || !nsoRotate.turn) return false;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'rotate')) return false;
+  const now = Date.now();
+  // A drag always starts a step of its own; presses of a held or repeated button within 0.7 s of each other share one.
+  const step = fresh === true || (fresh !== false && now - cutRotateDial.undoAt > 700);
+  if (step) {
+    // The point records the pose as it will be seated (a turn still in hand carries on pivoting; it is not put down for this).
+    if (nsoRotate.undoPoint) nsoRotate.undoPoint(); else pushUndo(snapshotPlacedPose(idx));
+  }
+  cutRotateDial.undoAt = now;
+  /* HELD: the piece pivots in place about its centre, through the plate where it must, about ONE line (the session's), and
+     stays so for as long as the wheel is in use - it is stood on the plate by cutRotateSettle, not by a timer (a timer
+     lifts it up off the plate in the middle of a spin). */
+  const sess = cutRotateSession();
+  if (nsoRotate.holdTurn && sess) nsoRotate.holdTurn(sess.ring, -cw, { A: sess.A.toArray(), keep: true });
+  else nsoRotate.turn(cutRotateRing(), -cw);
+  if (cutRotateAxis() === 'h') p.rotated = Math.abs(Math.sin(p.rotY || 0)) > 0.5;
+  if (cutRotateRef.q && cutRotateRef.idx === state.selectedIndex) cutRotateRef.q.copy(p.mesh.quaternion);   // the wheel's own turn: the reference stands
+  cutAfterPieceTurn();
+  return true;
+}
+
+/** An Undo or a Redo has put a pose back: the wheel and the blade read the piece as it is now, and a turn the wheel last
+    left is no longer the one the piece is in (so a lean's reference is picked again, 0 = as it lies). */
+function cutAfterPoseUndo() {
+  if (!state.cutterOpen) return;
+  cutRotateRef.q = null;                       // the line is read again; the reference stays
+  if (cutRotatePiece()) {
+    state.cutFollowAt = null;
+    if (typeof cutFollowSyncUI === 'function') cutFollowSyncUI();
+    syncCutRotateUI();
+    syncCutUI();
+    updateCutHelper();
+  }
+}
+
+/** The piece has been stood on the plate after a held turn (app-rotate-handles.js, seat): the blade goes with it. */
+function cutRotateSeated(p) {
+  if (!state.cutterOpen || !p || cutRotatePiece() !== p) return;
+  state.cutFollowAt = null;
+  syncCutRotateUI();
+  syncCutUI();
+  updateCutHelper();
+}
+
+/** The piece has turned: the blade (a child of the piece's frame) follows by itself, the card's numbers and any Follow
+    strand place, held in the world, do not. */
+function cutAfterPieceTurn() {
+  state.cutFollowAt = null;
+  if (typeof cutFollowSyncUI === 'function') cutFollowSyncUI();
+  syncCutRotateUI();
+  syncCutUI();
+  updateCutHelper();
+  if (typeof updateExportButton === 'function') updateExportButton();
+}
+
+function cutWireRotateDial() {
+  const dial = document.getElementById('cut-rotate-dial');
+  if (!dial || dial.dataset.nsoWired === '1') return;
+  dial.dataset.nsoWired = '1';
+  let press = null;
+  function angleAt(ev) {
+    const r = dial.getBoundingClientRect();
+    const dx = ev.clientX - (r.left + r.width / 2), dy = ev.clientY - (r.top + r.height / 2);
+    return { a: (Math.atan2(dx, -dy) * 180) / Math.PI, centre: Math.hypot(dx, dy) < r.width * 0.18 };
+  }
+  dial.addEventListener('pointerdown', function (ev) {
+    if (ev.button !== 0) return;
+    const at = angleAt(ev);
+    if (at.centre) return;                                    // the centre is the readout, not the rail
+    const fix = cutRotateAxis() === 'h' ? null : cutRotateFix();
+    const a0 = cutRotateReadingRaw(fix);
+    if (a0 == null) { setStatus('Rotate piece: pick a piece first', true); return; }
+    press = { x: ev.clientX, y: ev.clientY, lastA: at.a, raw: 0, abs0: a0, moved: false, first: true, fix: fix };
+    if (dial.setPointerCapture) { try { dial.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic */ } }
+    if (dial.focus) dial.focus();
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  dial.addEventListener('pointermove', function (ev) {
+    if (!press) return;
+    if (!press.moved && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) < CUT_BEVEL_CLICK_SLOP_PX) return;
+    press.moved = true;
+    cutRotateDial.dragging = true;
+    const at = angleAt(ev);
+    let d = at.a - press.lastA;
+    if (d > 180) d -= 360;
+    else if (d < -180) d += 360;
+    press.lastA = at.a;
+    press.raw += d;                                            // clockwise on the wheel = clockwise on the piece
+    const want = cutRotateDetent(press.abs0 + press.raw), cur = cutRotateReadingRaw(press.fix);
+    if (cur == null) return;
+    const delta = cutRotateWrap(want - cur);
+    if (Math.abs(delta) < 1e-6) return;
+    if (cutRotateBy(delta, press.first)) press.first = false;
+  });
+  const stop = function () {
+    press = null;
+    cutRotateDial.dragging = false;
+    syncCutRotateUI();
+  };
+  dial.addEventListener('pointerup', stop);
+  dial.addEventListener('pointercancel', stop);
+  dial.addEventListener('keydown', function (ev) {
+    const step = ev.shiftKey ? CUT_MITER_STEP_SHIFT_DEG : CUT_MITER_STEP_DEG;
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') cutRotateBy(step);
+    else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') cutRotateBy(-step);
+    else return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  cutWireDialInput('cut-rotate-deg', {
+    read: cutRotateReading,
+    apply: function (v) {
+      const d = cutRotateWrap(v - cutRotateReading());
+      if (Math.abs(d) > 1e-6) { cutRotateDial.undoAt = 0; cutRotateBy(d); }     // a typed turn is a step of its own
+    },
+    nudge: function (d) { return cutRotateBy(d); },
+    sync: syncCutRotateUI
+  });
+  // One axis at a time: ticking one clears the others, and the one in use cannot be cleared (the wheel needs an axis)
+  Object.keys(CUT_ROTATE_AXES).forEach(function (k) {
+    const el = document.getElementById(CUT_ROTATE_AXES[k]);
+    if (el) el.addEventListener('change', function () {
+      const ticked = el.checked;                                       // read first: landing the piece re-syncs the card
+      cutRotateSettle();                                              // a new axis: the turn in hand lands first
+      state.cutRotateAxis = ticked ? k : (cutRotateAxis() === k ? k : cutRotateAxis());
+      syncCutRotateUI();
+    });
+  });
+  // A press anywhere but on the Cut card ends the wheel's turn: the piece lands before it is dragged, exported, cloned ...
+  document.addEventListener('pointerdown', function (ev) {
+    if (!ev.target || !ev.target.closest || ev.target.closest('#edit-card')) return;
+    cutRotateSettle();
+  }, true);
+  cutWireMiterStep('btn-cut-rotate-minus', -1, 'rotate');
+  cutWireMiterStep('btn-cut-rotate-plus', 1, 'rotate');
+  syncCutRotateUI();
+}
+
+/* The centre of a wheel is also its number box (Mitre, Bevel and Rotate): an input laid over the middle of the rail (index.html,
+   .cut-dialwrap). It reads out as the wheel turns - `45°`, kept by the card's sync while it is not being typed in - and a click
+   in it selects the reading, so typing replaces it. Enter or leaving it sets the wheel to what was typed (the degree sign is
+   ignored), Esc puts the reading back, Up / Down step it (1 degree, Shift 0.1). A value equal to the reading changes nothing,
+   so a click and a click away is a no-op; a `change` event set by a script commits the same way.
+   The text is deliberately NOT rewritten on focus: that races the selection (a value typed over `50` came out `500`).
+   `o`: read() the wheel's reading (null with nothing to turn), apply(v) set it to v, nudge(d) step it by d (false = refused),
+   sync() draw the card from the state again. */
+function cutWireDialInput(id, o) {
+  const typed = document.getElementById(id);
+  if (!typed || typed.dataset.nsoWired === '1') return;
+  typed.dataset.nsoWired = '1';
+  const bare = function () { const r = o.read(); return r == null ? '' : String(r); };
+  const commit = function () {
+    const v = parseFloat(typed.value.replace(/[°\s]/g, '').replace(/^\u2212/, '-')), cur = o.read();
+    if (isFinite(v) && cur != null && v !== cur) o.apply(v);
+  };
+  typed.addEventListener('focus', function () {
+    requestAnimationFrame(function () { if (document.activeElement === typed) typed.select(); });
+  });
+  typed.addEventListener('change', commit);
+  typed.addEventListener('blur', function () { commit(); o.sync(); });   // sync: the box shows what the wheel reads now, degree sign back
+  typed.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') typed.blur();
+    else if (ev.key === 'Escape') { typed.value = bare() + '°'; typed.blur(); }
+    else if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
+      const d = (ev.shiftKey ? 0.1 : 1) * (ev.key === 'ArrowUp' ? 1 : -1);
+      if (o.nudge(d) !== false) { typed.value = bare() + '°'; typed.select(); }
+    } else return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
 }
 
 /* One − / + button under the wheel. A press steps the mitre through
@@ -1092,7 +1512,7 @@ function cutWireBevelDial() {
    scripted .click() arrive as a click with detail 0 and step once. With
    `which` 'bevel' it steps the bevel the same way. */
 function cutWireMiterStep(id, sign, which) {
-  const bevel = which === 'bevel';
+  const bevel = which === 'bevel', rotate = which === 'rotate';
   const btn = document.getElementById(id);
   if (!btn) return;
   let wait = null, rep = null;
@@ -1106,6 +1526,7 @@ function cutWireMiterStep(id, sign, which) {
   };
   const step = function (size) {
     if (bevel) setCutBevel(cutBevelDeg() + sign * size);
+    else if (rotate) cutRotateBy(sign * size);
     else setCutMiter(cutMiterDeg() + sign * size);
   };
   btn.addEventListener('pointerdown', function (ev) {
@@ -1114,7 +1535,7 @@ function cutWireMiterStep(id, sign, which) {
     // A number still being typed commits first. Its change event would
     // otherwise fire when this press takes the focus - after the step - and
     // put the typed angle back over it.
-    const typed = document.getElementById(bevel ? 'cut-bevel-deg' : 'cut-miter-deg');
+    const typed = document.getElementById(bevel ? 'cut-bevel-deg' : rotate ? 'cut-rotate-deg' : 'cut-miter-deg');
     if (typed && document.activeElement === typed) typed.blur();
     const size = sizeOf(ev);
     step(size);
@@ -1177,20 +1598,28 @@ function showEditPreview() {
 // black slab, depth-tested: only what stuck out of the piece showed, so on a
 // tall or wide piece the blade looked as if it stopped short.)
 //
-// The plate line marks the same plane where it meets the plate (y = 0): flat
-// on the plate, 1 mm wide (a mark, not a kerf), spanning the piece's footprint along the cut.
-// It is the plane Split cuts and the box the blade is sized from, carried
-// into world space - the same number, the same bounds - so it follows the
-// slider and the mm box exactly and cannot disagree with the blade.
+// The blade carries a TAB on the front-left end of its top edge, as the place to take hold of it: a thin blade is hard to catch,
+// and the tab - a flat bar running straight out from the blade, with a ball on its end, standing clear of the piece - is not (a
+// drag from it is the blade's drag). It is built onto the blade, an extension of it: the bar lies in the blade's plane with its
+// top edge in line with the blade's top edge, it and the ball are the sheet's own dark translucent stuff, and ONE yellow outline,
+// the frame's, runs on from the blade's top edge along the bar, round the ball and back along the bar's lower edge to the blade -
+// which keeps it in view over the dark background as the frame keeps the blade. "Top" is the plate vertical seen in the blade's
+// own plane; "front-left" is the top corner toward the viewer and the left of the home view (a continuous choice: it does not
+// flip as the blade turns, except where the blade runs exactly edge-on to it). cutPlaceBall places it on every update from the cut
+// frame's own `up`, so it stays on that corner through a mitre, a bevel and a turn of the piece. (A strip where the plane met
+// the plate used to stand in for it. It was drawn on the plate, far from the blade whenever the blade lay near-flat, and is gone.)
 //
 // Every part is skipped by the x-ray view (which rewrites depth settings on
-// whatever it walks), and the plate line is never picked: dragging still
-// starts only from the blade, as before.
-const CUT_BLADE_COLOR = 0xffc83d;      // the frame and the plate line
+// whatever it walks); dragging starts from the blade's sheet, its frame or the ball.
+const CUT_BLADE_COLOR = 0xffc83d;      // the frame (the ball and its bar are the sheet's colour)
 const CUT_BLADE_FILL = 0x101010;       // the sheet: a dark tint reads on any piece colour
 const CUT_BLADE_FILL_OPACITY = 0.38;
 const CUT_BLADE_RENDER_ORDER = 20;     // after the pieces, so the sheet tints them
-const CUT_PLATE_LINE_Y = 0.35;         // just above the plate border (0.3) and grid (0.15)
+const CUT_BALL_RADIUS_MM = 2.4;        // the ball at the blade's top corner: big enough to catch
+const CUT_BALL_BAR_MM = 6;             // the bar's length from the blade's edge to the ball's foot
+const CUT_BALL_BAR_WIDTH_MM = 3;       // the flat bar's width, hung from the blade's top edge
+const CUT_BALL_BAR_THICK_MM = 1;       // and its thickness, across the blade's plane
+const CUT_BALL_INSET_MM = 0.6;         // the bar runs this far into the blade
 const CUT_OVERHANG_MM = 1;             // the blade's margin past the section, each side
 const CUT_MIN_ACROSS_MM = 4;
 
@@ -1218,13 +1647,9 @@ function cutBuildSizedBlade(group, f) {
   const size = new THREE.Vector3(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]);
   const mid = new THREE.Vector3((box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2);
   const off = mid.clone().sub(C);
-  off.setComponent(k, 0);
+  off.setComponent(k, mid.getComponent(k) - f.plane);         // centred on the plane - less a Notch From / To remainder
   const geo = new THREE.BoxGeometry(size.x, size.y, size.z);
 
-  const hit = new THREE.Mesh(new THREE.BoxGeometry(size.x + 12, size.y + 12, size.z + 12),
-    new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
-  hit.userData.cutHandle = true;
-  hit.userData.skipXray = true;
   const blade = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
     color: CUT_BLADE_FILL, transparent: true, opacity: CUT_BLADE_FILL_OPACITY,
     side: THREE.DoubleSide, depthTest: false, depthWrite: false
@@ -1235,7 +1660,8 @@ function cutBuildSizedBlade(group, f) {
     color: CUT_BLADE_COLOR, transparent: true, opacity: 1, depthTest: false, depthWrite: false
   })), true);
   frame.userData.cutFrame = true;
-  [hit, blade, frame].forEach(o => { o.position.copy(off); group.add(o); });
+  [blade, frame].forEach(o => { o.position.copy(off); group.add(o); });
+  cutBuildBall(group, off.toArray(), [k === 0 ? 0 : size.x, k === 1 ? 0 : size.y, k === 2 ? 0 : size.z]);
   // The strand the cut will take: the plane's section of it, boxed (a second colour, so it reads against the blade).
   if (bl.isolate && bl.strand) {
     const lat = [0, 1, 2].filter(i => i !== k), pt = (u, v) => { const a = [0, 0, 0]; a[lat[0]] = u - C.getComponent(lat[0]); a[lat[1]] = v - C.getComponent(lat[1]); return a; };
@@ -1253,6 +1679,108 @@ function cutBuildSizedBlade(group, f) {
   group.userData.cutSig = bl.key;
 }
 
+/** The tab - ball, flat bar and outline - in the helper's own (cut) frame. `box` is the blade's extent there: { off: its
+    centre from the section's centre, size: its size along the three cut-frame axes (0 along the plane's normal) }, kept on the
+    helper so cutPlaceBall can find the corner again whenever the frame turns. */
+const CUT_BALL_ARC_STEPS = 30;
+function cutBuildBall(group, off, size) {
+  // The blade's own stuff: the sheet's colour, translucency and settings (so the tab reads as part of the blade - an extension of
+  // it), in the transparent pass like the sheet and frame: an opaque ball is drawn first, and the translucent plate (which knows
+  // nothing of it, no depth being written) is then drawn over it from straight above.
+  const mat = () => new THREE.MeshBasicMaterial({ color: CUT_BLADE_FILL, transparent: true, opacity: CUT_BLADE_FILL_OPACITY,
+    side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(CUT_BALL_RADIUS_MM, 20, 14), mat());
+  ball.userData.cutBall = true;
+  cutOverlay(ball, true);
+  ball.renderOrder = CUT_BLADE_RENDER_ORDER + 1;
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat());       // a flat bar: scaled and turned onto the blade by cutPlaceBall
+  bar.userData.cutBar = true;
+  cutOverlay(bar, true);
+  bar.renderOrder = CUT_BLADE_RENDER_ORDER + 1;
+  // The outline, the frame's yellow: blade's top edge -> out along the bar -> round the ball -> back along the bar's lower edge.
+  const n = 4 + CUT_BALL_ARC_STEPS + 1;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  const outline = new THREE.Line(g, new THREE.LineBasicMaterial({ color: CUT_BLADE_COLOR, transparent: true, opacity: 1, depthTest: false, depthWrite: false }));
+  outline.userData.cutBallOutline = true;
+  cutOverlay(outline, true);
+  outline.renderOrder = CUT_BLADE_RENDER_ORDER + 2;           // drawn last, over the ball's and the bar's fill, as bright as the frame
+  outline.frustumCulled = false;
+  group.add(bar);
+  group.add(ball);
+  group.add(outline);
+  group.userData.cutBallBox = { off: off, size: size };
+}
+
+/** Put the tab on the blade's front-left top corner. The blade's `up` is the plate vertical taken into its own plane (the cut
+    frame's `upCut`, less its part along the plane's normal) - and when the plane lies flat there is no such direction, so the
+    first axis across the plane stands in. The blade is a rectangle in that plane; its top corners are the ones furthest along
+    `up` (both ends of the top edge when the blade stands square to the frame). Of those, the one toward the front and left of
+    the home view (the direction (-0.5, 0, 1) in the world) is taken. From it the tab runs OUT along the top edge, away from the
+    blade's middle, in the blade's plane: a flat bar hung from the top edge (its upper edge in line with the blade's), and the
+    ball on the bar's centreline at its end. The outline is drawn on the plane itself. */
+function cutPlaceBall(group, info) {
+  const ball = group && group.children.find(c => c.userData.cutBall), bar = group && group.children.find(c => c.userData.cutBar);
+  const outline = group && group.children.find(c => c.userData.cutBallOutline), box = group && group.userData.cutBallBox;
+  if (!ball || !bar || !outline || !box || !info || !info.upCut) return;
+  const AX = ['x', 'y', 'z'], k = AX.indexOf(info.axis), a = (k + 1) % 3, b = (k + 2) % 3;
+  const u = info.upCut.clone();
+  u.setComponent(k, 0);
+  if (u.length() < 0.2) { u.set(0, 0, 0); u.setComponent(a, 1); } else u.normalize();
+  const corners = [];
+  [-1, 1].forEach(function (sa) {
+    [-1, 1].forEach(function (sb) {
+      const c = new THREE.Vector3();
+      c.setComponent(a, sa * box.size[a] / 2);
+      c.setComponent(b, sb * box.size[b] / 2);
+      corners.push(c);
+    });
+  });
+  let top = -Infinity;
+  corners.forEach(function (c) { top = Math.max(top, c.dot(u)); });
+  group.updateMatrixWorld(true);
+  const q = group.getWorldQuaternion(new THREE.Quaternion()), ref = new THREE.Vector3(-0.5, 0, 1).normalize();
+  let best = null, bs = -Infinity;
+  corners.forEach(function (c) {
+    if (c.dot(u) < top - 1e-6) return;                       // not on the top edge
+    const sc = c.clone().applyQuaternion(q).dot(ref);
+    if (sc > bs) { bs = sc; best = c; }
+  });
+  // outward: along the top edge, away from the blade's middle (the corner less its part along `up`)
+  const out = best.clone().addScaledVector(u, -best.dot(u));
+  const nrm = new THREE.Vector3().setComponent(k, 1);
+  if (out.length() < 1e-6) out.crossVectors(nrm, u);
+  out.normalize();
+  const C = new THREE.Vector3(box.off[0], box.off[1], box.off[2]).add(best);
+  const R = CUT_BALL_RADIUS_MM, H = CUT_BALL_BAR_WIDTH_MM, T = CUT_BALL_BAR_THICK_MM, inset = CUT_BALL_INSET_MM;
+  const L = CUT_BALL_BAR_MM + R;                              // from the blade's edge to the ball's centre
+  const P = function (o, h) { return C.clone().addScaledVector(out, o).addScaledVector(u, h); };    // a point in the blade's plane: o along the edge, h up from it
+  // the ball: on the bar's centreline, at its end
+  ball.position.copy(P(L, -H / 2));
+  // the bar: from a little inside the blade's edge to the ball's centre, hung H below the top edge, T thick across the plane
+  const mid = P((L - inset) / 2, -H / 2);
+  bar.position.copy(mid);
+  bar.scale.set(L + inset, H, T);
+  bar.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(out, u, new THREE.Vector3().crossVectors(out, u).normalize()));
+  // the outline, in the plane: the blade's top edge on out to where the bar meets the ball, round the ball the long way, back
+  // along the bar's lower edge to the blade
+  const d = Math.sqrt(Math.max(0, R * R - (H / 2) * (H / 2))), o1 = L - d;
+  const thA = Math.atan2(H / 2, -d), thB = Math.atan2(-H / 2, -d);      // the upper and the lower meeting points, seen from the ball's centre
+  const pts = [P(0, 0), P(o1, 0)];
+  for (let i = 0; i <= CUT_BALL_ARC_STEPS; i++) {
+    const th = thA + (thB - thA) * (i / CUT_BALL_ARC_STEPS);               // thA ~ +141 degrees down through 90, 0, -90 to thB ~ -141: the long way round
+    pts.push(P(L + R * Math.cos(th), -H / 2 + R * Math.sin(th)));
+  }
+  pts.push(P(o1, -H), P(0, -H));
+  const pos = outline.geometry.attributes.position;
+  pts.forEach(function (p, i) { pos.setXYZ(i, p.x, p.y, p.z); });
+  pos.needsUpdate = true;
+  outline.geometry.computeBoundingSphere();
+  ball.updateMatrixWorld(true);
+  bar.updateMatrixWorld(true);
+  outline.updateMatrixWorld(true);
+}
+
 function cutBuildBlade(group, f) {
   if (f.blade) { cutBuildSizedBlade(group, f); return; }
   const AX = ['x', 'y', 'z'];
@@ -1263,14 +1791,6 @@ function cutBuildBlade(group, f) {
   // PlaneGeometry lies in x-y; turn it so its normal is the cut axis, its
   // sides along u and v.
   const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(e(u), e(v), e(k)));
-
-  // Large invisible hit target for easy drag.
-  const hit = new THREE.Mesh(new THREE.PlaneGeometry(across[u] + 24, across[v] + 24), new THREE.MeshBasicMaterial({
-    visible: false, side: THREE.DoubleSide
-  }));
-  hit.quaternion.copy(q);
-  hit.userData.cutHandle = true;
-  hit.userData.skipXray = true;
 
   // The sheet: the blade's whole extent, seen through the piece.
   const blade = new THREE.Mesh(new THREE.PlaneGeometry(across[u], across[v]), new THREE.MeshBasicMaterial({
@@ -1296,94 +1816,12 @@ function cutBuildBlade(group, f) {
   frame.userData.cutFrame = true;
   const cross = lines([pt(-hu * 0.9, 0), pt(hu * 0.9, 0), pt(0, -hv * 0.9), pt(0, hv * 0.9)], 0.55);
 
-  group.add(hit);
   group.add(blade);
   group.add(frame);
   group.add(cross);
+  cutBuildBall(group, [0, 0, 0], [k === 0 ? 0 : across[0], k === 1 ? 0 : across[1], k === 2 ? 0 : across[2]]);
   group.userData.cutAxis = f.axis;
   group.userData.cutAcross = across;
-}
-
-// The plate line's two objects: a flat strip 1 mm wide and its centre
-// line (so it still reads as a line when the plate is seen edge-on). Their
-// vertices are written in world space by cutPlaceLine on every update.
-function cutBuildPlateLine(group) {
-  const strip = new THREE.BufferGeometry();
-  strip.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
-  strip.setIndex([0, 1, 2, 0, 2, 3]);
-  const stripMesh = cutOverlay(new THREE.Mesh(strip, new THREE.MeshBasicMaterial({
-    color: CUT_BLADE_COLOR, side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true, opacity: 0.95
-  })), false);
-  const centre = new THREE.BufferGeometry();
-  centre.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-  const centreLine = cutOverlay(new THREE.LineSegments(centre, new THREE.LineBasicMaterial({
-    color: CUT_BLADE_COLOR, depthTest: false, depthWrite: false, transparent: true
-  })), false);
-  stripMesh.frustumCulled = false;
-  centreLine.frustumCulled = false;
-  stripMesh.userData.cutPlateLine = true;
-  centreLine.userData.cutPlateLine = true;
-  const g = new THREE.Group();
-  g.name = 'cutPlateLine';
-  g.add(stripMesh);
-  g.add(centreLine);
-  group.add(g);
-}
-
-/** Where the cut plane meets the plate, from the cut plane `info`
-    (getCutPlaneLocal) on the piece's `mesh`: its two ends and the direction
-    across it, in world space. Null if the plane is (nearly) parallel to the
-    plate, which the cut frame does not produce. */
-function cutPlateLineWorld(info, mesh) {
-  if (!info || !mesh) return null;
-  mesh.updateMatrixWorld(true);
-  const Mw = cutWorldMatrix(info, mesh);
-  const local = info.bbox.getCenter(new THREE.Vector3());
-  local[info.axis] = info.plane;
-  const P = local.clone().applyMatrix4(Mw);
-  const n = new THREE.Vector3(info.axis === 'x' ? 1 : 0, info.axis === 'y' ? 1 : 0, info.axis === 'z' ? 1 : 0)
-    .applyMatrix3(new THREE.Matrix3().getNormalMatrix(Mw)).normalize();
-  const nh = new THREE.Vector3(n.x, 0, n.z);
-  const nh2 = nh.lengthSq();
-  if (nh2 < 1e-6) return null;
-  // The plane's trace on y = 0: a point on it, and its direction.
-  const Q = new THREE.Vector3(P.x, 0, P.z).addScaledVector(nh, n.y * P.y / nh2);
-  const dir = new THREE.Vector3(-n.z, 0, n.x).normalize();
-  // Its extent: the cut frame's box, carried into world space, along the line.
-  let lo = Infinity, hi = -Infinity;
-  const b = info.bbox, c = new THREE.Vector3();
-  for (let i = 0; i < 8; i++) {
-    c.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(Mw);
-    const s = c.sub(Q).dot(dir);
-    if (s < lo) lo = s;
-    if (s > hi) hi = s;
-  }
-  lo -= CUT_OVERHANG_MM;
-  hi += CUT_OVERHANG_MM;
-  return { a: Q.clone().addScaledVector(dir, lo), b: Q.clone().addScaledVector(dir, hi),
-           across: nh.normalize(), point: P, normal: n, mm: info.mm };
-}
-
-function cutPlaceLine(group, info, mesh) {
-  const g = group.children.find(c => c.name === 'cutPlateLine');
-  if (!g) return;
-  const w = cutPlateLineWorld(info, mesh);
-  g.visible = !!w && !info.blade;       // a sized blade is drawn whole; the full-width strip would lie
-  group.userData.plateLine = w ? { a: w.a.toArray(), b: w.b.toArray(), across: w.across.toArray(), mm: w.mm } : null;
-  if (!w) return;
-  const toGroup = new THREE.Matrix4().copy(group.matrixWorld).invert();
-  const y = CUT_PLATE_LINE_Y;
-  const half = (typeof KERF_MM !== 'undefined' ? KERF_MM : 1) / 2;
-  const at = (p, s) => new THREE.Vector3(p.x, y, p.z).addScaledVector(w.across, s).applyMatrix4(toGroup);
-  const quad = [at(w.a, -half), at(w.b, -half), at(w.b, half), at(w.a, half)];
-  const mid = [at(w.a, 0), at(w.b, 0)];
-  g.children.forEach(o => {
-    const pos = o.geometry.attributes.position;
-    const pts = o.isMesh ? quad : mid;
-    pts.forEach((p, i) => pos.setXYZ(i, p.x, p.y, p.z));
-    pos.needsUpdate = true;
-    o.geometry.computeBoundingSphere();
-  });
 }
 
 function buildCutHelper() {
@@ -1402,13 +1840,13 @@ function buildCutHelper() {
   const group = new THREE.Group();
   group.name = 'cutHelper';
   cutBuildBlade(group, info);
-  cutBuildPlateLine(group);
   // A helper (nso-helpers.js): tagged, never exported, gone on leave / Clear /
-  // Undo. Interactive - the grab sheet is how the blade is dragged.
+  // Undo. Interactive - the blade's own sheet and frame are how it is dragged (no padding past them).
   const parent = state.modelGroup || state.previewMesh;
   if (parent) nsoHelpers.attach(parent, group, 'cut', { interactive: true });
   state.cutHelper = group;
   updateCutHelper();
+  cutApplyHide();
 }
 
 /* Cut's session, for the helper registry: live while the cutter is armed for
@@ -1465,7 +1903,8 @@ function updateCutHelper() {
   state.cutHelper.updateMatrixWorld(true);
   state.cutHelper.userData.cutDeg = info.deg || 0;
   state.cutHelper.userData.cutBevel = info.bevel || 0;
-  cutPlaceLine(state.cutHelper, info, mesh);
+  cutPlaceBall(state.cutHelper, info);
+  state.cutHelper.visible = !cutBladeHidden();
 }
 
 function axisCoord(ax, x, y, z) {
@@ -2820,7 +3259,7 @@ function cutCapSideX(model) {
   return nearMax >= nearMin ? 'max' : 'min';
 }
 
-function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, stayA, stayB, along) {
+function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, stayA, stayB, along, noGap) {
   if (!state.modelGroup) return;
   clearDisplayMeshes();
   state.placed = [];
@@ -2862,7 +3301,7 @@ function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, 
   let aOff = stayWorld(stayA, srcOri);
   let bOff = stayWorld(stayB, srcOri);
   let ax = aOff.x, az = aOff.z, bx = bOff.x, bz = bOff.z;
-  const pad = SPLIT_VIEW_GAP_MM * 0.5;
+  const pad = noGap ? 0 : SPLIT_VIEW_GAP_MM * 0.5;           // noGap: one piece kept (Plane), nothing to part
   /* `along`: the cut's travel line on the plate, for a square cut across a
      turned piece's length (cutFrame's base turn): the halves part along it,
      away from the blade, as they part along the plate axis a square cut on a
@@ -3236,10 +3675,10 @@ function cutSplitAt(model, info) {
 
 // ===================== The sized blade: card and cut =====================
 const CUT_BLADE_MODES = { full: 'btn-cut-blade-full', sized: 'btn-cut-blade-sized', notch: 'btn-cut-blade-notch',
-                          plate: 'btn-cut-blade-plate' };
+                          plane: 'btn-cut-blade-plane', plate: 'btn-cut-blade-plate' };
 /* [number box, slider, state key]: the three sizes of the Sized blade and the two of Notch. */
 const CUT_BLADE_FIELDS = [['cut-blade-width', 'cut-blade-width-s', 'width'], ['cut-blade-depth', 'cut-blade-depth-s', 'depth'],
-                          ['cut-blade-kerf', 'cut-blade-kerf-s', 'kerf'],
+                          ['cut-blade-kerf', 'cut-blade-kerf-s', 'kerf'], ['cut-follow-slice', 'cut-follow-slice-s', 'slice'],
                           ['cut-notch-width', 'cut-notch-width-s', 'nwidth'], ['cut-notch-depth', 'cut-notch-depth-s', 'ndepth']];
 
 /** How far each slider runs, from the piece in hand - with room to breathe (the first version stopped the kerf and
@@ -3258,6 +3697,7 @@ function cutSliderMax(key) {
   const room = v => Math.max(20, Math.ceil(v));
   if (key === 'width') return room(ext * 2 + 2);
   if (key === 'depth' || key === 'ndepth') return room(ext * 1.5 + 2);
+  if (key === 'slice') return 10;                                           // Follow strand's slice: a few mm
   return room(span * 0.75);                                               // kerf, notch width
 }
 
@@ -3286,38 +3726,47 @@ function syncCutBladeUI() {
       if (num && v != null && document.activeElement !== num) num.value = String(v);
     });
   }
-  const strand = document.getElementById('chk-cut-blade-strand');
-  if (strand) strand.checked = b.strand !== false;
-  const rot = document.getElementById('chk-cut-rotate');
-  if (rot) rot.checked = !!state.cutRotate;
-  const rings = document.getElementById('cut-rotate-rings');
-  if (rings) rings.hidden = !state.cutRotate;
+  if (typeof cutFollowSyncUI === 'function') cutFollowSyncUI();
   const btn = document.getElementById('btn-cut');
   if (typeof cutPlateSync === 'function') cutPlateSync();
-  if (btn) btn.title = mode === 'plate'
+  if (btn) btn.title = mode === 'plane'
+    ? 'Shave the nearer end off at the blade: it comes off all the way across and the cut face is capped flat. The offcut is not kept. One Undo puts it back.'
+    : mode === 'plate'
     ? 'Cut every piece on the plate at the blade\'s height. Keep above: what is under the blade goes and the rest is set back on the plate, so each piece is shorter by that height. Keep below: what is above goes. One Undo puts the whole plate back.'
     : mode === 'notch'
     ? 'Cut the notch: a nick of your width and depth in from the edge of the strand under the click. Only that strand is touched, and it stops short of the far side. One Undo puts it back.'
     : mode === 'sized'
       ? 'Cut the sized blade\'s slot out of the piece: only what the blade box holds comes out, kerf and all' +
-        (b.strand !== false ? ' - and of that, only the strand under the click' : '') + '. One Undo puts it back.'
+        (cutStrandOn(b) ? ' - and of that, only the strand under the click' : '') + '. One Undo puts it back.'
       : 'Split the piece at the blade: two pieces that meet exactly at the plane and add back to the original - no kerf. One Undo puts it back.';
+  cutApplyHide();
+}
+
+/** What the Cut card is showing, kept on a cut's Undo entry so Undo can put the blade back (null with the card shut). */
+function cutBladeMemo() {
+  if (!state.cutterOpen) return null;
+  const b = state.cutBlade;
+  return { cutT: state.cutT, miter: state.cutMiterDeg, bevel: state.cutBevelDeg, blade: b ? JSON.parse(JSON.stringify(b)) : null };
+}
+
+/** An Undo of a cut made with the card open (app-core.js splitReplace) has put the piece back and left the card open: put the
+    blade where it stood - the blade in use, its place, its mitre and bevel - and on the piece again. */
+function cutRestoreAfterUndo(memo, sourceId) {
+  if (!memo || !state.cutterOpen) return;
+  state.cutMiterDeg = memo.miter;
+  state.cutBevelDeg = memo.bevel;
+  state.cutPlumb = null;
+  state.cutBlade = memo.blade;
+  state.cutT = memo.cutT != null ? memo.cutT : 0.5;
+  const i = (state.placed || []).findIndex(function (p) { return p && p.sourceId === sourceId; });
+  if (i >= 0) selectPlaced(i);                 // the blade goes back on the piece, at state.cutT
+  cutBladeRefresh();
 }
 
 function cutBladeRefresh() {
   syncCutBladeUI();
   syncCutUI();
   updateCutHelper();
-}
-
-/** Rotate piece: the rotate rings (app-rotate-handles.js) drawn on the piece while Cut stays open. */
-function cutSetRotate(on) {
-  state.cutRotate = !!on;
-  if (typeof nsoRotate !== 'undefined' && nsoRotate.setRing && on) {
-    nsoRotate.setRing('turn', true);
-  }
-  if (typeof nsoRotate !== 'undefined' && nsoRotate.refresh) nsoRotate.refresh();
-  syncCutBladeUI();
 }
 
 function cutWireBladeControls() {
@@ -3340,6 +3789,7 @@ function cutWireBladeControls() {
       if (sl && from !== sl) sl.value = String(v);
       syncCutUI();
       updateCutHelper();
+      if (typeof cutFollowRecompute === 'function') cutFollowRecompute();      // a new kerf or slice moves where Back / Forward land
     }
     num.addEventListener('input', function () { set(Number(num.value), num); });
     if (sl) sl.addEventListener('input', function () { set(Number(sl.value), sl); });
@@ -3351,16 +3801,9 @@ function cutWireBladeControls() {
       cutBladeRefresh();
     });
   });
-  const strand = document.getElementById('chk-cut-blade-strand');
-  if (strand) strand.addEventListener('change', function () { cutBladeState().strand = strand.checked; cutBladeRefresh(); });
-  const rot = document.getElementById('chk-cut-rotate');
-  if (rot) rot.addEventListener('change', function () { cutSetRotate(rot.checked); });
-  [['chk-cut-ring-fb', 'fb'], ['chk-cut-ring-ss', 'ss']].forEach(function (p) {
-    const el = document.getElementById(p[0]);
-    if (el) el.addEventListener('change', function () {
-      if (typeof nsoRotate !== 'undefined' && nsoRotate.setRing) nsoRotate.setRing(p[1], el.checked);
-    });
-  });
+  const hideBox = document.getElementById('chk-cut-hide-blade');
+  if (hideBox) hideBox.addEventListener('change', function () { cutSetHideBlade(hideBox.checked); });
+  if (typeof cutFollowWire === 'function') cutFollowWire();
   syncCutBladeUI();
 }
 
@@ -3392,10 +3835,15 @@ function cutEdgeFaults(soup) {
   return { open: open, nm: nm, total: open + nm };
 }
 
-/** The component of `parts` (kernel solids, world frame) whose surface passes nearest `qWorld`. */
+/** The component of `parts` (kernel solids, world frame) whose surface passes nearest `qWorld` - of those with a real
+    volume. What a box holds can come apart into the material plus a sliver of no volume where the box grazes the
+    surface (a fillet at the very spot clicked); the sliver lies nearest the click, and taking it took nothing: "the
+    blade does not reach the piece", with 182 mm³ of wall in the box. */
 function cutNearestPart(parts, qWorld) {
   let best = 0, bestD = Infinity;
+  const vols = parts.map(function (p) { return p.volume(); }), most = Math.max.apply(null, vols.concat([0]));
   parts.forEach(function (part, i) {
+    if (!(vols[i] > Math.max(1e-3, most * 1e-4))) return;
     const mesh = part.getMesh(), vp = mesh.vertProperties, np = mesh.numProp || 3;
     let d2 = Infinity;
     for (let v = 0; v + 2 < vp.length; v += np) {
@@ -3463,7 +3911,9 @@ async function cutNotchAt(m, info) {
       // What the box holds falls apart into one solid per strand it crosses; take the one under the click.
       const parts = inter.decompose();
       parts.forEach(keep);
-      strands = parts.length;
+      // a sliver of no volume where the box grazes the surface is not a strand (cutNearestPart passes it over too)
+      const most = Math.max.apply(null, parts.map(p => p.volume()).concat([0]));
+      strands = parts.filter(p => p.volume() > Math.max(1e-3, most * 1e-4)).length;
       if (parts.length > 1) {
         const part = parts[cutNearestPart(parts, qWorld)];
         takesVol = part.volume();
@@ -3535,6 +3985,10 @@ async function cutNotchAt(m, info) {
     const now = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
     removeCutHelper();
     state.previewMesh = now ? now.mesh : null;
+    /* The piece's white edge is a child of its mesh, and the commit made a new mesh: the edge stayed on the old one and
+       the piece showed none while the card was still open on it - the edge the cut is aimed by. Drawn again for the new
+       shape. (Here and not in the commit: a bake elsewhere leaves the build to the next select, which it costs.) */
+    if (now && typeof refreshOutline === 'function') refreshOutline(now);
     if (state.cutterOpen && state.previewMesh) buildCutHelper();
     updateEditSize();
     if (typeof updateAdjustUI === 'function') updateAdjustUI();
@@ -3555,6 +4009,12 @@ async function cutNotchAt(m, info) {
           : ' - the slot severs the piece into ' + parts.length + ' bodies, but they stay one piece' +
             (separated && separated.reason ? ' (' + separated.reason + ')' : '') + '; Split to parts separates them';
       setStatus(status + sepNote);
+    }
+    /* Follow strand: on to the next slice, on whichever piece it is now (the cut may have parted the cord). */
+    let followNote = '';
+    if (typeof cutFollowAfterCut === 'function') {
+      const fol = cutFollowAfterCut();
+      if (fol) { followNote = fol.text; setStatus(status + sepNote + fol.text); }
     }
     return { ok: true, removed: removed, intended: intended, shells: parts.length, strands: strands,
              trisOut: raw.length / 9, status: status + sepNote, nmAfter: nmAfter, nmBefore: nmBefore, exact: exact,
@@ -4402,8 +4862,16 @@ function rawLidSubtractBand2(pieces, poly, ring, limit) {
   const n = poly.length;
   for (let i = 0; i < n; i++) {
     const i1 = (i+1)%n;
-    const q = [poly[i], poly[i1], ring[i1], ring[i]];
-    if (rawPolyArea2(q) < 1e-12) continue;
+    // A ring trimmed at a fold (rawRimTrimFolds2) carries runs of one point;
+    // a quad with two corners on one point is a triangle, and clipping by its
+    // zero-length side would keep the whole piece on both sides of nothing.
+    const q = [];
+    for (const v of [poly[i], poly[i1], ring[i1], ring[i]]) {
+      const last = q[q.length - 1];
+      if (!last || Math.hypot(v[0] - last[0], v[1] - last[1]) > 1e-12) q.push(v);
+    }
+    while (q.length > 1 && Math.hypot(q[0][0] - q[q.length-1][0], q[0][1] - q[q.length-1][1]) <= 1e-12) q.pop();
+    if (q.length < 3 || rawPolyArea2(q) < 1e-12) continue;
     let bx0=Infinity, by0=Infinity, bx1=-Infinity, by1=-Infinity;
     for (const v of q) {
       if (v[0] < bx0) bx0 = v[0];

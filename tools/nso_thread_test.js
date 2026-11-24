@@ -423,6 +423,78 @@ const TABLE = [];
     check('a cutter with no depth is refused in words', (() => { const x = T.cutter('M6', 0, {}); return !x.ok && /^the thread needs a depth, more than 0$/.test(x.reason); })());
   }
 
+  /* ===================================================== BEVEL, THUMB HEADS */
+  console.log('\n=== 11. a bevelled end, a plain shank, and the two thumb heads ===');
+  {
+    // a rod bevelled at both ends: the end face is a disc of the tip radius, the cone meets the crests `len` from the end
+    const r = T.rod({ size: 'M10', length: 24, bevel: 1.5, bevelAngle: 45 }), sp = r.info.spec;
+    console.log('   ' + r.reason);
+    closed('M10 rod bevelled both ends', r.soup, 2);
+    const tip = sp.R - 1.5;
+    let mx0 = 0, mx1 = 0, mxMid = 0;
+    for (let i = 0; i < 72; i++) {
+      const th = i * Math.PI / 36;
+      mx0 = Math.max(mx0, radius(r.soup, th, 0.02)); mx1 = Math.max(mx1, radius(r.soup, th, 23.98)); mxMid = Math.max(mxMid, radius(r.soup, th, 0.75));
+    }
+    check('the end faces come in to the tip radius r ' + f3(tip) + ' (bottom ' + f3(mx0) + ', top ' + f3(mx1) + '), half way up the bevel the most is ' + f3(mxMid) + ' (the cone: ' + f3(tip + 0.75) + ')',
+      near(mx0, tip + 0.02, 0.02) && near(mx1, tip + 0.02, 0.02) && near(mxMid, tip + 0.75, 0.03));
+    let full = 0; for (let k = 0; k < 120; k++) full = Math.max(full, radius(r.soup, 0, 6 + sp.P * k / 120));
+    check('past the bevel the thread is whole: crests r ' + f3(full) + ' = ' + f3(sp.R), near(full, sp.R, 3e-3));
+    check('...and the info says so: tip Ø' + f3(r.info.bevel.tipDiaMm), near(r.info.bevel.tipDiaMm, 2 * tip, 1e-9));
+    const plain = T.rod({ size: 'M10', length: 24 });
+    check('a rod without a bevel is unchanged by the option existing (same triangle count as before: no finer rows)', plain.soup.length / 9 === T.rod({ size: 'M10', length: 24, bevel: 0 }).soup.length / 9);
+    const lh = T.rod({ size: 'M10', length: 24, bevel: 1.5, hand: 'left' });
+    closed('M10 left-hand rod bevelled', lh.soup, 2);
+    const b = T.bolt({ size: 'M8', length: 20, bevel: T.bevelDefault('M8'), bevelAngle: 30 });
+    console.log('   ' + b.reason);
+    closed('M8 hex bolt, bevelled tip at 30°', b.soup, 2);
+    check('the default bevel clears the roots: 1.25 x the depth (M8: ' + T.bevelDefault('M8') + ' mm)', T.bevelDefault('M8') === Math.round(1.25 * T.spec('M8').spec.h * 10) / 10);
+  }
+  {
+    // the knurled head (from a Ø32 thumb screw: 25 round-bottomed grooves 1.03 deep, a 3 mm chamfer blended by a 6 mm round)
+    const k = T.bolt({ size: { family: 'metric', major: 14.37, pitch: 2 }, head: 'knurled', headD: 32, headK: 35, count: 25, depth: 1.03, edge: 3, length: 43, shank: 24 });
+    console.log('   ' + k.reason);
+    closed('knurled thumb screw (Ø32 head, 24 mm plain shank)', k.soup, 2);
+    const rs = []; for (let i = 0; i < 1500; i++) rs.push(rayHits(k.soup, [40 * Math.cos(i * 2 * Math.PI / 1500), 40 * Math.sin(i * 2 * Math.PI / 1500), 17.5], [-Math.cos(i * 2 * Math.PI / 1500), -Math.sin(i * 2 * Math.PI / 1500), 0]).map(d => 40 - d)[0]);
+    const mid = (Math.max(...rs) + Math.min(...rs)) / 2; let grooves = 0; for (let i = 0; i < rs.length; i++) if (rs[i] < mid && rs[(i + rs.length - 1) % rs.length] >= mid) grooves++;
+    check('round the head\'s middle: ' + grooves + ' grooves, crests r ' + f3(Math.max(...rs)) + ' (16), groove bottoms r ' + f3(Math.min(...rs)) + ' (16 - 1.03)', grooves === 25 && near(Math.max(...rs), 16, 0.02) && near(Math.min(...rs), 16 - 1.03, 0.02));
+    const crestTh = rs.indexOf(Math.max(...rs)) * 2 * Math.PI / 1500;
+    const at = z => rayHits(k.soup, [40 * Math.cos(crestTh), 40 * Math.sin(crestTh), z], [-Math.cos(crestTh), -Math.sin(crestTh), 0]).map(d => 40 - d)[0];
+    check('its edge: the face at r ' + f3(at(0.01)) + ' (16 - 3), a 45° chamfer (r ' + f3(at(1)) + ' at z 1) rounded into the side (r ' + f3(at(6)) + ' by z 6)', near(at(0.01), 13.01, 0.03) && near(at(1), 14, 0.03) && near(at(6), 16, 0.02));
+    const sh = rayHits(k.soup, [40, 0, 47], [-1, 0, 0]).map(d => 40 - d)[0];
+    check('the plain shank stands just over the thread\'s crests: r ' + f3(sh) + ' (7.185 + 0.1)', near(sh, 14.37 / 2 + 0.1, 0.01));
+    // the fluted head (from a Ø26.2 thumb screw: 13 lobes 1.25 deep, a 2.43 mm chamfer at 36°, the flutes through it) + a bevelled tip
+    const f = T.bolt({ size: { family: 'metric', major: 19.59, pitch: 3.445 }, head: 'fluted', headD: 26.2, headK: 21, count: 13, depth: 1.25, edge: 2.43, length: 27.26, bevel: 3.3, bevelAngle: 36 });
+    console.log('   ' + f.reason);
+    closed('fluted thumb screw (Ø26.2 head, bevelled tip)', f.soup, 2);
+    const fr = []; for (let i = 0; i < 1300; i++) fr.push(rayHits(f.soup, [40 * Math.cos(i * 2 * Math.PI / 1300), 40 * Math.sin(i * 2 * Math.PI / 1300), 10.5], [-Math.cos(i * 2 * Math.PI / 1300), -Math.sin(i * 2 * Math.PI / 1300), 0]).map(d => 40 - d)[0]);
+    const fm = (Math.max(...fr) + Math.min(...fr)) / 2; let lobes = 0; for (let i = 0; i < fr.length; i++) if (fr[i] >= fm && fr[(i + fr.length - 1) % fr.length] < fm) lobes++;
+    check('round its middle: ' + lobes + ' lobes, crests r ' + f3(Math.max(...fr)) + ' (13.1), valleys r ' + f3(Math.min(...fr)) + ' (13.1 - 1.25, filleted into the lobes)', lobes === 13 && near(Math.max(...fr), 13.1, 0.01) && near(Math.min(...fr), 11.85, 0.05));
+    const lobeTh = fr.indexOf(Math.max(...fr)) * 2 * Math.PI / 1300, valTh = fr.indexOf(Math.min(...fr)) * 2 * Math.PI / 1300;
+    const fat = (th, z) => rayHits(f.soup, [40 * Math.cos(th), 40 * Math.sin(th), z], [-Math.cos(th), -Math.sin(th), 0]).map(d => 40 - d)[0];
+    const c0 = fat(lobeTh, 0.01), v0 = fat(valTh, 0.01);
+    check('its face: the lobe comes in by the 2.43 edge (r ' + f3(c0) + ') and the flute runs through the chamfer a quarter as deep (the valley ' + f3(c0 - v0) + ' under it)', near(c0, 13.1 - 2.43, 0.03) && near(c0 - v0, 0.25 * 1.25, 0.04));
+    let tipMax = 0; for (let i = 0; i < 72; i++) tipMax = Math.max(tipMax, fat(i * Math.PI / 36, 21 + 27.26 - 0.02));
+    check('the tip is bevelled: its end face r ' + f3(tipMax) + ' (the cone: 9.795 - 3.3 tan 36° = ' + f3(9.795 - 3.3 * Math.tan(36 * Math.PI / 180)) + ')', near(tipMax, 9.795 - 3.3 * Math.tan(36 * Math.PI / 180) + 0.02 * Math.tan(36 * Math.PI / 180), 0.03));
+    // defaults, scaled from the two screws
+    const kd = T.thumbDefaults('knurled', 14.4), fd = T.thumbDefaults('fluted', 19.6);
+    check('the knurled defaults for a Ø14.4 thread are the measured screw\'s within a few %: head Ø' + kd.headD + ', ' + kd.count + ' grooves ' + kd.depth + ' deep, edge ' + kd.edge,
+      near(kd.headD, 32, 1.5) && Math.abs(kd.count - 25) <= 1 && near(kd.depth, 1.03, 0.1) && near(kd.edge, 3, 0.2));
+    check('the fluted defaults for a Ø19.6 thread: head Ø' + fd.headD + ' × ' + fd.headK + ', ' + fd.count + ' flutes ' + fd.depth + ' deep, edge ' + fd.edge,
+      near(fd.headD, 26.2, 1) && near(fd.headK, 21, 0.5) && fd.count === 13 && near(fd.depth, 1.25, 0.08) && near(fd.edge, 2.43, 0.1));
+    for (const [sz, hd] of [['M3', 'knurled'], ['M4', 'fluted'], ['M8', 'knurled'], ['M12', 'fluted'], ['M20', 'knurled']]) {
+      const q = T.bolt({ size: sz, head: hd, length: 16, bevel: T.bevelDefault(sz) }), tp = q.ok ? topo(q.soup) : null;
+      check(sz + ' ' + hd + ' thumb screw at the defaults, bevelled: closed, Euler 2', q.ok && tp.open === 0 && tp.nm === 0 && tp.flip === 0 && tp.degen === 0 && tp.euler === 2, q.ok ? tp.tris + ' tris' : q.reason);
+    }
+    const no = (tag, r, re) => { console.log('   ' + r.reason); check('refused: ' + tag, !r.ok && !r.soup && re.test(r.reason), r.reason); };
+    no('a bevel down past a third of the thread', T.rod({ size: 'M8', length: 20, bevel: 5 }), /^a 5\.0 mm bevel at 45° would take the end down to Ø0\.00 - under a third of the Ø8\.00; make it at most 2\.6 mm$/);
+    no('a bevel angle off the scale', T.rod({ size: 'M8', length: 20, bevel: 1, bevelAngle: 80 }), /^a bevel angle of 80\.0° is outside 15° to 75° off the axis$/);
+    no('a shank that leaves under two pitches of thread', T.bolt({ size: 'M8', length: 20, shank: 19 }), /^a 19\.0 mm plain shank leaves 1\.0 mm of thread - under two pitches \(2\.5 mm\); make the shank at most 17\.5 mm$/);
+    no('a thumb head too small for the thread', T.bolt({ size: 'M10', head: 'fluted', headD: 12, length: 20 }), /^a Ø12\.0 fluted head with a .* mm edge comes in to Ø.* at its face - it does not clear the Ø10\.00 thread/);
+    no('a thumb head too short for its edges', T.bolt({ size: 'M8', head: 'knurled', headK: 2, length: 20 }), /^a 2\.0 mm tall head is too short for two .* mm edges/);
+    no('a groove count off the scale', T.bolt({ size: 'M8', head: 'knurled', count: 2, length: 20 }), /^a thumb head has 3 to 200 grooves, not 2$/);
+  }
+
   /* ======================================================== SCALE, SPEED */
   console.log('\n=== 10. scale: a big thread builds in well under a second ===');
   {

@@ -28,9 +28,11 @@ sliceObjects()  ->  plan()  ->  gcode  ->  toGcode3mf()  ->  .gcode.3mf
 | the toolpath, its feature names (support paths typed `Support` / `Support interface` / `Support transition`) | the engine |
 
 Templates: A1 mini 0.4 is `fixtures/bambu-templates/a1mini-0.4/` (the Phase 0
-export's). The P1S has no unsliced project yet: its settings are the project the
-owner's P1S slice carries (`simple_overhang_p1s.gcode.3mf`), and its model id
-(`C12`) is the one in that slice's `slice_info.config`.
+export's). P1S 0.4 is `fixtures/bambu-templates/p1s-0.4/`: the owner's own P1S project
+(mouse1.3mf, Studio 02.09.01.70) and its slice, which the start / end are frozen from;
+its model id (`C12`) is the one in that slice's `slice_info.config`. Studio 2.9 keeps some
+filament keys once per filament and extruder variant (`filament_self_index`); the project
+writer's cooling overlay reads that layout too.
 
 ## The planner
 
@@ -43,7 +45,7 @@ the bead being the stadium `nso-gcode-lines.js` inverts. This reproduces
 Studio's own figures exactly: outer wall F9547.055 and inner wall F8843.478 at
 0.42 / 0.45 mm lines, support F9000 (150 mm/s is under the limit). The first
 layer takes `initial_layer_speed` (walls, supports) or `initial_layer_infill_speed`
-(infill, bottom surface). A bridge is a round bead of the nozzle's diameter
+(infill, bottom surface). A bridge over sparse infill is a round bead of the nozzle's diameter, one over open air a line of the layer's height (docs/SLICER.md "A bridge's strand, by its kind"); before 2026-11-14 every bridge was a round bead of the nozzle's diameter
 (`; LAYER_HEIGHT` and `; LINE_WIDTH` both 0.4, as Studio writes it).
 
 **Acceleration.** `M204` per feature from the template (`inner_wall_acceleration`
@@ -111,8 +113,16 @@ it), CONFIG_BLOCK (Studio's, with NSO's cooling keys put in), EXECUTABLE_BLOCK,
 - **The M624 mask** is one bit per object, by its place in the plate's label
   order, as a 64-bit little-endian integer in base64: `AQAAAAAAAAA=`,
   `AgAAAAAAAAA=`, both `AwAAAAAAAAA=` (measured on the owner's two-object slice;
-  the third, `BAAAAAAAAAA=`, follows the same law and is not confirmed - no
-  Studio slice with three objects is in the repo).
+  confirmed past two by their four-object P1S desk hanger of 2026-11-20: all four
+  `DwAAAAAAAAA=`, the second and fourth `CgAAAAAAAAA=`).
+- **The objects still to print (P1S).** On a plate of several objects Studio
+  02.09.01.70 on the P1S writes `; remaining object ids: <ids>` and `M639 <mask>`
+  (M624's mask of those objects): right after `; MACHINE_START_GCODE_END`, again at
+  the layer change where some object has printed its last layer (after that
+  layer's closing `M625`, before `; layer num`), and once more, empty
+  (`M639 AAAAAAAAAAA=`), after the last object closes. NSO writes the same
+  (`REMAINING` in `nso-print-planner.js`). Not on the A1 mini: no Studio slice
+  of it has shown the list yet. Checked in `print-slice-check` 5a.
 - **The hook** (timelapse photo, nozzle-clog check) goes after the first run of
   walls in a layer, inside the union mask. Each of timelapse / clog / spaghetti
   can be left out per profile (`hooks: { timelapse: false }`); the default is the
@@ -136,8 +146,8 @@ The start block's and end block's time are Studio's, from the slice's M73s
 
 - **The gap list** was not in the repo; this page's list below is the ticket's
   own itemisation.
-- **P1S "template".** There is no unsliced P1S project. Its settings are the
-  owner's P1S slice's; the frozen blocks come from the same file.
+- **P1S template.** The owner's own P1S project (mouse1) and its slice; before it, the
+  settings were scraped from the P1S arc slice (still the arc's toolpath reference in print:planner).
 - **`simple_overhang_bambu.gcode.3mf`** was on three unmerged `supports-*`
   branches (the same blob on each); it is added here at the same path.
 - **The CONFIG_BLOCK is frozen too** (Studio's, per printer), not rebuilt from
@@ -194,46 +204,77 @@ What Studio's file has that `toGcode()`'s text does not, and where each landed.
 
 ## The Slice card (print-slice-main-plate)
 
-`app-print.js`, `#menu-slice`. A SLICE button in the left bar's bottom stack
-(Slice, G-scope, Check & repair, top to bottom) opens a card shaped like the other
-left-bar cards (a `details.vp-menu`, one open at a time). It is UI only and download
-only: no Send, no printer link, no settings.
+The filament rows (which filament, its temperatures and max flow, temperature steps by height) and what the
+start block takes from the filament are in [FILAMENTS.md](FILAMENTS.md).
+
+`app-print.js`, `#slice-card`: the **last section of the supports card** (`#sup-slice-sec`), not a
+button of its own in the left bar any more (the owner: one job, not a slice to draw the supports and
+another to print them). **Generate slices**: once every piece's supports are built, the plate is
+sliced once with this card's printer and settings (the raft included), the supports are drawn from
+that slice (nso_slicer.js `columnStacks`) and the slice waits here, fresh; **Preview**, right under
+Generate, opens it in G-scope as it is (it slices first only when the plate or a setting changed
+since). Cancel beside Generate stops the build and its slice. Style **None** builds no supports: Generate
+just slices the plate (with its raft). The **Raft** rows sit in the supports card's settings. This
+section keeps the printer line, the folded Slice settings, **Slice** (again, after a change) and
+**Export .gcode.3mf**. It is UI only and download only: no Send, no printer link.
 
 - **What it does.** Slices every piece on the plate, supports included, for the
   plate's printer profile, and reads out layers, estimated time and filament grams.
-  Then **Export .gcode.3mf** downloads the packaged file and **Preview in G-scope**
+  Then **Export .gcode.3mf** downloads the packaged file and **Preview** (the supports card's, under Generate)
   opens that same file through G-scope's existing `.gcode.3mf` import
   (`NSO_MICROSCOPE.openFile`), read-only, so the supports show as Support /
   Support interface / Support transition. A plate the planner refuses (off the bed,
   too tall, no first layer) shows the planner's reason in the card.
 - **The printer profile** is the plate picker's plate, read, not edited:
   `a1mini` -> A1 mini 0.4 (`fixtures/bambu-templates/a1mini-0.4/project_test.3mf`,
-  `fixtures/print-planner/a1mini-0.4/frozen.json`); `a1` ("A1 / P1S / X1C 256") ->
-  P1S 0.4 (the project inside `fixtures/supports/simple_overhang_p1s.gcode.3mf`,
-  `fixtures/print-planner/p1s-0.4/frozen.json`). Any other plate has no profile and the
-  card says so. The template's values are used as they are. Print settings live
-  here, per printer profile; they never read or write G-scope's Slice settings.
+  `fixtures/print-planner/a1mini-0.4/frozen.json`); `p1s` ("P1S 256") -> P1S 0.4 (the owner's
+  own P1S project, `fixtures/bambu-templates/p1s-0.4/project_test.3mf` - mouse1, Studio 02.09.01.70,
+  Bambu PLA Basic @BBL P1S, 0.20mm Standard @BBL X1C, Textured PEI - and its start / end frozen from
+  that project's slice, `mouse1.gcode.3mf` beside it, into `fixtures/print-planner/p1s-0.4/frozen.json`).
+  The "A1 / X1C 256" plate has no profile any more (it used to take the P1S's, and an A1 is
+  another printer). Any other plate has no profile and the card says so.
+- **Slice settings** (folded under the profile line): the rows G-scope's Slice side
+  has - nozzle, layer, walls, infill % and pattern, support below, brim, interface -
+  but the card's own (`slice-set-*`; it never reads or writes G-scope's `ms-slice-*`
+  rows). They start at the template's values (`settingsFromConfig`; the markup's
+  defaults are the same, shown until the open card has fetched the template), and go
+  back to them when another printer is picked or **Profile values** is pressed. A
+  value changed from the template's is written into a copy of the template's project
+  settings (`configOverlay` / `withOverlay`), so the engine, the planner, the G-code's
+  CONFIG_BLOCK (`plan(..., { configOver })`) and the file's `project_settings.config`
+  (listed as a change to the process preset) all carry it; an untouched card slices
+  byte for byte as the template does. The first layer stays the profile's. The nozzle
+  is the profile's: 0.6 is shown but off, since it needs its own start / end blocks
+  (`build()` refuses one). The interface rule is one choice with G-scope's
+  (`nsoSupportInterfaceRule` / `nsoSetSupportInterfaceRule`), read on the page and
+  handed to the worker with the rest. A changed setting makes the slice stale, as a
+  moved piece does, and the readout names the settings when they are not the
+  profile's.
 - **The plate becomes the engine's input** through G-scope's `plateObjects()` (a
   read of the plate, not an edit of G-scope): each piece's Z-up soup, moved by half
   the printer's bed (the viewport's plate is centred on 0,0, a bed starts at its
   corner), a support carrying its host and `role: 'support'` (the engine types its
   paths; the UI retypes nothing), a non-solid piece sliced with its open edges open.
-  The engine's options are the template's (`engineOptions(config)`).
+  The engine's options are the template's (`engineOptions(config)`), with the card's
+  settings written in.
 - **The slice runs on a worker** (it loads the engine files the page loaded, found
   from the page's own `<script>` tags), so the page stays alive; the card shows the
   stage ("Slicing 3 objects", "Writing the G-code and packing the file") and the
   seconds, with no invented percent, and Cancel ends the worker.
   `tools/nso_slice_pool.js` is the Node-only pool and is not used.
 - **Stale.** Export and Preview exist only for a slice of the plate as it stands; a
-  piece moved, added or removed, or another plate picked, greys them and says so.
+  piece moved, added or removed, another plate picked, or a Slice setting changed,
+  greys them and says so.
 - **Static files.** The frozen blocks and the template are fetched when Slice is
   pressed; a missing one says which path and that `fixtures/` must be served.
 - **Gate:** `npm run print:slice` (`tools/print-slice-check.js`): the plate with
   supports through `build()` -> a `.gcode.3mf` whose FEATURE lines carry Support,
-  Support interface and Support transition, the packager's checks, the refusals,
+  Support interface and Support transition, the packager's checks, the Slice
+  settings (the profile's values change nothing; a changed one reaches the slicer,
+  the CONFIG_BLOCK and project_settings.config), the refusals,
   the coupon on the P1S, the markup and the load order. The browser drive of the card belongs to
   the audit driver, not to `testSteps`.
-- **Not wired:** a settings panel; Send / a printer link; supports on the card (the
+- **Not wired:** a 0.6 nozzle profile; Send / a printer link; supports on the card (the
   Supports card is separate: Slice works on what is on the plate); a profile for the
   Prusa, Ender and Custom plates.
 
@@ -249,3 +290,27 @@ the first retraction and z-hop, and that the head lifts clear at the end.
 ## Supports on their own layer grid
 
 A Dense support (`sheetLayerMm` 0.275 in its meta) is sliced on its own layer grid (`supportLayerMaxMm` 0.28, see docs/SLICER.md), as G-scope's Slice does. The Print card sets the option the same way (`build()` in app-print.js), and `plan()` first puts the objects' grids into one timeline (`alignGrids`): every height any object prints at, ascending, each object's layers on the heights it has. A slice with no own grids passes through untouched. A bead takes its own layer's height, so the gcode carries a `; LAYER_HEIGHT` line where a support's layer differs from the part's. Checked on the real page with `node tools/nso_support_plate_page_slice.mjs out.json print.gcode.3mf` (Generate, Print card Slice, save the file): the six supp_ref supports start their transition/interface at Bambu's heights.
+
+## The start routine's time follows the filament (2026-11-15)
+
+`timing.startSeconds` is measured on the Studio slice a printer's blocks were frozen from (PLA). The
+block's purges run at the filament's flush speed (`{FLUSHF}`, `{OW*n}`), so a TPU start - 3.2 mm^3/s
+against PLA's 12 - takes about a minute longer: Studio read NSO's TPU string test as 6 m 54 s of
+preparation where NSO had counted 5 m 40 s. `plan()` now times the start block's own moves twice, with
+this print's values and with the frozen slice's (`Pr.values`), and adds the difference; the waits for
+temperature stay as measured. The block's lines are indented inside `M620`, so they are trimmed before
+timing. PLA's start is unchanged (340 s on the A1 mini); `build()` reports it as `stats.startSeconds`.
+Checked in `print:slice` 3c.
+
+## Where a travel need not retract (2026-11-15)
+
+Studio retracts and lifts for every travel of a part except one wholly inside the layer's sparse
+infill (`GCode::needs_retraction`, `reduce_infill_retraction`): on its slice of the owner's TPU tower
+it retracts 371 of 377 times from an outer wall to solid infill, 119 of 124 from solid to sparse
+infill. NSO skipped the retraction for any travel inside the layer's section, so 30 of 77 travels off
+an outer wall went at the layer's height - on the owner's CR-TPU level the nozzle leaving the wall's
+end at the corner dragged the soft lip it had just laid (a bump on the same spot, two prints running).
+The slicer now hands each part layer its sparse region (`sparsePolys`), and `layerItems` takes that
+for `travelInside`; a support's layer keeps its section, as Studio's travels keep its islands. On the
+level: 74 of 77 from an outer wall now retract, 31 of 32 from solid to sparse.
+

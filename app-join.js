@@ -46,8 +46,8 @@ function updateJoinUI() {
     slotC.classList.toggle('armed', state.joinArmed === 'c');
   }
   if (btn) btn.disabled = !(state.joinSession && state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
-  const btnSub = document.getElementById('btn-subtract');
-  if (btnSub) btnSub.disabled = !(state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
+  // Subtract B from A is never greyed: its first press is the pick, not the cut.
+  updateSubtractUI();
   const alignBtn = document.getElementById('btn-join-align');
   if (alignBtn) alignBtn.disabled = !(state.joinSession && state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
   const readyJoin = !!(state.joinSession && state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
@@ -86,6 +86,8 @@ function assignJoinClick(id, face) {
     state.joinFaceA = useFace;
     state.cutT = 0.5;
     state.joinArmed = null;
+    // Subtract's run of picks: A taken, B is next without another press.
+    if (state.subtractFlow && state.joinPartnerId == null) state.joinArmed = 'b';
   } else if (state.joinArmed === 'b') {
     if (id === state.editId) return;
     if (id === state.joinThirdId) { state.joinThirdId = null; state.joinFaceC = null; }
@@ -127,22 +129,23 @@ function startJoinSession() {
   updateJoinUI();
 }
 
-/* No Start Join: the Join column is the switch. Opening it starts the session
-   (startJoinSession, what the button ran) and shows the Join card, with its
-   slots, at once; shutting it with the column button again, with Escape, or by
-   the leave-tool gesture is Cancel (clearJoinSlots). A session already
-   live is kept as it is: Seat, Align and Center lock work on the A and B the
-   Join card holds, so opening one of THEIR columns shuts this one and leaves
-   the session standing - returning to Join finds the slots as they were. (The
+/* No Start Join: the Assemble column is the switch. Opening it starts the
+   session (startJoinSession, what the button ran) and shows the Assemble card
+   - the editor button, and the Join by slots, Seat and Align sections, which
+   all work on the A and B the slots hold. Shutting it with the column button
+   again, with Escape, or by the leave-tool gesture is Cancel (clearJoinSlots).
+   A session already live is kept as it is: opening another column (Move,
+   Rotate, Tip - to turn B before a seat) shuts this one and leaves the session
+   standing, so returning to Assemble finds the slots as they were. (The
    card's Cancel clears the slots and leaves the card open.) A MutationObserver
    on `open`, for the reason the one-panel rule below gives. */
 function joinWireCard() {
-  const menu = document.getElementById('menu-joins');
+  const menu = document.getElementById('menu-assemble');
   if (!menu || menu.dataset.nsoWired === '1') return;
   menu.dataset.nsoWired = '1';
   const anotherOpen = function () {
     return Array.prototype.some.call(document.querySelectorAll('.vp-menu[open]'),
-      function (d) { return d !== menu && !menu.contains(d); });
+      function (d) { return d !== menu && !menu.contains(d) && d.id !== 'menu-measure'; });
   };
   const show = function () {
     if (!state.joinSession) startJoinSession();
@@ -170,6 +173,7 @@ function armJoinSlot(slot) {
 
 function clearJoinSlots() {
   state.joinSession = false;
+  state.subtractFlow = false;
   state.joinArmed = null;
   state.joinPartnerId = null;
   state.joinHullId = null;
@@ -1443,6 +1447,116 @@ function NSO_farWallMarch(grid, ox, oy, oz, dir, maxDist, tol) {
    nso_csg.js, a file the page and the boolean worker (nso_work.js) both load. */
 
 /* =====================================================================
+   SUBTRACT B FROM A, PICKED ON ITS OWN CARD
+
+   The Subtract card used to need a trip to the Join card: Pick A and Pick B were
+   its slots, and the button stayed grey until both were filled. Now the button
+   runs the whole thing, in this order:
+
+     press            -> click piece A (plate or list)
+     (A is taken)     -> click piece B - armed by the A click, no second press
+     (B is taken)     -> move B into place, through A's surface, by hand
+     press            -> the cut
+
+   It is the Join session under the hood - the same slots, the same click routing
+   in app-core.js, the same highlights, and B drags freely once both are taken -
+   with state.subtractFlow marking who started it. Shutting the card (to nothing
+   else open) or pressing the button while it waits for a click ends the run, as
+   Cancel does on the Join card. A and B that are already picked, by this card or
+   the Join card, are cut on the first press, so nothing that drove it before
+   changes.
+   ===================================================================== */
+function subtractReady() {
+  return !!(state.editId != null && state.joinPartnerId != null && state.editId !== state.joinPartnerId);
+}
+
+function updateSubtractUI() {
+  // A Join that finished or was cancelled elsewhere ends the run with it.
+  if (state.subtractFlow && !state.joinSession) state.subtractFlow = false;
+  const btn = document.getElementById('btn-subtract');
+  const out = document.getElementById('subtract-readout');
+  const picking = !!(state.joinSession && state.subtractFlow && state.joinArmed);
+  if (btn) {
+    btn.classList.toggle('is-armed', picking);
+    btn.setAttribute('aria-pressed', picking ? 'true' : 'false');
+  }
+  if (!out) return;
+  const nameOf = function (id) {
+    const m = (state.models || []).find(function (x) { return x.id === id; });
+    return m ? m.name : 'piece';
+  };
+  let msg = '';
+  if (state.joinSession && state.subtractFlow) {
+    if (state.joinArmed === 'a') {
+      msg = 'Click piece A - the one that is cut.';
+    } else if (state.joinArmed === 'b') {
+      msg = 'A: ' + nameOf(state.editId) + '. Now click piece B - the bit that is taken out.';
+    } else if (subtractReady()) {
+      msg = 'A: ' + nameOf(state.editId) + ' - B: ' + nameOf(state.joinPartnerId) +
+        '. Move B into A, through the surface it cuts, then press Subtract B from A.';
+    }
+  }
+  out.textContent = msg;
+  out.hidden = !msg;
+}
+
+function startSubtractFlow() {
+  // Anything else waiting for a click on a piece is put away first: its click
+  // would be taken before the pick is.
+  ['btn-carve', 'btn-punch', 'btn-lift'].forEach(function (id) {
+    const b = document.getElementById(id);
+    if (b && !b.disabled && b.getAttribute('aria-pressed') === 'true') b.click();
+  });
+  startJoinSession();
+  state.subtractFlow = true;
+  state.joinArmed = 'a';
+  setStatus('Subtract: click piece A, the one that is cut');
+  updateJoinUI();
+}
+
+/* The press that is not the cut: start the picks, carry them on, or stop them. */
+function subtractPick() {
+  if (state.joinSession && state.subtractFlow && state.joinArmed) {
+    clearJoinSlots();
+    setStatus('Subtract stopped - nothing was changed');
+    return;
+  }
+  const onPlate = {};
+  state.placed.forEach(function (p) { if (p && p.mesh && p.sourceId != null) onPlate[p.sourceId] = true; });
+  if (Object.keys(onPlate).length < 2) {
+    setStatus('Subtract needs two pieces on the plate - A to cut, B to cut with', true);
+    return;
+  }
+  if (!state.joinSession) { startSubtractFlow(); return; }
+  // A session the Join card already holds: finish its picks from here.
+  state.subtractFlow = true;
+  state.joinArmed = state.editId == null ? 'a' : 'b';
+  setStatus(state.joinArmed === 'a' ? 'Subtract: click piece A, the one that is cut'
+                                    : 'Subtract: click piece B, the bit that is taken out');
+  updateJoinUI();
+}
+
+function subtractWireCard() {
+  const menu = document.getElementById('menu-bit');
+  if (!menu || menu.dataset.nsoSubWired === '1') return;
+  menu.dataset.nsoSubWired = '1';
+  if (typeof MutationObserver !== 'function') return;
+  /* Watched on every menu, not only this one: the card shuts for Move when B is
+     put in place, and it is the Move menu shutting that leaves nothing open. A
+     run left standing then would keep Brush, Pull and Limb off (they stand down
+     for a live session) with no card on the page to say why. The look is one
+     tick later, so a column handing over to the next never reads as "nothing". */
+  const look = function () {
+    if (menu.open) updateSubtractUI();
+    if (!state.subtractFlow) return;
+    // Measure is not a panel in this sense (it sits beside the others).
+    if (!document.querySelector('.vp-menu[open]:not(#menu-measure)')) clearJoinSlots();
+  };
+  new MutationObserver(function () { setTimeout(look, 0); })
+    .observe(document.body, { attributes: true, attributeFilter: ['open'], subtree: true });
+}
+
+/* =====================================================================
    REPLACEMENT: subtractBFromA
    Same selection checks, same undo shape (subtractReplace), same mesh
    swap/cleanup as before. Only change: awaits the now-async subtract,
@@ -1576,6 +1690,7 @@ async function subtractBFromA() {
   state.joinThirdId = null;
   state.joinFaceC = null;
   state.joinSession = false;
+  state.subtractFlow = false;
   state.joinArmed = null;
 
   if (placedA.mesh && state.modelGroup) {
@@ -1617,7 +1732,7 @@ function centerJoinAxis(axis) {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Open JOIN, Pick A and B, then Center', true);
+    setStatus('Open ASSEMBLE, Pick A and B, then Center', true);
     return;
   }
   const placedA = state.placed.find(function (q) { return q && q.sourceId === idA && q.mesh; });
@@ -1658,7 +1773,7 @@ function flipPortOnPunch() {
   const bit = placedB && placedB.mesh;
   const hull = placedA && placedA.mesh;
   if (!bit || !hull) {
-    setStatus('Open JOIN, pick hull A and tunnel B, then Flip port', true);
+    setStatus('Open ASSEMBLE, pick hull A and tunnel B, then Flip port', true);
     return;
   }
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
@@ -1755,7 +1870,7 @@ function seatFlushBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Open JOIN, A = hull, B = bit, then Seat flush', true);
+    setStatus('Open ASSEMBLE, A = hull, B = bit, then Seat flush', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -1796,7 +1911,7 @@ function seatSupportBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Open JOIN, A = hull, B = bit, then Seat (support)', true);
+    setStatus('Open ASSEMBLE, A = hull, B = bit, then Seat (support)', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -2013,76 +2128,54 @@ function soupAxisBox(min, max) {
   return new Float32Array(out);
 }
 
-// New helper: 6-connected flood fill over the empty-cell grid, returns the
-// largest connected empty region as index-space min/max (or null if the
-// grid has no empty cells at all).
-function NSO_floodFillLargestEmptyCluster(empty, nx, ny, nz) {
-  const total = nx * ny * nz;
-  const visited = new Uint8Array(total);
-  const stackX = new Int32Array(total);
-  const stackY = new Int32Array(total);
-  const stackZ = new Int32Array(total);
-  const idx3 = function (ix, iy, iz) { return (ix * ny + iy) * nz + iz; };
-
-  let best = null;
-
-  for (let ix = 0; ix < nx; ix++) {
-    for (let iy = 0; iy < ny; iy++) {
-      for (let iz = 0; iz < nz; iz++) {
-        const startIdx = idx3(ix, iy, iz);
-        if (!empty[startIdx] || visited[startIdx]) continue;
-
-        let sp = 0;
-        stackX[sp] = ix; stackY[sp] = iy; stackZ[sp] = iz; sp++;
-        visited[startIdx] = 1;
-
-        let size = 0;
-        let minIx = ix, minIy = iy, minIz = iz;
-        let maxIx = ix, maxIy = iy, maxIz = iz;
-
-        while (sp > 0) {
-          sp--;
-          const cx = stackX[sp], cy = stackY[sp], cz = stackZ[sp];
-          size++;
-          if (cx < minIx) minIx = cx; if (cx > maxIx) maxIx = cx;
-          if (cy < minIy) minIy = cy; if (cy > maxIy) maxIy = cy;
-          if (cz < minIz) minIz = cz; if (cz > maxIz) maxIz = cz;
-
-          if (cx > 0) { const n = idx3(cx - 1, cy, cz); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx - 1; stackY[sp] = cy; stackZ[sp] = cz; sp++; } }
-          if (cx < nx - 1) { const n = idx3(cx + 1, cy, cz); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx + 1; stackY[sp] = cy; stackZ[sp] = cz; sp++; } }
-          if (cy > 0) { const n = idx3(cx, cy - 1, cz); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy - 1; stackZ[sp] = cz; sp++; } }
-          if (cy < ny - 1) { const n = idx3(cx, cy + 1, cz); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy + 1; stackZ[sp] = cz; sp++; } }
-          if (cz > 0) { const n = idx3(cx, cy, cz - 1); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy; stackZ[sp] = cz - 1; sp++; } }
-          if (cz < nz - 1) { const n = idx3(cx, cy, cz + 1); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy; stackZ[sp] = cz + 1; sp++; } }
-        }
-
-        if (!best || size > best.size) {
-          best = { size: size, minIx: minIx, minIy: minIy, minIz: minIz, maxIx: maxIx, maxIy: maxIy, maxIz: maxIz };
-        }
-      }
-    }
-  }
-
-  return best;
+/* The bit's display geometry from its exact soup. soupToCenteredGeo welds at 0.3 mm, which is right for
+   the box round a void and would flatten a thread's flank (pitch 0.5 to 2 mm) into a smooth rod, so the
+   exact bit is welded at the kernel's own scale (1e-4 mm: shared corners only) and centred. */
+function NSO_centerSoup(soup) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < soup.length; i += 3) for (let k = 0; k < 3; k++) { const v = soup[i + k]; if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v; }
+  const c = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  const out = new Float32Array(soup.length);
+  for (let i = 0; i < soup.length; i += 3) { out[i] = soup[i] - c[0]; out[i + 1] = soup[i + 1] - c[1]; out[i + 2] = soup[i + 2] - c[2]; }
+  return out;
 }
 
-async function extractBitFromSelected() {
-  const p = state.selectedIndex >= 0 ? state.placed[state.selectedIndex] : null;
+function NSO_exactBitGeo(soup) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(soup, 3));
+  const U = THREE.BufferGeometryUtils;
+  const out = (U && typeof U.mergeVertices === 'function') ? U.mergeVertices(geo, 1e-4) : geo;
+  out.computeVertexNormals();
+  out.center();
+  out.computeBoundingBox();
+  return out;
+}
+
+/* ---------------------------------------------------------------------------------------------------------
+   EXTRACT BIT. The bit is the void the user clicked, not one the tool guessed (nso_void.js says which void,
+   nso_csg.js NSO_cavityCore makes it solid). Two steps, so the user sees what they are about to get:
+
+     extractBitDetect(index, point, normal, opts)  the click: finds the void and makes the bit as a soup, changes
+                                                   nothing on the plate. -> { ok, ...bit } or { ok: false, reason }
+     extractBitCommit(bit)                         the bake: the bit becomes a piece beside its source, one Undo.
+
+   app-extract-bit.js is the card's side: it arms the click, draws the detected bit as a live preview, redoes it
+   when the Lid R box moves, and commits on Make bit. The button, pressed with nothing armed, arms.
+   --------------------------------------------------------------------------------------------------------- */
+async function extractBitDetect(index, point, normal, opts) {
+  opts = opts || {};
+  const p = index >= 0 ? state.placed[index] : null;
   const model = p && p.sourceId != null
     ? state.models.find(function (m) { return m.id === p.sourceId; })
-    : getActiveModel();
-  if (!p || !p.mesh || !model || !model.geometry) {
-    setStatus('Select a tile on the plate first', true);
-    return;
-  }
-  // The cavity is found by even-odd inside tests, which shells laid over one
-  // another turn inside out: such a piece is read as its shells merged into one
-  // solid (nso-helpers.js, nsoOverlap). The piece itself is not touched.
+    : null;
+  if (!p || !p.mesh || !model || !model.geometry) return { ok: false, reason: 'select a piece on the plate first' };
+  if (typeof NSO_Void === 'undefined') return { ok: false, reason: 'the void finder (nso_void.js) is not loaded' };
+  // The void is found by even-odd inside tests, which shells laid over one another turn inside out: such a
+  // piece is read as its shells merged into one solid (nso-helpers.js, nsoOverlap). The piece is not touched.
   const solBit = (typeof nsoOverlap !== 'undefined' && nsoOverlap)
     ? await nsoOverlap.solid(model, { geometry: model.geometry }) : { ok: true, merged: false };
   if (!solBit.ok) {
-    setStatus(solBit.cancelled ? 'Extract stopped - piece unchanged' : 'Extract refused - ' + solBit.reason + ' - piece unchanged', !solBit.cancelled);
-    return;
+    return { ok: false, cancelled: !!solBit.cancelled, reason: solBit.cancelled ? 'stopped' : solBit.reason };
   }
   const py = p.mesh.position.y;
   let soupPiece;
@@ -2094,108 +2187,83 @@ async function extractBitFromSelected() {
   } else {
     soupPiece = geomToWorldSoup(model.geometry, p.x, py, p.z);
   }
-  if (!soupPiece || soupPiece.length < 9) {
-    setStatus('Extract failed - piece unchanged', true);
-    return;
-  }
-  p.mesh.updateMatrixWorld(true);
-  const bb = meshLocalBox3(p.mesh);
-  const inset = 0.45;
-  const x0 = bb.min.x + inset, x1 = bb.max.x - inset;
-  const y0 = bb.min.y + inset, y1 = bb.max.y - inset;
-  const z0 = bb.min.z + inset, z1 = bb.max.z - inset;
-  if (x1 <= x0 || y1 <= y0 || z1 <= z0) {
-    setStatus('Extract failed - tile too thin', true);
-    return;
-  }
+  if (!soupPiece || soupPiece.length < 9) return { ok: false, reason: 'the piece has no surface to read' };
 
-  // Same sampling grid as before - cell centers on the 1.2mm lattice.
-  const step = 1.2;
-  const half = step * 0.49;
-  const xs = [];
-  for (let x = x0 + half; x <= x1 - half + 1e-6; x += step) xs.push(x);
-  const ys = [];
-  for (let y = y0 + half; y <= y1 - half + 1e-6; y += step) ys.push(y);
-  const zs = [];
-  for (let z = z0 + half; z <= z1 - half + 1e-6; z += step) zs.push(z);
-  const nx = xs.length, ny = ys.length, nz = zs.length;
-  if (nx < 1 || ny < 1 || nz < 1) {
-    setStatus('Extract failed - no cavity found', true);
-    return;
+  /* Which void: the click's. Its wall comes back as points; the kernel makes the bit from them. */
+  const sel = NSO_Void.select(soupPiece, point, normal, { R: opts.R });
+  if (!sel.ok) return { ok: false, reason: sel.reason };
+  const cav = (typeof NSO_cavitySoup === 'function')
+    ? await NSO_cavitySoup(soupPiece, sel.points, sel.seed, { label: 'Extracting' })
+    : { ok: false, reason: 'no CSG kernel in this build' };
+  if (!cav.ok) {
+    return { ok: false, cancelled: !!cav.cancelled, timedOut: !!cav.timedOut,
+             reason: cav.noCavity ? 'no void there - the click was not inside one' : cav.reason };
   }
+  return { ok: true, index: index, sourceId: model.id, name: model.name || 'tile', soup: cav.soup,
+           volumeMm3: cav.volumeMm3, R: sel.R, auto: sel.auto, span: sel.span, merged: !!solBit.merged, note: solBit.note || '',
+           point: point, normal: normal };
+}
 
-  const empty = new Uint8Array(nx * ny * nz);
-  let emptyCount = 0;
-  for (let ix = 0; ix < nx; ix++) {
-    for (let iy = 0; iy < ny; iy++) {
-      for (let iz = 0; iz < nz; iz++) {
-        if (!NSO_pointInsideSoup(soupPiece, xs[ix], ys[iy], zs[iz])) {
-          empty[(ix * ny + iy) * nz + iz] = 1;
-          emptyCount++;
-        }
-      }
-    }
-  }
-  if (emptyCount < 4) {
-    setStatus('Extract failed - no cavity found', true);
-    return;
-  }
-
-  // Flood-fill (6-connected) to the single largest empty region - this is
-  // the fix: no more one cube per empty cell.
-  const cluster = NSO_floodFillLargestEmptyCluster(empty, nx, ny, nz);
-  if (!cluster || cluster.size < 4) {
-    setStatus('Extract failed - no cavity found', true);
-    return;
-  }
-
-  // One box spanning the cluster's cell extents.
-  const mn = {
-    x: xs[cluster.minIx] - half,
-    y: ys[cluster.minIy] - half,
-    z: zs[cluster.minIz] - half
-  };
-  const mx = {
-    x: xs[cluster.maxIx] + half,
-    y: ys[cluster.maxIy] + half,
-    z: zs[cluster.maxIz] + half
-  };
-
-  const bitSoup = soupAxisBox(mn, mx);
-  if (!bitSoup || bitSoup.length < 9) {
-    setStatus('Extract failed - no cavity found', true);
-    return;
-  }
-
-  const geo = soupToCenteredGeo(bitSoup);
+function extractBitCommit(bit) {
+  const p = bit && state.placed[bit.index];
+  if (!p || p.sourceId !== bit.sourceId) { setStatus('Extract failed - the piece moved on; click the void again', true); return false; }
+  /* The raw soup is the kernel's own triangles, only moved to the middle: welding them (the display's job) is
+     what turns a thread's sliver triangles into non-manifold edges. */
+  const cs = NSO_centerSoup(bit.soup);
+  const rawGeo = new THREE.BufferGeometry();
+  rawGeo.setAttribute('position', new THREE.BufferAttribute(cs, 3));
+  const rawOut = displayGeometryToRawSoup(rawGeo);
+  const geo = NSO_exactBitGeo(cs);
   geo.computeBoundingBox();
   const size = new THREE.Vector3();
   geo.boundingBox.getSize(size);
-  const rawOut = displayGeometryToRawSoup(geo);
-  const id = addModel((model.name || 'tile') + '-bit', geo, {
+  const id = addModel(bit.name + '-bit', geo, {
     rawTris: rawOut,
     rawAxis: 'zup',
     centerOffset: computeCenterOffsetFromRaw(rawOut),
     keepSelection: true,
     silent: true
   });
-  if (!id) {
-    setStatus('Extract failed - piece unchanged', true);
-    return;
-  }
+  if (!id) { setStatus('Extract failed - piece unchanged', true); return false; }
   pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
   const xPlace = p.x + (p.width || size.x) / 2 + size.x / 2 + 6;
   const m = state.models.find(function (mm) { return mm.id === id; });
   if (m) placeModelMovable(m, xPlace, p.z);
-  setStatus('Extract bit ok - solid ' + size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm' +
-    (solBit.merged ? ' - ' + solBit.note : ''));
+  setStatus('Extract bit ok - the void you clicked (lid R ' + bit.R + ' mm' + (bit.auto ? ' auto' : '') + '), solid ' +
+    size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm, ' + Math.round(bit.volumeMm3) + ' mm3' +
+    (bit.merged ? ' - ' + bit.note : ''));
+  return true;
 }
 
-async function joinSelectedModels() {
+/* The Extract bit button. With a pick ({ point, normal } in world space, or { index, point, normal }) it runs
+   the whole thing on the spot: detect, then bake - what a click and Make bit do together, for the checks. With
+   none it is the button: it arms the click (or, with a preview showing, makes the bit). */
+async function extractBitFromSelected(pick) {
+  if (pick && pick.point) {
+    const idx = pick.index != null ? pick.index : state.selectedIndex;
+    const r = await extractBitDetect(idx, pick.point, pick.normal || null, { R: pick.R });
+    if (!r.ok) { setStatus(r.cancelled ? 'Extract stopped - piece unchanged' : 'Extract failed - ' + r.reason, !r.cancelled); return r; }
+    r.committed = extractBitCommit(r);
+    return r;
+  }
+  if (window.nsoExtractBit && typeof window.nsoExtractBit.press === 'function') return window.nsoExtractBit.press();
+  setStatus('Extract bit needs app-extract-bit.js', true);
+}
+
+/* opts.inPlace (the assembly editor, app-asm-editor.js): B has just been placed
+   on A, face to face, exactly where it is to be welded. So no route here may
+   move either piece or go looking for a mating of its own - the planar fuse and
+   the plate weld stand down and the kernel union welds the two where they
+   stand, and the result stays where the two were instead of being parked at
+   the midpoint of their plate positions. Every other caller passes nothing (the
+   JOIN button passes its click event) and gets the Join it always got.
+   Resolves true when the pieces were joined. */
+async function joinSelectedModels(opts) {
+  const inPlace = !!(opts && opts.inPlace === true);
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Open JOIN, Pick A, Pick B, then JOIN', true);
+    setStatus('Open ASSEMBLE, Pick A, Pick B, then JOIN', true);
     return;
   }
   const modelA = state.models.find(x => x.id === idA);
@@ -2266,7 +2334,9 @@ async function joinSelectedModels() {
   let fuseGeo = null, fuseStats = null, fuseInfo = null, fuseWhy = '';
   const paintedJoin = (typeof nsoMaskCount === 'function')
     ? (nsoMaskCount(modelA) + nsoMaskCount(modelB)) : 0;
-  if (solidOnly) {
+  if (inPlace) {
+    fuseWhy = 'placed face to face - the kernel union welds them where they are';
+  } else if (solidOnly) {
     fuseWhy = 'overlapping shells merged - the kernel union welds them';
   } else if (typeof NSO_fuseFindMating !== 'function' || typeof NSO_planarFusePair !== 'function') {
     fuseWhy = 'fusion module not loaded';
@@ -2348,6 +2418,8 @@ async function joinSelectedModels() {
     // A real fuse already landed. Skip the plate route rather than let it
     // nudge the poses to close a kerf that is no longer there.
     legacyWhy = 'not needed - planar fuse succeeded';
+  } else if (inPlace) {
+    legacyWhy = 'placed face to face - the kernel union welds them where they are';
   } else if (solidOnly) {
     legacyWhy = 'overlapping shells merged - the kernel union welds them';
   } else try {
@@ -2392,7 +2464,7 @@ async function joinSelectedModels() {
   // reopens a wrap - the kernel does not. Only reached when the two pieces
   // already touch; split halves parked a kerf apart come back as two parts and
   // stay with route 1, which closes that gap by moving the far half in.
-  let kernelGeo = null, kernelStats = null, kernelWhy = '', kernelExact = false;
+  let kernelGeo = null, kernelStats = null, kernelWhy = '', kernelExact = false, kernelAt = null;
   if (!fuseGeo && joinSoupA && joinSoupB && (!legacyStats || score(legacyStats) > score(before))) {
     try {
       setStatus('Joining (loading CSG kernel)...');
@@ -2405,6 +2477,16 @@ async function joinSelectedModels() {
       }
       if (u.ok && u.soup && u.soup.length >= 9) {
         kernelGeo = soupToCenteredGeo(u.soup);
+        if (inPlace) {
+          // where the union stands on the plate: the middle of its own world box
+          let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+          for (let i = 0; i < u.soup.length; i += 3) {
+            const ux = u.soup[i], uz = u.soup[i + 2];
+            if (ux < x0) x0 = ux; if (ux > x1) x1 = ux;
+            if (uz < z0) z0 = uz; if (uz > z1) z1 = uz;
+          }
+          kernelAt = { x: (x0 + x1) / 2, z: (z0 + z1) / 2 };
+        }
         // the kernel's own count, not one rounded off the soup
         kernelStats = u.stats || NSO_edgeStats(u.soup);
         kernelExact = !!u.stats;
@@ -2428,7 +2510,7 @@ async function joinSelectedModels() {
     newGeo = kernelGeo; after = kernelStats; route = 'kernel union'; exact = kernelExact;
   }
   if (!newGeo) {
-    const why = legacyWhy || kernelWhy || fuseWhy || 'pieces unchanged';
+    const why = (inPlace && kernelWhy) || legacyWhy || kernelWhy || fuseWhy || 'pieces unchanged';
     setStatus('Join failed - ' + why + ' - A and B unchanged', true);
     return;
   }
@@ -2510,8 +2592,8 @@ async function joinSelectedModels() {
 
   // Park the union at the midpoint of the two halves.
   if (placedA) {
-    const px = (poseA.x + poseB.x) / 2;
-    const pz = (poseA.z + poseB.z) / 2;
+    const px = (route === 'kernel union' && kernelAt) ? kernelAt.x : (poseA.x + poseB.x) / 2;
+    const pz = (route === 'kernel union' && kernelAt) ? kernelAt.z : (poseA.z + poseB.z) / 2;
     placedA.x = px;
     placedA.z = pz;
     if (placedA.mesh && state.modelGroup) {
@@ -2557,6 +2639,7 @@ async function joinSelectedModels() {
             (fuseInfo ? '; seam fused, ' + fuseInfo.removed + ' cap tri(s) removed, ' +
                         fuseInfo.triIn + '\u2192' + fuseInfo.triOut + ' tris' : '') +
             (solJoin.note ? ' - ' + solJoin.note : ''));
+  return true;
 }
 
 
@@ -2575,6 +2658,8 @@ function cutActiveModel(opts) {
     setStatus('Open Cut first', true);
     return;
   }
+  // A turn of the Rotate piece wheel still in hand lands on the plate first: the cut is made on the piece as it will lie.
+  if (typeof cutRotateSettle === 'function') cutRotateSettle();
   // The Whole plate blade (app-cut-plate.js) cuts every piece at one height: no picked piece, no plane of its own.
   if (typeof cutPlateOn === 'function' && cutPlateOn()) { cutPlateActiveRun(); return; }
   const m = getActiveModel();
@@ -2587,6 +2672,8 @@ function cutActiveModel(opts) {
     setStatus('Cannot resolve cut plane - reopen Cut', true);
     return;
   }
+  // The Plane blade (app-cut-plane.js) shaves the nearer end off and keeps the rest: its own end limit, one piece out.
+  if (typeof cutPlaneOn === 'function' && cutPlaneOn()) { cutPlaneRun(m, info); return; }
   const axis = info.axis;
   const plateAxis = info.plateAxis || axis;
   const span = info.span;
@@ -2768,7 +2855,8 @@ function cutActiveModel(opts) {
     newIds: newIds.slice(),
     siblings: siblingSnapshots,
     editId: prevEditId,
-    cutT: prevCutT
+    cutT: prevCutT,
+    cutMemo: typeof cutBladeMemo === 'function' ? cutBladeMemo() : null    // Undo leaves the card open, the blade where it was
   });
   console.log('[nest] split undo pushed', state.undoStack.length, newIds);
 
@@ -2961,11 +3049,44 @@ function updatePlateInfo() {
   document.getElementById('plate-dims').textContent = `${p.w} x ${p.d} mm`;
   document.getElementById('plate-area').textContent = `${(p.w * p.d).toLocaleString()} mm2`;
   if (state.ready) {
+    /* A PLATE CHANGE KEEPS THE PIECES. The plate picker is also the printer the Slice card slices for, so a
+       piece laid out on the A1 Mini has to survive a switch to the P1S (and back). Piece coordinates are
+       plate-centred, so every piece stays where it was relative to the middle of the bed; only the floor is
+       rebuilt. A piece the new, smaller bed no longer holds is left where it is and named in the status line. */
     buildPlateMesh();
-    clearPlaced();
-    // the size is every bed's: the others' pieces come off the plate the same way (app-beds.js)
+    // the size is every bed's: the other beds' floors follow, their pieces stay too (app-beds.js)
     if (typeof NSO_BEDS !== 'undefined') NSO_BEDS.plateSizeChanged();
+    reportPiecesPastPlateEdge(p);
   }
+}
+
+/* The active bed's pieces whose footprint now runs past the plate edge, named in the status line. */
+function piecesPastPlateEdge(p) {
+  const out = [];
+  if (!state.placed || !state.placed.length || typeof THREE === 'undefined') return out;
+  const hw = p.w / 2 + 0.01, hd = p.d / 2 + 0.01;
+  state.placed.forEach(function (pl) {
+    if (!pl || !pl.mesh) return;
+    pl.mesh.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(pl.mesh);
+    if (bb.isEmpty()) return;
+    if (bb.min.x < -hw || bb.max.x > hw || bb.min.z < -hd || bb.max.z > hd) out.push(pl.name || 'a piece');
+  });
+  return out;
+}
+
+function reportPiecesPastPlateEdge(p) {
+  if (!state.placed || !state.placed.length) return;
+  const name = p.name || 'this plate';
+  const past = piecesPastPlateEdge(p);
+  if (!past.length) {
+    setStatus(state.placed.length + ' piece' + (state.placed.length === 1 ? '' : 's') + ' kept on ' + name + '.');
+    return;
+  }
+  const list = past.slice(0, 4).join(', ') + (past.length > 4 ? ' and ' + (past.length - 4) + ' more' : '');
+  setStatus(past.length + ' piece' + (past.length === 1 ? '' : 's') + ' hang' + (past.length === 1 ? 's' : '') +
+    ' past the edge of ' + name + ' (' + list + ') - move ' + (past.length === 1 ? 'it' : 'them') +
+    ' onto the bed or press Optimize before slicing.', true);
 }
 
 function setupUI() {
@@ -3099,6 +3220,14 @@ function setupUI() {
      were open; the observer runs as a microtask, before the next event, and
      sees a programmatic `.open = true` as well as a click.
 
+     ONE EXEMPTION, MEASURE. Its card neither shuts another panel when it opens
+     nor is shut by another opening, so a ruler or a measurement can be used
+     while a ghost is being manipulated or a live card is open (Crop, Scale,
+     Surface texture, Wheel...). Closing a panel ends its live session, so a
+     Measure that shut the panel in use ended the work it was meant to serve.
+     app-measure.js docks its card beside whichever panel is open so the two
+     do not sit on top of each other.
+
      Cut has no exemption. Opening another panel shuts Cut's panel, but the
      cutter itself is a tool, not a panel: closing the <details> leaves
      state.cutterOpen, the blade and its position exactly as they were, and
@@ -3112,8 +3241,10 @@ function setupUI() {
         if (r.oldValue === null && d.open && d.matches('.vp-menu')) opened = d;
       });
       if (!opened) return;
+      if (opened.id === 'menu-measure') return;       // opening Measure shuts nothing
       document.querySelectorAll('.vp-menu[open]').forEach(function (o) {
         if (o === opened || o.contains(opened) || opened.contains(o)) return;
+        if (o.id === 'menu-measure') return;           // and nothing else shuts Measure
         o.open = false;
       });
     }).observe(document.body, { attributes: true, subtree: true,
@@ -3240,6 +3371,8 @@ function setupUI() {
     var subtractBusy = false;
     btnSubtract.addEventListener('click', function () {
       if (subtractBusy) return;
+      // Not both picked yet: this press is the picking, not the cut.
+      if (!subtractReady()) { subtractPick(); return; }
       subtractBusy = true;
       var prevLabel = btnSubtract.textContent;
       btnSubtract.disabled = true;
@@ -3277,6 +3410,7 @@ function setupUI() {
   const btnJoinClear = document.getElementById('btn-join-clear');
   if (btnJoinClear) btnJoinClear.addEventListener('click', clearJoinSlots);
   joinWireCard();
+  subtractWireCard();
   const btnJoinAlign = document.getElementById('btn-join-align');
   if (btnJoinAlign) btnJoinAlign.addEventListener('click', alignJoinForSlide);
   const btnJoinCx = document.getElementById('btn-join-cx');

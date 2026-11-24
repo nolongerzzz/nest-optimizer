@@ -106,7 +106,8 @@ function install() {
   const W = function (g, a) { oc.builds++; return new EG(g, a); };
   W.prototype = EG.prototype;
   THREE.EdgesGeometry = W;
-  ['edgesOf', 'edgesOfTransfer'].forEach(k => {
+  window.__featureEdges = window.NSO_Edges && window.NSO_Edges.featureEdges;
+  ['edgesOf', 'edgesOfTransfer', 'featureEdges', 'featureEdgesTransfer'].forEach(k => {
     const f = window.NSO_Edges && window.NSO_Edges[k];
     if (typeof f === 'function') window.NSO_Edges[k] = function () { oc.builds++; return f.apply(this, arguments); };
   });
@@ -145,7 +146,9 @@ function install() {
     const o = p && p.outline;
     if (!o) return { ok: false, why: 'no outline' };
     const g = p.mesh.geometry;
-    const fresh = new EG(g, 15).attributes.position.array;
+    // the outline is nso_edges.js featureEdges: three's 15 degree edges plus the tangent edges beside a flat face
+    // (on the stand-in, a smooth body with no flat face, the two are the same array). Read past the counter wrap.
+    const fresh = window.__featureEdges(g.attributes.position.array, 15);
     const a = o.geometry.attributes.position.array, n = a.length;
     if (o.parent !== p.mesh) return { ok: false, why: 'outline is not on the mesh' };
     if (n !== fresh.length) return { ok: false, why: 'edge count', nOutline: n / 6, nFresh: fresh.length / 6 };

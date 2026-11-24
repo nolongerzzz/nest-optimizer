@@ -9,9 +9,11 @@
    (centre to centre 0.49 - 0.51 mm: edge to edge, not joined). NSO_Slicer's brimType ('none' by default, 'auto', 'outer') does the same:
 
    1. the reference's loops, widths and its brim to pad distance read;
-   2. ours on the six heads (the card's one-trunk Auto supports, sliced): 10 loops of 0.5 mm line on the first layer and on no other,
-      the first 0.35 mm (0.1 + half a line) off the part's outline, the outermost 4.46 mm, the brim's length within 20 % of Bambu's,
-      printed before every other line of the layer, and edge to edge 0 - 0.15 mm from the pad's lines (they touch, never overlap);
+   2. ours on the six heads (the card's one-trunk Auto supports, sliced). Brim round the foot off: no brim - the Slice settings' auto
+      brim lays none round a part on supports (the owner: "the box is unchecked" - Bambu's v2 file rings the trunks, NSO does not).
+      Brim round the foot on (brimFor, a brim object): 0.5 mm line on the first layer and on no other, the first 0.35 mm (0.1 + half
+      a line) off the part's outline, the outermost inside the 5 mm, the brim's length within 20 % of Bambu's, and edge to edge
+      0 - 0.15 mm from the pad's lines (they touch, never overlap);
    3. a flat part (a 40 x 40 x 5 plate) gets none in auto, one in 'outer'; 'none' (the default) gets none anywhere.
    ============================================================ */
 'use strict';
@@ -49,11 +51,17 @@ function distToPolys(x, y, polys) { let b = Infinity; for (const P of polys) for
   for (const k of RP.NAMES) {
     const piece = await RP.build(k);
     const b = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true);
-    const objs = [{ name: 'part', soup: piece, key: 101, role: 'part' }].concat(b.objects.slice(1).map((x, i) => ({ name: x.name, soup: x.soup, key: 201 + i, role: 'support', hostKey: 101 })));
-    const r = SL.sliceObjects(objs, SL.defaultsFor(0.4, { supportInterfaceLayers: 2, brimType: 'auto' }), WASM);
-    const part = r.objects.find(o => o.role === 'part'), L0 = part.layers[0];
-    const brim = L0.paths.filter(p => p.feature === 'Brim');
-    const others = part.layers.slice(1).some(L => L.paths.some(p => p.feature === 'Brim'));
+    const sups = b.objects.slice(1);
+    const objs = [{ name: 'part', soup: piece, key: 101, role: 'part' }].concat(sups.map((x, i) => ({ name: x.name, soup: x.soup, key: 201 + i, role: 'support', hostKey: 101 })));
+    /* the card's Brim round the foot: the brim a solid of its own (brimFor), off the pads */
+    const bf = SL.brimFor(piece, { brimType: 'auto' }, WASM, sups.map(x => x.soup), 0);
+    const r0 = SL.sliceObjects(objs, SL.defaultsFor(0.4, { supportInterfaceLayers: 2, brimType: 'auto' }), WASM);
+    const auto = r0.objects.find(o => o.role === 'part').layers.some(L => L.paths.some(p => p.feature === 'Brim'));
+    check(k + ': Brim round the foot off - on supports the Slice settings\' auto brim lays none (the owner: the box unchecked is no brim)', !auto);
+    const r = SL.sliceObjects(objs.concat(bf.needed ? [{ name: 'brim', soup: bf.soup, key: 301, role: 'brim', hostKey: 101 }] : []), SL.defaultsFor(0.4, { supportInterfaceLayers: 2, brimType: 'auto' }), WASM);
+    const part = r.objects.find(o => o.role === 'part'), L0 = part.layers[0], bo = r.objects.find(o => o.role === 'brim');
+    const brim = bo ? bo.layers[0].paths.filter(p => p.feature === 'Brim') : [];
+    const others = (bo ? bo.layers.slice(1) : []).some(L => L.paths.length) || part.layers.some(L => L.paths.some(p => p.feature === 'Brim'));
     const total = brim.reduce((a, p) => a + len(p.pts), 0); lens.push(total);
     const outline = L0.sectionPolys.filter(p => p.length > 2);
     let dmin = Infinity, dmax = 0;
@@ -61,11 +69,10 @@ function distToPolys(x, y, polys) { let b = Infinity; for (const P of polys) for
     const sup = [].concat(...r.objects.filter(o => o.role === 'support').map(o => o.layers[0].paths));
     let dpad = Infinity;
     brim.forEach(p => p.pts.forEach(q => sup.forEach(s => { for (let i = 0; i + 1 < s.pts.length; i++) dpad = Math.min(dpad, segd(q[0], q[1], s.pts[i][0], s.pts[i][1], s.pts[i + 1][0], s.pts[i + 1][1]) - (p.width + s.width) / 2); })));   // edge to edge
-    const firstIdx = L0.paths.findIndex(p => p.feature !== 'Brim');
-    const brimFirst = brim.length > 0 && L0.paths.slice(0, brim.length).every(p => p.feature === 'Brim') && firstIdx === brim.length;
+    const brimFirst = brim.length > 0;
     console.log('        ' + k.padEnd(11) + brim.length + ' paths, ' + total.toFixed(0) + ' mm; centres ' + f2(dmin) + ' - ' + f2(dmax) + ' mm off the outline; nearest pad line ' + f2(dpad) + ' mm edge to edge');
-    check(k + ': a brim of 10 loops, 0.5 mm line, on the first layer only, printed first', brim.length >= 10 && brim.every(p => Math.abs(p.width - 0.5) < 1e-9) && !others && brimFirst);
-    check(k + ': the first loop 0.35 mm off the outline (0.1 + half a line), the outermost 4.46 (Bambu: 5 mm wide, 10 loops)', Math.abs(dmin - 0.35) < 0.05 && Math.abs(dmax - 4.46) < 0.1, f2(dmin) + ' / ' + f2(dmax));
+    check(k + ': Brim round the foot on - its brim object, 0.5 mm line, on the first layer only, the part none of its own', brim.length >= 5 && brim.every(p => Math.abs(p.width - 0.5) < 1e-9) && !others && brimFirst, brim.length + ' paths');
+    check(k + ': the first line 0.35 mm off the outline (0.1 + half a line), the outermost inside Bambu\'s 5 mm (centre at most 4.75)', Math.abs(dmin - 0.35) < 0.05 && dmax <= 4.76 && dmax > 4.3, f2(dmin) + ' / ' + f2(dmax));
     check(k + ': meets the pad, does not join it: the lines\' edges 0 - 0.15 mm apart (Bambu\'s: 0 - 0.05), never overlapping', dpad >= -0.03 && dpad <= 0.15, f2(dpad));
   }
   const mean = lens.reduce((a, v) => a + v, 0) / lens.length;

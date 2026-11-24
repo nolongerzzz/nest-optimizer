@@ -34,8 +34,13 @@ Reach for Local-Carve when the shape matters and you can name it. Reach for the
 brush when the shape is a gesture. Neither is the other's fallback, and a bug in
 one is not a bug in the other.
 
-Three modes share one mechanism — Carve (in along the normal), Emboss (out
-along the normal), Smooth (a Laplacian confined to the area under the brush).
+The Brush's menu offers two modes — Emboss (out along the normal) and Smooth
+(a Laplacian confined to the area under the brush). The engine still has the
+third, `carve` (in along the normal, Emboss with the opposite sign), and its
+tests drive it, but the UI no longer offers it: pushing material in is the
+**Carve** arm of the Sculpt card (the blade tool, `docs/LOCAL-CARVE.md`), which
+sits beside the Brush. Shutting the Sculpt card puts the Brush away, and Carve
+with it.
 
 ## The audit that came first, and what it changed
 
@@ -356,7 +361,7 @@ has. That holds for every row in it, not just the last four added.
 |---|---|---|
 | `#inp-brush-size` | 5–50 mm radius | 12 |
 | `#inp-brush-intensity` | 0–1 | 0.5 |
-| `#sel-brush-mode` | carve / emboss / smooth | carve |
+| `#sel-brush-mode` | emboss / smooth | emboss |
 | `#chk-brush-hard` | hard / soft falloff | soft |
 
 Depth is keyed to radius, not to an absolute figure: `depthScale` 0.25 puts

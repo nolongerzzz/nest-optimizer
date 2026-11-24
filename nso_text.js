@@ -70,6 +70,8 @@
     depth: 1,            // mm below the surface
     angle: 0,            // degrees, counter-clockwise seen from outside
     mirror: false,
+    raise: false,        // true: EXTRUDE - the text stands depth above the surface (a union) instead of being cut into it
+    sink: 0.2,           // raised text starts this far inside the piece, so the union has something to bite
     nozzle: 0.4,         // the wall floor under the text is two of these
     lift: 0.2,           // the cutter's top stands this far over the highest surface
     maxEdge: 1,          // mm, the longest edge of a curved surface's bottom
@@ -643,12 +645,17 @@
     }
     var fill = hasH ? hSum / hasH : 0;
     miss.forEach(function (j) { h[j] = fill; cosS[j] = 1; });
-    var hMax = -Infinity, hb = new Float64Array(nV);
-    for (i = 0; i < nV; i++) { hb[i] = h[i] - o.depth / cosS[i]; if (h[i] > hMax) hMax = h[i]; }
-    var data = { V: V, T: T, hb: hb, ht: hMax + o.lift, o: S.o, n: S.n, ex: ex, ey: ey, edges: null };
+    var hMax = -Infinity, hb = new Float64Array(nV), hta = o.raise ? new Float64Array(nV) : null;
+    for (i = 0; i < nV; i++) {
+      // raised: the bottom a little inside the piece, the top depth over the surface, both following it
+      if (o.raise) { hb[i] = h[i] - o.sink / cosS[i]; hta[i] = h[i] + o.depth / cosS[i]; }
+      else hb[i] = h[i] - o.depth / cosS[i];
+      if (h[i] > hMax) hMax = h[i];
+    }
+    var data = { V: V, T: T, hb: hb, ht: hMax + o.lift, hta: hta, raise: !!o.raise, o: S.o, n: S.n, ex: ex, ey: ey, edges: null };
     var stats = {
       width: sh.width, height: sh.height, depth: o.depth, tris: T.length, vertices: nV, flat: S.flat, edge: mesh.edge,
-      missed: miss.length, stroke: sh.stroke, thin: sh.stroke < o.nozzle, area: sh.area
+      missed: miss.length, stroke: sh.stroke, thin: sh.stroke < o.nozzle, area: sh.area, raise: !!o.raise
     };
     var out = { frame: frame, data: data, stats: stats };
 
@@ -658,6 +665,12 @@
         ' (' + fmt(sh.width) + ' × ' + fmt(sh.height) + ' mm)', out);
     }
 
+    if (o.raise) {                                          // nothing is taken out: no wall to keep
+      out.ok = true;
+      out.reason = fmt(sh.width) + ' × ' + fmt(sh.height) + ' mm, ' + fmt(o.depth) + ' mm high' +
+        (stats.thin ? ' - strokes about ' + fmt(sh.stroke) + ' mm, under a nozzle width, will not print' : '');
+      return out;
+    }
     // the wall left under it
     var floor = 2 * o.nozzle, stride = Math.max(1, Math.ceil(nV / o.sampleCap)), minRem = Infinity, maxFit = Infinity, thinAt = 0;
     for (i = 0; i < nV; i += stride) {
@@ -679,14 +692,15 @@
     return out;
   }
 
-  /* The cutter: one closed triangle soup, wound outward, in the piece's frame. */
+  /* The cutter: one closed triangle soup, wound outward, in the piece's frame. With opts.raise it is
+     the solid to UNION: its top follows the surface depth above it, its bottom sink below. */
   function cutter(pl) {
     var D = pl && pl.data;
     if (!D) return new Float32Array(0);
     if (!D.edges) D.edges = outline(D.V, D.T);
     var nT = D.T.length, nE = D.edges.length, out = new Float32Array((2 * nT + 2 * nE) * 9), q = 0;
     function at(i, bottom) {
-      var w = bottom ? D.hb[i] : D.ht, x = D.V[i][0], y = D.V[i][1];
+      var w = bottom ? D.hb[i] : (D.hta ? D.hta[i] : D.ht), x = D.V[i][0], y = D.V[i][1];
       return [D.o[0] + D.ex[0] * x + D.ey[0] * y + D.n[0] * w,
               D.o[1] + D.ex[1] * x + D.ey[1] * y + D.n[1] * w,
               D.o[2] + D.ex[2] * x + D.ey[2] * y + D.n[2] * w];
@@ -1444,7 +1458,219 @@
     return { tris: rf.map(function (t) { return [P3[t[0]], P3[t[1]], P3[t[2]]]; }), nRing: nRing };
   }
 
+  /* ---------------------------------------------------------- lettering already there */
+
+  /* RAISE. Lettering that is already in the mesh: each letter a flat patch of its own, walled all
+     round, in a face that looks the same way - a label a CAD file outlines 0.01 mm deep so a slicer
+     can paint it another colour (Bambu Studio's paint_color sits on exactly such patches), a shallow
+     engraving, a low boss. Too shallow for Remove's rays (docs/RESURFACE.md reads walls on a
+     0.12 mm grid), so it is read off the triangles:
+
+       islands(soup)                 every such patch: { list: [{ id, tris, n, level, area, c, r }], owner }
+       islandAt(isl, point, normal)  the patch under a point, or -1
+       islandGroup(isl, id, reach)   it and every patch in the same plane, at the same level, within
+                                     reach mm (single linkage, between their bounding circles)
+       lift(soup, isl, ids, height)  the new soup: those patches standing height mm over the face
+                                     round them (negative: sunk that far)
+
+     A patch is one plane (triangles joined edge to edge within a degree, 2 degrees of the first).
+     Every triangle that touches it and is not of it is a WALL (60 degrees or more off the plane), the
+     walls' far corners - the rim - stand at one height (within 0.05 mm), and a face looking the same
+     way as the patch meets that rim (so the top of a box, whose walls end at its underside, is not
+     lettering). level is the patch's height over its rim: -0.01 for a painted label.
+
+     lift() moves the patch's own corners along its normal and nothing else. The walls are joined to
+     them, so they stretch: a wall that went down 0.01 mm to a floor now goes up to a top, and turns
+     itself to face out as it passes through. No boolean, no new triangle; the piece is as closed as
+     it was. */
+  var islandCache = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var ISLAND = { planeDeg: 1, driftDeg: 2, wallCos: 0.5, rimSpread: 0.05, faceCos: 0.9, minLift: 0.05, maxLift: 50 };
+  function islands(soup) {
+    var hitC = islandCache && islandCache.get(soup);
+    if (hitC && hitC.len === soup.length) return hitC;
+    var M = weld(soup), n = M.n, t, k, i, j;
+    // corner -> triangles
+    var nV = M.P.length, deg = new Int32Array(nV + 1);
+    for (i = 0; i < 3 * n; i++) deg[M.vid[i] + 1]++;
+    for (i = 0; i < nV; i++) deg[i + 1] += deg[i];
+    var vt = new Int32Array(3 * n), fillAt = deg.slice(0, nV);
+    for (t = 0; t < n; t++) for (k = 0; k < 3; k++) vt[fillAt[M.vid[3 * t + k]]++] = t;
+    var cosP = Math.cos(ISLAND.planeDeg * Math.PI / 180), cosD = Math.cos(ISLAND.driftDeg * Math.PI / 180);
+    var reg = new Int32Array(n).fill(-1), owner = new Int32Array(n).fill(-1), list = [], nReg = 0;
+    var mark = new Int32Array(nV).fill(-1);
+    for (var s0 = 0; s0 < n; s0++) {
+      if (reg[s0] >= 0 || !(M.area[s0] > 1e-10)) continue;
+      var id = nReg++, tris = [s0], nx = M.nrm[3 * s0], ny = M.nrm[3 * s0 + 1], nz = M.nrm[3 * s0 + 2], ok = true;
+      reg[s0] = id;
+      for (i = 0; i < tris.length; i++) {
+        t = tris[i];
+        for (k = 0; k < 3; k++) {
+          var e0 = M.vid[3 * t + k], e1 = M.vid[3 * t + (k + 1) % 3];
+          if (e0 === e1) continue;
+          var l = M.edges.get(e0 < e1 ? e0 * M.K + e1 : e1 * M.K + e0);
+          if (!l || l.length !== 2) { ok = false; continue; }           // an open or a shared edge: not a clean patch
+          var w = l[0] === t ? l[1] : l[0];
+          if (reg[w] >= 0 || !(M.area[w] > 1e-10)) continue;
+          var d1 = M.nrm[3 * w] * M.nrm[3 * t] + M.nrm[3 * w + 1] * M.nrm[3 * t + 1] + M.nrm[3 * w + 2] * M.nrm[3 * t + 2];
+          var d2 = M.nrm[3 * w] * nx + M.nrm[3 * w + 1] * ny + M.nrm[3 * w + 2] * nz;
+          if (d1 >= cosP && d2 >= cosD) { reg[w] = id; tris.push(w); }
+        }
+      }
+      if (!ok) continue;
+      // its corners; everything else that touches them must be a wall, and the walls' far corners one rim
+      var nn = [nx, ny, nz], P0 = M.P[M.vid[3 * s0]], verts = [], area = 0, cx = 0, cy = 0, cz = 0;
+      for (i = 0; i < tris.length; i++) {
+        t = tris[i];
+        var ar = M.area[t]; area += ar;
+        for (k = 0; k < 3; k++) {
+          var v = M.vid[3 * t + k], p = M.P[v];
+          cx += ar * p[0] / 3; cy += ar * p[1] / 3; cz += ar * p[2] / 3;
+          if (mark[v] !== id) { mark[v] = id; verts.push(v); }
+        }
+      }
+      var lo = Infinity, hi = -Infinity, sum = 0, cnt = 0, rim = [], flatOk = true;
+      for (i = 0; i < verts.length && ok; i++) {
+        var pv = M.P[verts[i]];
+        if (Math.abs((pv[0] - P0[0]) * nx + (pv[1] - P0[1]) * ny + (pv[2] - P0[2]) * nz) > 0.02) { flatOk = false; break; }
+        for (j = deg[verts[i]]; j < deg[verts[i] + 1]; j++) {
+          t = vt[j];
+          if (reg[t] === id || !(M.area[t] > 1e-10)) continue;
+          if (Math.abs(M.nrm[3 * t] * nx + M.nrm[3 * t + 1] * ny + M.nrm[3 * t + 2] * nz) >= ISLAND.wallCos) { ok = false; break; }
+          for (k = 0; k < 3; k++) {
+            var rv = M.vid[3 * t + k];
+            if (mark[rv] === id) continue;
+            var rp = M.P[rv], hgt = (rp[0] - P0[0]) * nx + (rp[1] - P0[1]) * ny + (rp[2] - P0[2]) * nz;
+            if (hgt < lo) lo = hgt;
+            if (hgt > hi) hi = hgt;
+            sum += hgt; cnt++; rim.push(rv);
+          }
+        }
+      }
+      if (!ok || !flatOk || !cnt || hi - lo > ISLAND.rimSpread) continue;
+      var faced = false;
+      for (i = 0; i < rim.length && !faced; i++) {
+        for (j = deg[rim[i]]; j < deg[rim[i] + 1]; j++) {
+          t = vt[j];
+          if (reg[t] !== id && M.area[t] > 1e-10 && M.nrm[3 * t] * nx + M.nrm[3 * t + 1] * ny + M.nrm[3 * t + 2] * nz >= ISLAND.faceCos) { faced = true; break; }
+        }
+      }
+      if (!faced) continue;
+      var c = [cx / area, cy / area, cz / area], r = 0;
+      for (i = 0; i < verts.length; i++) { var q = M.P[verts[i]]; r = Math.max(r, Math.hypot(q[0] - c[0], q[1] - c[1], q[2] - c[2])); }
+      var isl = { id: list.length, tris: tris, verts: verts, n: nn, level: -sum / cnt, area: area, c: c, r: r, off: P0[0] * nx + P0[1] * ny + P0[2] * nz };
+      for (i = 0; i < tris.length; i++) owner[tris[i]] = isl.id;
+      list.push(isl);
+    }
+    var out = { list: list, owner: owner, len: soup.length, soup: soup, _M: M };
+    if (islandCache) islandCache.set(soup, out);
+    return out;
+  }
+  /* The patch under a point of the piece (its face normal given), or -1. */
+  function islandAt(isl, p, normal) {
+    var M = isl._M, best = -1, bd = 0.05, t;
+    for (t = 0; t < M.n; t++) {
+      if (isl.owner[t] < 0) continue;
+      var nx = M.nrm[3 * t], ny = M.nrm[3 * t + 1], nz = M.nrm[3 * t + 2];
+      if (normal && nx * normal[0] + ny * normal[1] + nz * normal[2] < 0.7) continue;
+      var a = M.P[M.vid[3 * t]], b = M.P[M.vid[3 * t + 1]], c = M.P[M.vid[3 * t + 2]];
+      var d = Math.abs((p[0] - a[0]) * nx + (p[1] - a[1]) * ny + (p[2] - a[2]) * nz);
+      if (d >= bd) continue;
+      // inside the triangle, seen along its normal (a hair over its edges)
+      var inside = true, tri = [a, b, c];
+      for (var k = 0; k < 3 && inside; k++) {
+        var u = tri[k], v = tri[(k + 1) % 3], ex = v[0] - u[0], ey = v[1] - u[1], ez = v[2] - u[2], wx = p[0] - u[0], wy = p[1] - u[1], wz = p[2] - u[2];
+        var cr = (ey * wz - ez * wy) * nx + (ez * wx - ex * wz) * ny + (ex * wy - ey * wx) * nz;
+        if (cr < -1e-3 * Math.hypot(ex, ey, ez)) inside = false;
+      }
+      if (inside) { bd = d; best = isl.owner[t]; }
+    }
+    return best;
+  }
+  /* The gap between two patches: the least distance from a corner of one to an edge of the other
+     (both ways); stops early once it is within \`enough\`. */
+  function islandGap(M, A, B, enough) {
+    var best = Infinity;
+    function oneWay(X, Y) {
+      for (var i = 0; i < X.verts.length; i++) {
+        var p = M.P[X.verts[i]];
+        for (var j = 0; j < Y.tris.length; j++) {
+          var t = Y.tris[j];
+          for (var k = 0; k < 3; k++) {
+            var a = M.P[M.vid[3 * t + k]], b = M.P[M.vid[3 * t + (k + 1) % 3]];
+            var ex = b[0] - a[0], ey = b[1] - a[1], ez = b[2] - a[2], L2 = ex * ex + ey * ey + ez * ez;
+            var u = L2 > 0 ? ((p[0] - a[0]) * ex + (p[1] - a[1]) * ey + (p[2] - a[2]) * ez) / L2 : 0;
+            u = u < 0 ? 0 : u > 1 ? 1 : u;
+            var d = Math.hypot(p[0] - a[0] - u * ex, p[1] - a[1] - u * ey, p[2] - a[2] - u * ez);
+            if (d < best) { best = d; if (best <= enough) return true; }
+          }
+        }
+      }
+      return false;
+    }
+    if (!oneWay(A, B)) oneWay(B, A);
+    return best;
+  }
+  /* The patch and every one like it (the same plane and level) within reach mm, single linkage. */
+  function islandGroup(isl, id, reach) {
+    var L = isl.list, s = L[id];
+    if (!s) return [];
+    var like = L.filter(function (o) {
+      return o.n[0] * s.n[0] + o.n[1] * s.n[1] + o.n[2] * s.n[2] > 0.9994 && Math.abs(o.off - s.off) < 0.02 && Math.abs(o.level - s.level) < 0.02;
+    });
+    var got = [s], seen = {}; seen[s.id] = 1;
+    for (var i = 0; i < got.length; i++) {
+      like.forEach(function (o) {
+        if (seen[o.id]) return;
+        var g = got[i];
+        if (Math.hypot(o.c[0] - g.c[0], o.c[1] - g.c[1], o.c[2] - g.c[2]) - o.r - g.r > reach) return;      // their bounding circles first
+        if (islandGap(isl._M, o, g, reach) <= reach) { seen[o.id] = 1; got.push(o); }
+      });
+    }
+    return got.map(function (o) { return o.id; }).sort(function (a, b) { return a - b; });
+  }
+  /* Stand the patches `ids` height mm over the face round them (negative: below it). */
+  function lift(soup, isl, ids, height) {
+    if (!isl || isl.soup !== soup || isl.len !== soup.length) return refuse('the piece changed since its lettering was read');
+    if (!ids || !ids.length) return refuse('nothing is locked');
+    if (!isFinite(height)) return refuse('the height needs a number');
+    if (Math.abs(height) < ISLAND.minLift) return refuse('a height under ' + ISLAND.minLift + ' mm leaves the letters flush with the face - nothing to print');
+    if (Math.abs(height) > ISLAND.maxLift) return refuse('a height of ' + fmt(height) + ' mm is more than one lift makes (' + ISLAND.maxLift + ')');
+    var M = isl._M, move = new Map(), i, j;
+    for (i = 0; i < ids.length; i++) {
+      var s = isl.list[ids[i]];
+      if (!s) return refuse('that letter is not on the piece any more');
+      var d = height - s.level;
+      for (j = 0; j < s.verts.length; j++) {
+        if (move.has(s.verts[j])) return refuse('two of the locked letters share a corner');
+        move.set(s.verts[j], [s.n[0] * d, s.n[1] * d, s.n[2] * d]);
+      }
+    }
+    var out = new Float32Array(soup), moved = 0;
+    for (i = 0; i < 3 * M.n; i++) {
+      var mv = move.get(M.vid[i]);
+      if (!mv) continue;
+      out[3 * i] += mv[0]; out[3 * i + 1] += mv[1]; out[3 * i + 2] += mv[2];
+      moved++;
+    }
+    var area = 0;
+    ids.forEach(function (id) { area += isl.list[id].area; });
+    return { ok: true, soup: out, moved: moved, count: ids.length, area: area, height: height };
+  }
+  /* The triangles of a patch, as a flat array of raw coordinates (for the page to draw). */
+  function islandTris(isl, id) {
+    var s = isl.list[id], soup = isl.soup;
+    if (!s) return new Float32Array(0);
+    var out = new Float32Array(9 * s.tris.length);
+    for (var i = 0; i < s.tris.length; i++) out.set(soup.subarray(9 * s.tris[i], 9 * s.tris[i] + 9), 9 * i);
+    return out;
+  }
+
   var API = {
+    islands: islands,
+    islandAt: islandAt,
+    islandGroup: islandGroup,
+    islandTris: islandTris,
+    lift: lift,
     capLoops: capLoops,
     _across: across,
     _loopsOf: loopsOf,

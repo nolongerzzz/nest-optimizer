@@ -198,7 +198,7 @@
     var idA = target && target.sourceId;
     var idB = state.joinPartnerId;
     if (!state.joinSession || idA == null || idB == null) {
-      say('Open JOIN, pick A and B, then click the point on A where B should sit', true);
+      say('Open ASSEMBLE, pick A and B, then click the point on A where B should sit', true);
       return { ok: false, reason: 'no join session' };
     }
     if (idA === idB) {
@@ -391,6 +391,76 @@
     };
     return plan;
   }
+
+  /* A whole rigid move of one placed piece, given as a WORLD matrix (16
+     numbers, column-major, THREE's Matrix4.elements): where every point of
+     the piece is to go from where it is now. The assembly editor
+     (app-asm-editor.js) works its mate out on a ghost and hands the answer
+     here, so the piece is committed by the very steps seatPiece above takes
+     once it has a plan: the turn baked into the piece's own raw triangles
+     (the pose model cannot hold a free rotation - see the top of this file),
+     x / z / liftY read off the box the move really produces, one Undo entry
+     carrying geometry and pose together. Same position lock, same paint
+     scope (whole-piece, only on the piece that moves, only when it turns).
+
+     opts.verb / opts.b name the action and the piece in the status line;
+     opts.undoType as seatPiece. A move that would put the piece under the
+     plate is refused with `below`, the depth in mm, so the caller can raise
+     the pair by that much and ask again. Says nothing on success: the caller
+     knows what the move was for. */
+  window.NSO_poseApplyWorld = function (placedB, elements, optsIn) {
+    optsIn = optsIn || {};
+    var verb = optsIn.verb || 'Place', bName = optsIn.b || 'the piece';
+    if (!placedB || !placedB.mesh) return { ok: false, reason: 'no piece' };
+    if (!elements || elements.length !== 16) return { ok: false, reason: 'no matrix' };
+    if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(placedB, verb)) {
+      return { ok: false, reason: 'position lock' };
+    }
+    var M = new THREE.Matrix4().fromArray(elements);
+    var qDelta = new THREE.Quaternion(), tDelta = new THREE.Vector3(), sDelta = new THREE.Vector3();
+    M.decompose(tDelta, qDelta, sDelta);
+    var rotationDeg = 2 * Math.acos(Math.min(1, Math.abs(qDelta.w))) * 180 / Math.PI;
+    var needsRotation = rotationDeg > ROTATION_FLOOR_DEG;
+    var modelB = state.models.find(function (m) { return m && m.id === placedB.sourceId; });
+    if (needsRotation) {
+      var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(modelB) : 0;
+      if (painted > 0) {
+        say(verb + ' stood down - ' + painted + ' painted face(s) on ' + bName + ', and this turns it ' +
+          rotationDeg.toFixed(1) + ' degrees, which would leave the paint on a different face - clear the paint first', true);
+        return { ok: false, reason: 'painted', painted: painted };
+      }
+      if (!modelB || !modelB.rawTris || modelB.rawAxis !== 'zup') {
+        say(verb + ' needs a raw piece for ' + bName + ' - nothing moved', true);
+        return { ok: false, reason: 'no rawTris' };
+      }
+    }
+    placedB.mesh.updateMatrixWorld(true);
+    var wb = plannedWorldBox(meshToWorldSoup(placedB.mesh), elements);
+    var lift = wb.lo[1] - BED;
+    if (lift < -BED_EPS) return { ok: false, reason: 'below the plate', below: -lift };
+    if (lift < 0) lift = 0;
+    var cx = (wb.lo[0] + wb.hi[0]) / 2, cz = (wb.lo[2] + wb.hi[2]) / 2;
+    var pose = (typeof snapshotPlacedPose === 'function')
+      ? snapshotPlacedPose(state.placed.indexOf(placedB)) : null;
+    if (needsRotation) {
+      var qRaw = rawQuatFor(qDelta, placedB.mesh.quaternion.clone());
+      var undoType = optsIn.undoType || 'seatSurfaceReplace';
+      if (!NSO_sculptCommitRaw(modelB, rotateRawSoup(modelB.rawTris, qRaw), undoType, null)) {
+        say(verb + ' failed - ' + bName + '\'s geometry was not replaced, nothing moved', true);
+        return { ok: false, reason: 'commit failed' };
+      }
+      var top = state.undoStack[state.undoStack.length - 1];
+      if (top && top.type === undoType && top.modelId === modelB.id) top.prevPose = pose;
+    } else if (pose) {
+      pushUndo(pose);
+    }
+    placedB.x = cx; placedB.z = cz; placedB.liftY = lift;
+    applyMeshRotation(placedB);
+    applyPlacedXZ(placedB, cx, cz);
+    if (typeof refreshOutline === 'function') refreshOutline(placedB);
+    placedB.mesh.updateMatrixWorld(true);
+    return { ok: true, rotated: needsRotation, rotationDeg: rotationDeg, x: cx, z: cz, liftY: lift };
+  };
 
   window.NSO_seatPieceAt = function (target, point, placedB, optsIn, words) {
     if (typeof NSO_SeatSurface === 'undefined' || !NSO_SeatSurface) {

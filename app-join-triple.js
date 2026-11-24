@@ -310,7 +310,7 @@
   function run() {
     var t = trio();
     if (!t) {
-      setStatus('Open JOIN, then pick three different pieces A, B and C', true);
+      setStatus('Open ASSEMBLE, then pick three different pieces A, B and C', true);
       return false;
     }
     var gapAB = junctionGap('ab');
@@ -350,7 +350,7 @@
   function runPair() {
     var p = pair();
     if (!p) {
-      setStatus('Open JOIN, then pick two different pieces A and B', true);
+      setStatus('Open ASSEMBLE, then pick two different pieces A and B', true);
       return false;
     }
     var gapAB = junctionGap('ab');

@@ -22,9 +22,17 @@
         after it previews, a refused one after that clears the preview; Enter on
         the refused value says why and changes nothing
      5  Set (button) and Enter both bake; Tab / leaving the field does not
-     6  Offset and the ring rows behave the same way
+     6  Offset and the ring rows behave the same way; a tube taken down - Bore
+        in, then Outer typed below where the bore STOOD - previews and bakes as
+        one ring move (judged on the final ring), and Outer past the NEW bore
+        is refused under Outer
      7  the preview is dropped by another piece, the other mm | in unit, Fit to
         plate and closing the card - the piece never changed
+     8  every field stays staged: Length, Width and Height all adjusted (and
+        Length again) before Set - the one preview holds all of them, the piece
+        is untouched, Set bakes the final state as one Undo step; a refusal in
+        one field names that field, leaves it out of the preview (the others
+        still draw) and blocks Set; Escape drops every field
 
    Every number is printed; the PR quotes them. */
 
@@ -136,8 +144,9 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. the buttons and the sliders ===');
   const btns = await page.evaluate(() => Array.from(document.querySelectorAll('#scale-card button')).map(b => b.id));
   console.log('   buttons: ' + btns.join(', '));
-  check('the card\'s buttons are the mm | in toggle, Set, Cancel and Fit to plate',
-    btns.join() === 'btn-scale-unit-mm,btn-scale-unit-in,btn-scale-set,btn-scale-cancel,btn-scale-fit', btns.join());
+  check('the card\'s buttons are the mm | in toggle, Set, Cancel and Fit to plate, then the Feature size section\'s (docs/FEATURE-SIZE.md)',
+    btns.join() === 'btn-scale-unit-mm,btn-scale-unit-in,btn-scale-set,btn-scale-cancel,btn-scale-fit,' +
+      'btn-scale-feature,btn-scale-feature-keep,btn-scale-feature-stretch,btn-scale-feature-set,btn-scale-feature-cancel', btns.join());
   const ui = await page.evaluate(() => {
     const rows = Array.from(document.querySelectorAll('#scale-rows .scale-row')).filter(r => !r.hidden);
     return {
@@ -405,6 +414,43 @@ withApp(async (page, logs) => {
   check('...Escape clears the reason and puts the field back', t4.why === '' && t4.value === w0.value && t4.soupIsStart && t4.undo === t0.undo,
     JSON.stringify({ why: t4.why, v: t4.value }));
 
+  // Taking the tube down: Bore in first, then Outer typed below where the bore
+  // STOOD. The staged ring fields are one move, judged on the final ring - not
+  // Outer first against the old bore (the report: "outer would reach the bore").
+  const oldBore = +(await look(page, 'scale-ring-bore')).value, small = Math.floor(oldBore) - 4;
+  await type(page, 'scale-ring-bore', 12);
+  await waitPreview(page, +t0.value);
+  await type(page, 'scale-ring-outer', small);
+  await waitPreview(page, small);
+  await settle(page);
+  const t5 = await look(page, 'scale-ring-outer');
+  console.log('   Bore 12, then Outer Ø ' + small + ' (the bore stood at ' + oldBore + '): preview ' + t5.pv[0].toFixed(2) + ', why "' + t5.why + '"');
+  check('Bore 12 then Outer below the old bore: no refusal, the preview is the new outer, Set lit, the piece untouched',
+    t5.why === '' && Math.abs(t5.pv[0] - small) < 1e-2 && !t5.setOff && t5.soupIsStart && t5.undo === t0.undo, t5.note);
+  // ...and past the NEW bore it is still refused, under Outer, the bore alone drawn.
+  await type(page, 'scale-ring-outer', 10);
+  await waitWhy(page, 'scale-ring-outer');
+  await settle(page);
+  const t6 = await look(page, 'scale-ring-outer');
+  console.log('   Outer Ø 10 against Bore 12: why "' + t6.why + '"');
+  check('...Outer 10 against that bore 12 is refused under Outer, Set greyed, the bore change still drawn',
+    /^outer would reach the bore - Ø10 outer against a Ø12 bore$/.test(t6.why) && t6.setOff && t6.previews === 1 &&
+    Math.abs(t6.pv[0] - (+t0.value)) < 1e-2 && t6.soupIsStart, t6.why);
+  await type(page, 'scale-ring-outer', small);
+  await waitPreview(page, small);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(k => state.undoStack.length > k, t0.undo, { timeout: 30000 });
+  await card(page);
+  const t7 = await look(page, 'scale-ring-outer');
+  const b7 = await look(page, 'scale-ring-bore');
+  console.log('   Set: ' + t7.status + '   readout ' + t7.readout);
+  check('Enter bakes both as one Undo step: Outer and Bore read as typed',
+    /^Outer Ø \+ Bore Ø done - /.test(t7.status) && t7.undo === t0.undo + 1 && Math.abs(+t7.value - small) < 0.05 && Math.abs(+b7.value - 12) < 0.05,
+    JSON.stringify({ outer: t7.value, bore: b7.value, undo: t7.undo - t0.undo }));
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => getActiveModel().rawTris === window.__nsoStart, null, { timeout: 30000 });
+  check('...one Undo returns the tube', (await look(page, 'scale-ring-outer')).soupIsStart);
+
   console.log('\n=== 7. what else drops a preview ===');
   await select(page, trayId);
   await card(page);
@@ -441,6 +487,65 @@ withApp(async (page, logs) => {
   check('...and reopening shows the field at 100.0 with nothing staged', d4.value === '100.0' && d4.setOff && d4.cancelOff, JSON.stringify({ v: d4.value, s: d4.setOff }));
   const helpersLeft = await page.evaluate(() => nsoHelpers.live().length);
   check('no helper left in the scene', helpersLeft === 0, String(helpersLeft));
+
+  console.log('\n=== 8. every field stays staged until Set ===');
+  await select(page, trayId);
+  await card(page);
+  await keepStart(page);
+  const u8 = await page.evaluate(() => state.undoStack.length);
+  await type(page, 'scale-length', 120);
+  await waitPreview(page, 120, 0);
+  await type(page, 'scale-width', 50);                 // switch field: Length must be held
+  await waitPreview(page, 50, 2);
+  const w8 = await look(page, 'scale-width');
+  check('moving Width keeps the Length: the preview is 120 long AND 50 wide, the piece untouched',
+    Math.abs(w8.pv[0] - 120) < 1e-2 && Math.abs(w8.pv[2] - 50) < 1e-2 && w8.soupIsStart && w8.undo === u8,
+    JSON.stringify(w8.pv));
+  const l8 = await look(page, 'scale-length');
+  check('...and the Length box still reads what was typed, Set and Cancel are lit', l8.value === '120' && !w8.setOff && !w8.cancelOff, l8.value);
+  await type(page, 'scale-height', 30);
+  await waitPreview(page, 30, 1);
+  const h8 = await look(page, 'scale-height');
+  check('Height as well: all three held on one preview',
+    Math.abs(h8.pv[0] - 120) < 1e-2 && Math.abs(h8.pv[1] - 30) < 1e-2 && Math.abs(h8.pv[2] - 50) < 1e-2, JSON.stringify(h8.pv));
+  await type(page, 'scale-length', 140);               // go back to an earlier field and change it again
+  await waitPreview(page, 140, 0);
+  const b8 = await look(page, 'scale-height');
+  check('going back to Length re-sizes it and still holds Width and Height',
+    Math.abs(b8.pv[0] - 140) < 1e-2 && Math.abs(b8.pv[1] - 30) < 1e-2 && Math.abs(b8.pv[2] - 50) < 1e-2 && b8.soupIsStart, JSON.stringify(b8.pv));
+  await page.keyboard.press('Enter');                  // Set bakes the final state
+  await waitSpan(page, 0, 140);
+  const a8 = await look(page, 'scale-height');
+  check('Set bakes the final state: 140 x 50 x 30, one Undo step, the preview gone',
+    Math.abs(a8.span[0] - 140) < 1e-3 && Math.abs(a8.span[1] - 50) < 1e-3 && Math.abs(a8.span[2] - 30) < 1e-3 &&
+    a8.undo === u8 + 1 && a8.previews === 0, JSON.stringify({ span: a8.span, undo: a8.undo }));
+  check('...and every field re-reads the new size',
+    (await page.evaluate(() => ['scale-length', 'scale-width', 'scale-height'].map(i => document.getElementById(i).value).join())) === '140.0,50.0,30.0');
+  await clearStatus(page);
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  await card(page);
+  const u8b = await look(page, 'scale-length');
+  check('one Undo restores all three', Math.abs(u8b.span[0] - 100) < 1e-3 && Math.abs(u8b.span[1] - 40) < 1e-3 && Math.abs(u8b.span[2] - 25) < 1e-3 && u8b.undo === u8, JSON.stringify(u8b.span));
+
+  console.log('  -- a refusal in one field blocks Set and names that field; Escape drops every field');
+  await type(page, 'scale-length', 120);
+  await waitPreview(page, 120, 0);
+  await type(page, 'scale-height', 1.5);
+  await waitWhy(page, 'scale-height');
+  const r8 = await look(page, 'scale-height');
+  const lw = await look(page, 'scale-length');
+  check('Height 1.5 is refused under its own field; Length shows no reason; Length 120 still previews, Set greyed',
+    r8.why.length > 0 && lw.why === '' && r8.previews === 1 && Math.abs(r8.pv[0] - 120) < 1e-2 && Math.abs(r8.pv[1] - 25) < 1e-2 && r8.setOff,
+    JSON.stringify({ why: r8.why.slice(0, 40), lwhy: lw.why, pv: r8.pv }));
+  await page.keyboard.press('Enter');
+  const n8 = await look(page, 'scale-height');
+  check('Enter with a refused field bakes nothing and says why',
+    n8.soupIsStart && n8.undo === u8 && /Height refused/.test(n8.status), n8.status.slice(0, 60));
+  await page.keyboard.press('Escape');
+  const e8 = await page.evaluate(() => ({ l: document.getElementById('scale-length').value, h: document.getElementById('scale-height').value,
+    soupSame: getActiveModel().rawTris === window.__nsoStart, previews: nsoHelpers.live().filter(o => o.userData.nsoHelper === 'scale-live').length }));
+  check('Escape puts every field back and drops the preview', e8.l === '100.0' && e8.h === '25.0' && e8.soupSame && e8.previews === 0, JSON.stringify(e8));
 
   console.log('\n=== nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

@@ -18,7 +18,8 @@
    beside the selection, then the nearest free spot (nsoFittings.spotFor, the drop's own two steps) - rebuilt as any control
    moves, paced by the live slider. Nothing is on the plate until Add to plate: the preview is a helper in the scene, not a
    piece (it is not in state.placed or state.modelGroup, so it is not picked, packed or exported). It shows only while the menu is
-   open. A choice that is refused clears it and says why, in red, and Add to plate is off.
+   open AND a tile has been clicked (armed): opening the card shows none, and Add to plate disarms it - no ghost stands beside
+   the piece just baked until a tile is clicked again. A choice that is refused clears it and says why, in red, and Add to plate is off.
 
    PAINT SCOPE: NONE. A fastener reads no face of anything and writes to no face. See docs/HANDOFF.md, "Scoping". */
 
@@ -35,7 +36,7 @@
   }
   function r2(x) { return Math.round(x * 100) / 100; }
 
-  var KINDS = ['rod', 'bolt', 'nut', 'set'];
+  var KINDS = ['rod', 'bolt', 'nut', 'set', 'extend'];
   var KIND_LENGTH = { rod: 40, bolt: 25, set: 25 };         // what Length starts at, until it is touched
   /* the five numbers: the box, the slider, the read-out, and what each says */
   var FIELDS = {
@@ -43,9 +44,21 @@
     pitch:  { box: 'inp-fs-pitch',  slider: 'inp-fs-pitch-slider',  read: 'fs-pitch-read' },
     length: { box: 'inp-fs-length', slider: 'inp-fs-length-slider', read: 'fs-length-read' },
     fit:    { box: 'inp-fs-fit',    slider: 'inp-fs-fit-slider',    read: 'fs-fit-read' },
-    nutm:   { box: 'inp-fs-nutm',   slider: 'inp-fs-nutm-slider',   read: 'fs-nutm-read' }
+    nutm:   { box: 'inp-fs-nutm',   slider: 'inp-fs-nutm-slider',   read: 'fs-nutm-read' },
+    shank:  { box: 'inp-fs-shank',  slider: 'inp-fs-shank-slider',  read: 'fs-shank-read' },
+    bevel:  { box: 'inp-fs-bevel',  slider: 'inp-fs-bevel-slider',  read: 'fs-bevel-read' },
+    bevelang: { box: 'inp-fs-bevelang', slider: 'inp-fs-bevelang-slider', read: 'fs-bevelang-read', unit: '°' },
+    headd:  { box: 'inp-fs-headd',  slider: 'inp-fs-headd-slider',  read: 'fs-headd-read' },
+    headk:  { box: 'inp-fs-headk',  slider: 'inp-fs-headk-slider',  read: 'fs-headk-read' },
+    count:  { box: 'inp-fs-count',  slider: 'inp-fs-count-slider',  read: 'fs-count-read', unit: '' },
+    depth:  { box: 'inp-fs-depth',  slider: 'inp-fs-depth-slider',  read: 'fs-depth-read' },
+    edge:   { box: 'inp-fs-edge',   slider: 'inp-fs-edge-slider',   read: 'fs-edge-read' },
+    turns:  { box: 'inp-fs-turns',  slider: 'inp-fs-turns-slider',  read: 'fs-turns-read', unit: '' }
   };
-  var S = { kind: 'bolt', head: 'hex', touched: {}, tiles: false, ok: false };
+  var THUMB = ['headd', 'headk', 'count', 'depth', 'edge'];
+  function unitOf(name) { var u = FIELDS[name].unit; return u == null ? ' mm' : u; }
+  /* armed: a tile has been clicked and not yet baked. Only then is there a preview - none on opening the card, none after a bake */
+  var S = { kind: 'bolt', head: 'hex', touched: {}, tiles: false, ok: false, armed: false };
 
   function menu() { return $('menu-fasteners'); }
   /* open, and so is every menu it sits in (Gen+): a preview for a card nobody can see is clutter */
@@ -64,11 +77,11 @@
     var t = String(r2(v));
     if (box) box.value = t;
     if (sl) sl.value = t;
-    if (rd) rd.textContent = t + ' mm';
+    if (rd) rd.textContent = t + unitOf(name);
   }
   function showRead(name) {
     var F = FIELDS[name], v = num(F.box), rd = $(F.read), sl = $(F.slider);
-    if (rd) rd.textContent = v === null ? '—' : r2(v) + ' mm';
+    if (rd) rd.textContent = v === null ? '—' : r2(v) + unitOf(name);
     if (sl && v !== null) sl.value = String(v);
   }
   function table(size) { return (have() && NSO_Thread.SIZES[size]) || null; }
@@ -78,6 +91,16 @@
   function touch(name) {
     S.touched[name] = true;
     if (name === 'major' && !S.touched.nutm) { var ma = num(FIELDS.major.box); if (ma != null) setField('nutm', stdNut(ma)); }
+    if (name === 'major' || name === 'headd') syncThumb();
+  }
+  /* A thumb head's numbers follow the thread's Ø (and its groove count the head's Ø) until each is moved: the engine's own defaults, so
+     a number not moved is not handed to it at all. */
+  function syncThumb() {
+    if (!have() || (S.head !== 'knurled' && S.head !== 'fluted')) return;
+    var D = num(FIELDS.major.box) || 8, d = NSO_Thread.thumbDefaults(S.head, D);
+    if (S.touched.headd) { var hd = num(FIELDS.headd.box); if (hd) d.count = Math.max(S.head === 'knurled' ? 6 : 5, Math.round(Math.PI * hd / (S.head === 'knurled' ? 4 : 6.3))); }
+    var map = { headd: d.headD, headk: d.headK, count: d.count, depth: d.depth, edge: d.edge };
+    THUMB.forEach(function (n) { if (!S.touched[n]) setField(n, map[n]); });
   }
 
   /* Size chosen: Ø, Pitch and the nut's thickness go to the table's own (and are no longer "touched"). */
@@ -86,6 +109,8 @@
     if (!t) return;
     setField('major', t.major); setField('pitch', t.pitch); setField('nutm', stdNut(t.major));
     S.touched.major = S.touched.pitch = S.touched.nutm = false;
+    THUMB.forEach(function (n) { S.touched[n] = false; });
+    syncThumb();
   }
 
   /* the card's numbers as nso_thread.js's options: an unchanged Ø or pitch is not passed, so the table's own is used exactly */
@@ -95,7 +120,15 @@
     var ma = num(FIELDS.major.box), pi = num(FIELDS.pitch.box);
     if (ma != null && Math.abs(ma - t.major) > 0.0051) o.major = ma;
     if (pi != null && Math.abs(pi - t.pitch) > 0.0051) o.pitch = pi;
-    return { o: o, length: num(FIELDS.length.box), fit: num(FIELDS.fit.box), nutm: num(FIELDS.nutm.box), size: size };
+    // the bevel, the plain shank, and a thumb head's numbers (only those moved: the rest are the engine's own defaults)
+    var bv = num(FIELDS.bevel.box);
+    if (bv > 0) { o.bevel = bv; o.bevelAngle = num(FIELDS.bevelang.box); }
+    var head = {};
+    if (S.head === 'knurled' || S.head === 'fluted') {
+      var key = { headd: 'headD', headk: 'headK', count: 'count', depth: 'depth', edge: 'edge' };
+      THUMB.forEach(function (n) { if (S.touched[n] && num(FIELDS[n].box) != null) head[key[n]] = num(FIELDS[n].box); });
+    }
+    return { o: o, length: num(FIELDS.length.box), fit: num(FIELDS.fit.box), nutm: num(FIELDS.nutm.box), size: size, shank: num(FIELDS.shank.box) || 0, head: head };
   }
 
   /* what the current choice makes: { ok, items: [{ label, soup, reason, kind }], text } or { ok: false, reason } */
@@ -115,10 +148,10 @@
       bad = one('Rod', function () { return NSO_Thread.rod(Object.assign({}, I.o, { length: I.length != null ? I.length : 40 })); }, function (q) { return 'rod ' + q.info.size; });
     }
     if (!bad && (kind === 'bolt' || kind === 'set')) {
-      bad = one('Bolt', function () { return NSO_Thread.bolt(Object.assign({}, I.o, { length: I.length != null ? I.length : 25, head: S.head })); }, function (q) { return 'bolt ' + q.info.size; });
+      bad = one('Bolt', function () { return NSO_Thread.bolt(Object.assign({}, I.o, I.head, { length: I.length != null ? I.length : 25, head: S.head, shank: I.shank })); }, function (q) { return 'bolt ' + q.info.size; });
     }
     if (!bad && (kind === 'nut' || kind === 'set')) {
-      bad = one('Nut', function () { return NSO_Thread.nut(Object.assign({}, I.o, { fit: I.fit, thickness: S.touched.nutm && I.nutm != null ? I.nutm : undefined })); },
+      bad = one('Nut', function () { var on = Object.assign({}, I.o); delete on.bevel; delete on.bevelAngle; return NSO_Thread.nut(Object.assign(on, { fit: I.fit, thickness: S.touched.nutm && I.nutm != null ? I.nutm : undefined })); },
                 function (q) { return 'nut ' + q.info.size; });
     }
     if (bad) return bad;
@@ -134,9 +167,50 @@
 
   function setAdd(on) { var b = $('btn-fs-add'); if (b) b.disabled = !on; S.ok = !!on; }
 
+  /* ------------------------------------------------------- Extend thread (the selected screw) */
+  /* NSO_ThreadExtend reads the SELECTED piece's thread once per mesh (its axis, pitch, hand, the full-depth turns and which end is the tip)
+     and extends it by whole turns. The preview is the piece as it would become, laid over it (the piece translucent under it); Apply
+     replaces the piece - the sculpt commit, one Undo ('threadExtend'). */
+  var EX = { soup: null, model: null, rd: null };
+  function selModel() { var m = (typeof getActiveModel === 'function') ? getActiveModel() : null; return (m && m.rawTris && m.rawAxis === 'zup') ? m : null; }
+  function readSel() {
+    var m = selModel();
+    if (!m) return null;
+    if (EX.soup !== m.rawTris) {
+      EX.soup = m.rawTris; EX.model = m;
+      try { EX.rd = window.NSO_ThreadExtend ? NSO_ThreadExtend.read(m.rawTris) : { ok: false, reason: 'Fasteners needs nso_thread_extend.js' }; }
+      catch (e) { EX.rd = { ok: false, reason: (e && e.message) || String(e) }; }
+      // the Turns slider runs down to as many turns as the thread can lose
+      var sl = $(FIELDS.turns.slider);
+      if (sl && EX.rd.ok) sl.min = String(-Math.max(1, Math.floor(EX.rd.turnsFull - 0.5)));
+    }
+    return EX.rd;
+  }
+  function buildExtend() {
+    var m = selModel();
+    if (!m) return { ok: false, reason: 'Extend thread: select the screw first - its thread is read off the piece' };
+    var rd = readSel();
+    if (!rd.ok) return { ok: false, reason: 'Extend thread: ' + rd.reason };
+    var turns = Math.round(num(FIELDS.turns.box) || 0);
+    if (!turns) return { ok: false, soft: true, reason: rd.reason + ' - move Turns to make it longer (or shorter)' };
+    var r;
+    try { r = NSO_ThreadExtend.extend(m.rawTris, rd, turns); } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
+    if (!r.ok) return { ok: false, reason: 'Extend thread: ' + r.reason };
+    return { ok: true, model: m, soup: r.soup, info: r.info, text: r.reason, read: rd };
+  }
+
   /* the preview, now: build what the card says, show it, say what it is - or clear it and say why */
   function refresh() {
     if (!isOpen()) { ghostClear(); return null; }
+    if (!S.armed) { ghostClear(); setAdd(false); readout('Pick Rod, Bolt, Nut or Bolt + nut to preview it - or Extend thread for a screw you have selected'); return null; }
+    if (S.kind === 'extend') {
+      var e = buildExtend();
+      if (!e.ok) { ghostClear(); setAdd(false); readout(e.reason, !e.soft); return e; }
+      if (PV()) PV().showOn('fasteners', e.model, e.soup);
+      setAdd(true);
+      readout('Preview - ' + e.text);
+      return e;
+    }
     var b = build();
     if (!b.ok) { ghostClear(); setAdd(false); readout(b.reason, true); return b; }
     ghostShow(b.items); setAdd(true);
@@ -151,25 +225,37 @@
   function syncRows() {
     var k = S.kind;
     var show = function (id, on) { var el = $(id); if (el) el.hidden = !on; };
-    show('fs-length-row', k !== 'nut');
-    show('fs-head-row', k === 'bolt' || k === 'set');
+    var ext = k === 'extend', bolt = k === 'bolt' || k === 'set', thumb = bolt && (S.head === 'knurled' || S.head === 'fluted');
+    ['fs-size-row', 'fs-major-row', 'fs-pitch-row'].forEach(function (id) { show(id, !ext); });
+    show('fs-length-row', k !== 'nut' && !ext);
+    show('fs-head-row', bolt);
     show('fs-fit-row', k === 'nut' || k === 'set');
     show('fs-nutm-row', k === 'nut' || k === 'set');
-    document.querySelectorAll('#fs-kind-row [data-kind]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-kind') === k ? 'true' : 'false'); });
+    show('fs-shank-row', bolt);
+    show('fs-bevel-row', bolt || k === 'rod');
+    show('fs-bevelang-row', (bolt || k === 'rod') && (num(FIELDS.bevel.box) || 0) > 0);
+    THUMB.forEach(function (n) { show('fs-' + n + '-row', thumb); });
+    show('fs-turns-row', ext);
+    var lab = $('fs-count-read') && $('fs-count-row') ? $('fs-count-row').querySelector('label') : null;
+    if (lab) lab.textContent = S.head === 'fluted' ? 'Flutes' : 'Grooves';
+    var lab2 = $('fs-depth-row') ? $('fs-depth-row').querySelector('label') : null;
+    if (lab2) lab2.textContent = S.head === 'fluted' ? 'Flute depth' : 'Groove depth';
+    var add = $('btn-fs-add'); if (add) add.textContent = ext ? 'Apply to piece' : 'Add to plate';
+    document.querySelectorAll('#fs-kind-row [data-kind]').forEach(function (b) { b.setAttribute('aria-pressed', S.armed && b.getAttribute('data-kind') === k ? 'true' : 'false'); });
     document.querySelectorAll('#fs-head-row [data-head]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-head') === S.head ? 'true' : 'false'); });
   }
   function selectKind(kind) {
     if (KINDS.indexOf(kind) < 0) return false;
     var was = S.kind;
-    S.kind = kind;
+    S.kind = kind; S.armed = true;
     if (!S.touched.length && KIND_LENGTH[kind] && KIND_LENGTH[kind] !== KIND_LENGTH[was]) setField('length', KIND_LENGTH[kind]);
     syncRows();
     refresh();
     return true;
   }
   function selectHead(head) {
-    if (head !== 'hex' && head !== 'socket') return false;
-    S.head = head; syncRows(); refresh();
+    if (['hex', 'socket', 'knurled', 'fluted'].indexOf(head) < 0) return false;
+    S.head = head; syncThumb(); syncRows(); refresh();   // a head choice only changes a preview that is already up
     return true;
   }
 
@@ -178,6 +264,7 @@
   /* Add to plate: drop what the preview shows. A set is both or neither (built first, so a refusal on either adds nothing). */
   function bake(kind) {
     if (kind && kind !== S.kind) { S.kind = kind; syncRows(); }
+    if (S.kind === 'extend') return applyExtend();
     var b = build();
     var tag = { rod: 'Rod', bolt: 'Bolt', nut: 'Nut', set: 'Bolt + nut' }[S.kind];
     if (!b.ok) { say(tag + ' refused - nothing added: ' + b.reason, true); readout(b.reason, true); return { ok: false, reason: b.reason }; }
@@ -193,8 +280,23 @@
     var res = { ok: made.every(function (m) { return m.ok; }), pieces: made, reason: b.text };
     if (made.length === 1) { res.modelId = made[0].modelId; res.name = made[0].name; res.placedIndex = made[0].placedIndex; res.added = made[0].ok; }
     else { res.bolt = made[0]; res.nut = made[1]; }
-    if (isOpen()) { var again = build(); if (again.ok) ghostShow(again.items); }       // the preview stands beside what was just added
+    /* baked: disarm. No new ghost beside the piece just added - the next one starts when a tile is clicked again */
+    S.armed = false; syncRows(); setAdd(false); ghostClear();
     return res;
+  }
+
+  /* Apply: the selected piece becomes the extended one - one Undo puts it back. */
+  function applyExtend() {
+    var e = buildExtend();
+    if (!e.ok) { say('Extend thread refused - nothing changed: ' + e.reason.replace(/^Extend thread: /, ''), true); readout(e.reason, !e.soft); return { ok: false, reason: e.reason }; }
+    ghostClear();                                           // the overlay rides on the piece's old mesh, which the commit replaces
+    var done = typeof NSO_sculptCommitRaw === 'function' && NSO_sculptCommitRaw(e.model, e.soup, 'threadExtend', 'Thread extended - ' + e.text);
+    if (!done) { say('Extend thread failed - the result could not be committed', true); return { ok: false, reason: 'commit failed' }; }
+    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+    readout('Applied - ' + e.text);
+    EX.soup = null;                                         // the piece is new: read it again next time
+    S.armed = false; syncRows(); setAdd(false);
+    return { ok: true, modelId: e.model.id, reason: e.text, info: e.info };
   }
 
   /* ---------------------------------------------------------------- the tiles */
@@ -213,6 +315,15 @@
         return { soup: join(body, moveZ(nut.soup, -(bolt.info.headK + 16) + 1.5)), view: { yaw: 0.62, elev: 0.5 }, tint: function (t) { return t >= n1 ? AMBER : null; } };
       case 'hex': return { soup: flipUp(T.bolt({ size: 'M8', length: 3.5 }).soup), view: { yaw: 0.62, elev: 0.85 } };
       case 'socket': return { soup: flipUp(T.bolt({ size: 'M8', length: 3.5, head: 'socket' }).soup), view: { yaw: 0.62, elev: 1.0 } };
+      case 'knurled': return { soup: flipUp(T.bolt({ size: 'M8', length: 4, head: 'knurled' }).soup), view: { yaw: 0.62, elev: 0.55 } };
+      case 'fluted': return { soup: flipUp(T.bolt({ size: 'M8', length: 4, head: 'fluted' }).soup), view: { yaw: 0.62, elev: 0.55 } };
+      case 'extend':                                        // a screw with the turns an extension adds in amber
+        bolt = T.bolt({ size: 'M8', length: 20, bevel: T.bevelDefault('M8') }); body = flipUp(bolt.soup);
+        var k0 = bolt.info.headK;
+        return { soup: body, view: { yaw: 0.62, elev: 0.5 }, tint: function (t) {
+          var z = (body[9 * t + 2] + body[9 * t + 5] + body[9 * t + 8]) / 3;
+          return z < -(k0 + 9) && z > -(k0 + 15) ? AMBER : null;
+        } };
     }
     return null;
   }
@@ -246,7 +357,7 @@
     Object.keys(FIELDS).forEach(function (name) {
       var F = FIELDS[name];
       if (window.nsoLiveSlider) {
-        window.nsoLiveSlider.bind({ slider: F.slider, box: F.box, read: F.read, unit: ' mm', onLive: function () { touch(name); soon(); } });
+        window.nsoLiveSlider.bind({ slider: F.slider, box: F.box, read: F.read, unit: unitOf(name), onLive: function () { touch(name); if (name === 'bevel') syncRows(); soon(); } });
       } else {                                              // no live slider module: the box and the slider still say one number
         var box = $(F.box), sl = $(F.slider);
         if (box) box.addEventListener('input', function () { touch(name); showRead(name); soon(); });
@@ -263,10 +374,17 @@
     var onToggle = function () { if (isOpen()) { drawTiles(); refresh(); } else ghostClear(); };
     for (var d = m; d; d = d.parentElement && d.parentElement.closest('details')) d.addEventListener('toggle', onToggle);
     // a click that selects another piece (or an Undo, a Remove) moves where the drop would land: stand the preview there
-    window.addEventListener('pointerup', function () { if (isOpen() && PV() && PV().count()) setTimeout(function () { if (PV().state().owner === 'fasteners') PV().place(); }, 0); }, true);
+    window.addEventListener('pointerup', function () {
+      if (!isOpen()) return;
+      setTimeout(function () {
+        if (S.armed && S.kind === 'extend') { var m = selModel(); if ((m ? m.rawTris : null) !== EX.soup || !PV().count()) refresh(); return; }   // another piece: read it
+        if (PV() && PV().count() && PV().state().owner === 'fasteners') PV().place();
+      }, 0);
+    }, true);
     if (have()) {
       var f = $(FIELDS.fit.box); if (f && !S.touched.fit) setField('fit', NSO_Thread.DEFAULTS.fit);
       syncFromSize(); setField('length', KIND_LENGTH[S.kind]);
+      setField('shank', 0); setField('bevel', 0); setField('bevelang', 45); setField('turns', 3);
     }
     syncRows();
     if (isOpen()) { drawTiles(); refresh(); }
@@ -276,9 +394,10 @@
     // each bakes that kind with the card's numbers now (what the Add to plate button does for the chosen tile)
     rod: function () { return bake('rod'); }, bolt: function () { return bake('bolt'); }, nut: function () { return bake('nut'); }, set: function () { return bake('set'); },
     add: bake, select: selectKind, head: selectHead, preview: refresh, build: build, drawTiles: drawTiles,
+    extendRead: function () { return readSel(); },
     state: function () {
       var g = PV() ? PV().state() : { owner: null, count: 0, ghost: [] }, mine = g.owner === 'fasteners';
-      return { kind: S.kind, head: S.head, ghosts: mine ? g.count : 0, ok: S.ok, open: isOpen(), tiles: S.tiles, touched: Object.assign({}, S.touched), ghost: mine ? g.ghost : [] };
+      return { kind: S.kind, head: S.head, armed: S.armed, ghosts: mine ? g.count : 0, overlay: mine && !!g.overlay, ok: S.ok, open: isOpen(), tiles: S.tiles, touched: Object.assign({}, S.touched), ghost: mine ? g.ghost : [] };
     }
   };
 

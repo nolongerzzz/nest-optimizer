@@ -95,6 +95,8 @@
   var Densify = (typeof require === 'function' && typeof module !== 'undefined')
     ? require('./nso_densify.js') : root.NSO_Densify;
 
+  var WELD_MM = 1e-4;          // closedGuard's weld: tools/mesh_validate.py's WELD_TOL
+  var FADE_MM = 3;             // a flex vertex's move fades in over this much surface from the fork's boundary
   var SPACING = 1.0;           // mm, the densify target in the flex zone
   var PERSIST_MM = 1.5;        // a branch shorter than this beyond its joint is a bump, not a fork
   var BASE_FRAC = 0.03;        // the root is the lowest 3% of the piece's height
@@ -237,8 +239,63 @@
 
   /* ---------------------------------------------------------------- analyse */
 
-  /* The limb a grab at `click` would take. */
-  function analyze(ctx, click) {
+  /* A ROD'S LIMB, from a hint (nso_rod_branch.js, NSO_rodLimbHint): the bone
+     is the rod's own axis, the hinge the hint's (just past where the rod
+     meets what it grows from), the limb every vertex joined to the grab
+     through vertices at or past the hinge, the carried part those at or past
+     the grab's ring. Used only when the flex zone it gives is clean rod - every
+     limb vertex short of the grab within the rod's girth of the bone - else
+     null, and the tree reading below decides. */
+  var ROD_MIN_ZONE_MM = 1;
+  function hintR(h) { return h ? Math.max(h.radius || 0, h.tipR || 0) : 1; }
+  function rodAnalyze(ctx, click, hint) {
+    var mesh = ctx.mesh, g = ctx.graph, pos = mesh.pos, V = mesh.vertCount;
+    var a = hint.axis, C = hint.center, vg = nearestVertex(pos, V, click);
+    var hv = new Float64Array(V), v, j;
+    for (v = 0; v < V; v++) hv[v] = (pos[v * 3] - C[0]) * a[0] + (pos[v * 3 + 1] - C[1]) * a[1] + (pos[v * 3 + 2] - C[2]) * a[2];
+    var hG = hv[vg], hH = hint.hHinge;
+    if (!(hG - hH >= ROD_MIN_ZONE_MM)) {
+      return { ok: false, reason: 'that grab is ' + round3(Math.max(0, hG - hH + 1)) + ' mm from where this rod meets what it grows from - grab it further out' };
+    }
+    function flood(min) {
+      var mask = new Uint8Array(V), stack = [vg];
+      mask[vg] = 1;
+      while (stack.length) {
+        var u = stack.pop();
+        for (j = g.start[u]; j < g.start[u + 1]; j++) {
+          var w = g.list[j];
+          if (!mask[w] && hv[w] >= min) { mask[w] = 1; stack.push(w); }
+        }
+      }
+      return mask;
+    }
+    var limb = flood(hH), carried = flood(hG - 1e-9), nLimb = 0, nCarried = 0, girth = 0;
+    var Q = [C[0] + hH * a[0], C[1] + hH * a[1], C[2] + hH * a[2]], A = [C[0] + hG * a[0], C[1] + hG * a[1], C[2] + hG * a[2]];
+    for (v = 0; v < V; v++) {
+      if (carried[v]) nCarried++;
+      if (!limb[v]) continue;
+      nLimb++;
+      if (carried[v]) continue;
+      var rx = pos[v * 3] - Q[0], ry = pos[v * 3 + 1] - Q[1], rz = pos[v * 3 + 2] - Q[2], s = rx * a[0] + ry * a[1] + rz * a[2];
+      var w2 = Math.hypot(rx - s * a[0], ry - s * a[1], rz - s * a[2]);
+      if (w2 > girth) girth = w2;
+    }
+    var wide = Math.max(hint.radius, hint.tipR || 0) * 1.25 + 0.5;
+    if (girth > wide || nCarried >= V) return null;
+    return {
+      ok: true, rod: true, vg: vg, fork: -1, atBase: false, tFork: 0, dGrab: ctx.d[vg],
+      limb: limb, carried: carried, nLimb: nLimb, nCarried: nCarried,
+      Q: Q, A: A, u0: [a[0], a[1], a[2]], L: hG - hH,
+      grabPoint: [pos[vg * 3], pos[vg * 3 + 1], pos[vg * 3 + 2]]
+    };
+  }
+
+  /* The limb a grab at `click` would take (hint: a rod's, above). */
+  function analyze(ctx, click, hint) {
+    if (hint && hint.ok) { var ra = rodAnalyze(ctx, click, hint); if (ra) return ra; }
+    return treeAnalyze(ctx, click);
+  }
+  function treeAnalyze(ctx, click) {
     var mesh = ctx.mesh, g = ctx.graph, d = ctx.d, order = ctx.order, pos = mesh.pos, V = mesh.vertCount;
     var vg = nearestVertex(pos, V, click);
     var parent = new Int32Array(V).fill(-1), maxd = new Float64Array(V), added = new Uint8Array(V);
@@ -335,9 +392,9 @@
   }
 
   /* What a click would grab, for the hover marker: no densify, no copy. */
-  function probe(ctx, click) {
+  function probe(ctx, click, hint) {
     if (!ctx || !ctx.ok) return { ok: false, reason: ctx ? ctx.reason : 'no context' };
-    var an = analyze(ctx, click);
+    var an = analyze(ctx, click, hint);
     if (!an.ok) return an;
     an.radius = ringRadius(ctx.mesh, an);
     return an;
@@ -352,12 +409,39 @@
     if (!click || click.length < 3) { out.reason = 'no grab point'; return out; }
     var ctx0 = opts.ctx && opts.ctx.ok ? opts.ctx : context(rawTris);
     if (!ctx0.ok) { out.reason = ctx0.reason; return out; }
-    var an = analyze(ctx0, click);
+    var an = analyze(ctx0, click, opts.hint);
     if (!an.ok) { out.reason = an.reason; return out; }
 
     var spacing = opts.spacing > 0 ? opts.spacing : SPACING;
     var mesh = ctx0.mesh, ctx = ctx0, dens = null;
-    if (opts.densify !== false) {
+    if (opts.densify !== false && an.rod) {
+      // A ROD's flex zone is a known cylinder (radius rr, Q to A along u0): it
+      // is subdivided in small spheres strung along the axis, each just wider
+      // than the rod and centred where its reach along the surface starts at
+      // the hinge, so none of them reaches back over the hinge into the
+      // junction (whose slivers nso_densify.js's needle zip has been seen to
+      // break). A Branch-made rod is ringed finer than SPACING already and
+      // splits nothing; a Stock rod's full-length facets are laddered.
+      var rr = Math.max(hintR(opts.hint), 0.5), rho = 1.05 * rr + 0.6, along = Math.sqrt(Math.max(0, rho * rho - rr * rr));
+      var cur = rawTris, splits = 0, before = (rawTris.length / 9) | 0, last = null;
+      for (var sc = along; ; sc += 2 * along) {
+        var sAt = Math.min(sc, an.L);
+        var zc = [an.Q[0] + sAt * an.u0[0], an.Q[1] + sAt * an.u0[1], an.Q[2] + sAt * an.u0[2]];
+        var rg = Densify.region(cur, { c: zc, r: rho }, { spacing: spacing, maxTris: opts.maxTris || MAX_TRIS, margin: 0 });
+        if (!rg.ok) { out.reason = rg.reason; return out; }
+        if (rg.changed) { cur = rg.soup; splits += rg.report.splits; last = rg; } else if (last) last = null;
+        if (sAt >= an.L) break;
+      }
+      if (splits) {
+        var mesh2 = last ? last.mesh : Densify.weld(cur);
+        dens = { spacing: spacing, splits: splits, passes: 0, capped: false, trisBefore: before, trisAfter: mesh2.triCount, zone: { c: an.A.slice(), r: an.L } };
+        ctx = context(null, mesh2);
+        if (!ctx.ok) { out.reason = ctx.reason; return out; }
+        an = analyze(ctx, click, opts.hint);
+        if (!an.ok) { out.reason = an.reason; return out; }
+        mesh = mesh2;
+      } else dens = { spacing: spacing, splits: 0, passes: 0, capped: false, trisBefore: before, trisAfter: before, zone: { c: an.A.slice(), r: an.L } };
+    } else if (opts.densify !== false) {
       // a sphere round the flex zone: every vertex of it, from its midpoint.
       var M = mul(add(an.Q, an.A), 0.5), r = an.L / 2 + 1, pos0 = ctx0.mesh.pos, V0 = ctx0.mesh.vertCount;
       for (var v = 0; v < V0; v++) {
@@ -372,7 +456,7 @@
       if (reg.changed) {
         ctx = context(null, reg.mesh);
         if (!ctx.ok) { out.reason = ctx.reason; return out; }
-        an = analyze(ctx, click);
+        an = analyze(ctx, click, opts.hint);
         if (!an.ok) { out.reason = an.reason; return out; }
         mesh = reg.mesh;
       }
@@ -440,6 +524,30 @@
       v = touched[i];
       S.rigid[i] = (S.carried[v] && (ss[i] <= 0 || ss[i] >= S.reach || S.ctx.d[v] - dg > band)) || ss[i] >= S.reach ? 1 : 0;
     }
+    /* THE FADE. The zone's law moves a vertex by how far it is along the bone
+       from the hinge, and the fork's loop is square to the bone only when the
+       limb leaves its parent square: a branch that leaves at 45° meets it in a
+       loop that runs several mm along the bone, so the zone's vertices next
+       to the loop's high side already move while their neighbours across it
+       (not the limb's) hold - and the triangles between tear. So each flex
+       vertex's move is scaled by smoothstep(its surface distance from the
+       nearest vertex that holds / fade), fade = FADE_MM or a quarter of the
+       zone, whichever is less: 0 on the loop, the zone's own law beyond. On a
+       square fork the loop's neighbours barely move anyway, and nothing
+       changes that the guards could see. */
+    var isT = new Uint8Array(S.mesh.vertCount), g = S.ctx.graph, src = [];
+    for (i = 0; i < touched.length; i++) isT[touched[i]] = 1;
+    for (i = 0; i < touched.length; i++) {
+      v = touched[i];
+      for (var j = g.start[v]; j < g.start[v + 1]; j++) { var w2 = g.list[j]; if (!isT[w2] && src.indexOf(w2) < 0) src.push(w2); }
+    }
+    var fade = Math.min(FADE_MM, S.reach / 4), db = src.length && fade > 0 ? geodesic(S.mesh, g, src) : null;
+    S.fade = new Float64Array(touched.length);
+    for (i = 0; i < touched.length; i++) {
+      if (S.rigid[i] || !db) { S.fade[i] = 1; continue; }
+      var x = Math.min(1, db[touched[i]] / fade);
+      S.fade[i] = x * x * (3 - 2 * x);
+    }
     S.last = null;
     return S;
   }
@@ -488,7 +596,7 @@
         v = S.touched[i]; o = v * 3;
         var sx = (bp[o] - Q[0]) * u0[0] + (bp[o + 1] - Q[1]) * u0[1] + (bp[o + 2] - Q[2]) * u0[2];
         var tt = Math.min(1, Math.max(0, sx / Lr));
-        var slide = S.rigid[i] ? e : e * tt * tt * (3 - 2 * tt);
+        var slide = S.rigid[i] ? e : e * tt * tt * (3 - 2 * tt) * S.fade[i];
         pos[o] = bp[o] + slide * u0[0]; pos[o + 1] = bp[o + 1] + slide * u0[1]; pos[o + 2] = bp[o + 2] + slide * u0[2];
       }
       res.u1 = u0; res.A1 = add(A, mul(u0, e));
@@ -522,6 +630,10 @@
         px = Q[0] + cu2 * u0[0] + cb2 * b[0] + z * n[0];
         py = Q[1] + cu2 * u0[1] + cb2 * b[1] + z * n[1];
         pz = Q[2] + cu2 * u0[2] + cb2 * b[2] + z * n[2];
+      }
+      if (!S.rigid[i] && S.fade[i] < 1) {
+        var fd = S.fade[i];
+        px = bp[o] + fd * (px - bp[o]); py = bp[o + 1] + fd * (py - bp[o + 1]); pz = bp[o + 2] + fd * (pz - bp[o + 2]);
       }
       pos[o] = px; pos[o + 1] = py; pos[o + 2] = pz;
     }
@@ -663,6 +775,42 @@
     return res;
   }
 
+  /* CLOSED, as it came. The flex zone is subdivided (nso_densify.js) before
+     it moves, and on a mesh a boolean made - a branch welded on by Cylinders
+     → Branch, say, its junction long slivers - that subdivision has been seen
+     to leave open and doubled edges, which the fold and pierce guards (both
+     on the subdivided mesh) cannot see. So the piece handed back is counted
+     as the canonical checker counts it (welded at WELD_MM): no more open
+     edges, edges on three or more faces, edges walked the same way twice, or
+     triangles that the weld collapses (an edge under WELD_MM: the checker
+     keeps them and finds their edges doubled) than the piece had. */
+  function edgeCounts(s) {
+    // welded as the canonical checker welds (tools/mesh_validate.py, 1e-4 mm):
+    // a new point that lands that close to an old one IS that vertex to every
+    // slicer, so two such points are one, and their triangles are counted so
+    var m = Densify.weld(s, WELD_MM), tri = m.tri, nv = m.vertCount, E = new Map(), k;
+    for (var t = 0; t < m.triCount; t++) for (k = 0; k < 3; k++) {
+      var a = tri[t * 3 + k], b = tri[t * 3 + (k + 1) % 3], ek = a < b ? a * nv + b : b * nv + a, e = E.get(ek);
+      if (!e) { e = [0, 0]; E.set(ek, e); }
+      e[0]++; if (a < b) e[1]++;
+    }
+    var open = 0, nm = 0, flip = 0;
+    E.forEach(function (e) { if (e[0] === 1) open++; else if (e[0] > 2) nm++; else if (e[1] !== 1) flip++; });
+    return { open: open, nm: nm, flip: flip, dropped: ((s.length / 9) | 0) - m.triCount };
+  }
+  function closedGuard(before, after) {
+    var b = edgeCounts(before), a = edgeCounts(after);
+    var res = { ok: a.open <= b.open && a.nm <= b.nm && a.flip <= b.flip && a.dropped <= b.dropped, before: b, after: a };
+    if (!res.ok) {
+      res.reason = 'the limb\'s surface could not be subdivided cleanly here (it would come back with ' +
+        (a.dropped - b.dropped > 0 ? (a.dropped - b.dropped) + ' triangle(s) thinner than the slicer\'s weld ' : '') +
+        (a.open - b.open > 0 ? (a.open - b.open) + ' open edge(s) ' : '') + (a.nm - b.nm > 0 ? (a.nm - b.nm) + ' edge(s) on more than two faces ' : '') +
+        (a.flip - b.flip > 0 ? (a.flip - b.flip) + ' edge(s) wound against their neighbour ' : '') +
+        '- the piece is unchanged; grab nearer the tip, or with a shorter Reach)';
+    }
+    return res;
+  }
+
   function f32(pos) {
     var o = new Float64Array(pos.length);
     for (var i = 0; i < pos.length; i++) o[i] = Math.fround(pos[i]);
@@ -719,8 +867,11 @@
     if (!fold.ok) { res.reason = fold.reason; res.report = { fold: fold }; return res; }
     var pierce = pierceGuard(S, opts);
     if (!pierce.ok) { res.reason = pierce.reason; res.report = { fold: fold, pierce: pierce }; return res; }
+    var out = Densify.toSoup(S.mesh, S.pos);
+    var shut = closedGuard(S.origTris, out);
+    if (!shut.ok) { res.reason = shut.reason; res.report = { fold: fold, pierce: pierce, closed: shut }; return res; }
     res.ok = true;
-    res.tris = Densify.toSoup(S.mesh, S.pos);
+    res.tris = out;
     res.report = {
       moved: S.touched.length, carried: S.an.nCarried, limb: S.an.nLimb,
       extend: S.last.ext, angleDeg: S.last.angleDeg, reach: S.reach, zone: S.L,
@@ -740,7 +891,7 @@
     SPACING: SPACING, PERSIST_MM: PERSIST_MM, MAX_BEND_DEG: MAX_BEND_DEG, MIN_ZONE_FRAC: MIN_ZONE_FRAC,
     context: context, probe: probe, analyze: analyze, prepare: prepare, setReach: setReach,
     displaceTo: displaceTo, displaceBy: displaceBy, finish: finish, describe: describe,
-    foldGuard: foldGuard, pierceGuard: pierceGuard
+    foldGuard: foldGuard, pierceGuard: pierceGuard, closedGuard: closedGuard
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

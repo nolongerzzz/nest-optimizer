@@ -241,7 +241,7 @@ function verts(app) {
     app.ctx.NSO_SUPPORTS_CARD.cancelSlice();
     const r1 = await p1;
     check('Cancel stops it: the Slice card is told, the line says so (not as an error), the button is back', log[1] === 'cancel' && r1.cancelled && app.el('sup-slice-line').textContent === 'Slice cancelled.' &&
-      !app.el('sup-slice-line').classList.contains('is-bad') && app.el('btn-sup-slice').disabled === false && app.el('btn-sup-slice').textContent === 'Slice and Preview' && app.el('btn-sup-slice-cancel').hidden === true);
+      !app.el('sup-slice-line').classList.contains('is-bad') && app.el('btn-sup-slice').disabled === false && app.el('btn-sup-slice').textContent === 'Preview' && app.el('btn-sup-slice-cancel').hidden === true);
     const p3 = app.ctx.NSO_SUPPORTS_CARD.sliceAndPreview();
     release({ ok: false, reason: 'Slice refused: the plate has nothing on it', previewed: false });
     await p3;

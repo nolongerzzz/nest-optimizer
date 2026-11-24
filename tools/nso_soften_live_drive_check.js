@@ -23,9 +23,17 @@
 //   6  a click on a box with the card open names nothing and bakes nothing
 //   7  a pocket piece  its preview comes back from the boolean kernel, and the
 //                      bake installs that soup
+//   8  a curved rim    a drawn outline (rounded corners, a bulged side) turned
+//                      into a wrist rest: Corners+edges waits for the face, a
+//                      real click previews the whole rim rounded at R 15 and
+//                      says why, the bake is the preview, ONE Undo step
 
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { writeSTL } = require('./nso_stl_io.js');
+const CS = require('../nso_custom_shape.js');
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -280,6 +288,61 @@ withApp(async (page, logs) => {
       for (let k = 0; k < g.length; k++) if (g[k] !== r[k]) return false;
       return true;
     }, [pid]));
+  }
+
+  /* ------------------------------------------------------------------ 8 */
+  console.log('\n=== 8. a curved rim: Corners+edges rounds all of it ===');
+  {
+    // A wrist rest: a Custom shape outline (r 8 corners, one side bulged into
+    // a long curve) as a tray with a 24 mm floor, turned over so the floor is
+    // the top slab and the pocket is underneath.
+    const H = 50;
+    const spec = CS.preset('rounded');
+    spec.mode = 'tray'; spec.height = H; spec.floor = 24;
+    spec.sides.forEach(x => { x.wall = 2.5; });
+    spec.sides[2].bulge = 10;
+    const tray = CS.make(CS.normalize(spec)).soup, rest = new Float32Array(tray.length);
+    for (let t = 0; t < tray.length; t += 9) {
+      for (const [to, from] of [[0, 0], [3, 6], [6, 3]]) {        // mirrored in z: wind the other way
+        rest[t + to] = tray[t + from]; rest[t + to + 1] = tray[t + from + 1]; rest[t + to + 2] = H - tray[t + from + 2];
+      }
+    }
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nso-soften-rim-')), 'wrist_rest.stl');
+    writeSTL(file, rest, 'wrist rest');
+    await loadSTL(page, file);
+    await page.waitForTimeout(500);
+    await page.evaluate(() => selectPlaced(state.placed.length - 1));
+    const wid = await page.evaluate(() => state.models[state.models.length - 1].id);
+    const wmodel = () => page.evaluate(i => state.models.find(m => m.id === i).rawTris.length, wid);
+    const w0 = await wmodel(), u0 = await undoDepth();
+    await openCard();
+    await page.click('#btn-soften'); await page.waitForTimeout(200);
+    await page.fill('#inp-soften-r', '15');
+    await tile('cornersedges');
+    await page.waitForFunction(() => window.nsoSoftenLive.info().needPick === true, null, { timeout: 15000 });
+    check('Corners+edges waits for a face on a piece that is not a box', (await info()).needPick === true, (await info()).readout);
+    await lookDown(wid);
+    await clickAt(await topOf(wid));
+    await waitPlan();
+    const i = await info();
+    check('a click on the slab previews the whole rim rounded at R 15, and says why',
+      i.ok && i.kind === 'faces' && /rim bends in curves, so all of it is rounded - R 15\.00/.test(i.text || '') &&
+      /4 bends tighter than R meet in a soft hip/.test(i.text || ''), i.text || i.reason || i.readout);
+    check('...and never blames something already softened', !/already softened/.test(i.text || ''));
+    check('the piece was not touched by the preview', (await undoDepth()) === u0 && (await wmodel()) === w0);
+    await keepGhost();
+    await page.click('#btn-soften');
+    await page.waitForFunction(u => state.undoStack.length > u, u0, { timeout: 30000 });
+    check('the bake installs the previewed rim, bit for bit', await page.evaluate(([id]) => {
+      const g = window.__ghost, r = state.models.find(m => m.id === id).rawTris;
+      if (!g || g.length !== r.length) return false;
+      for (let k = 0; k < g.length; k++) if (g[k] !== r[k]) return false;
+      return true;
+    }, [wid]));
+    check('ONE Undo step', (await undoDepth()) === u0 + 1);
+    await page.evaluate(() => undoLast());
+    await page.waitForTimeout(300);
+    check('Undo gives the piece back', (await wmodel()) === w0);
   }
 
   const errs = logs.filter(l => /pageerror|^error/i.test(String(l.type || l)) );

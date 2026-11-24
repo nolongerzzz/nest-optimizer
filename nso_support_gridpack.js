@@ -182,7 +182,8 @@
   var LATTICE_MM = 5;          /* L. Node pitch L/2 in x, y and z. */
   var AREA_CAP = 4;
   var MAX_MERGE = 3;           /* members meeting at one node: pairwise, or three when one stands in the way */            /* a merged section tops out at 4 x the strut area (FLAG) */
-  var CLEAR_MM = 0.2;          /* rails are tested this far outside the section */
+  var CLEAR_MM = 0.2;
+  var CROWN_EDGE_CLEAR_MM = 0.45;   /* a tree's branch under the column rule: the slicer's xy distance (0.35) and a hair (crownPlan edgeClear) */          /* rails are tested this far outside the section */
   var STEER_HEADINGS = 16;
   var STEER_STEP_MM = 5;       /* a leaning route is tried leaning this much further down at a time (twice the node lattice's z step, L/2: the test is a gate, not a planner) */
   var STEER_LEANS = [1, 0.5];
@@ -192,7 +193,20 @@
   var SHEET_SINK_MM = 0.015;   /* weld() only: T1's underside this far into the caps, inside their 0.02 mm upright band (joinSheets) */
   var TIP_LEVELS = [0.05, 0.3, 0.6, 1.0, 1.5];   /* mm below a tip where the tip zone is swept for walls */
   var TIP_RISE_SIDES = 2;     /* a pickup stub's vertical last run, x the strut side */
-  var NUDGE_STEPS = [0.25, 0.5, 0.75, 1];   /* x the strut side: how far a tip may move off a wall */
+  var NUDGE_STEPS = [0.25, 0.5, 0.75, 1];
+  /* THIN TIPS (docs/SUPPORT-ONE-TRUNK.md item 25): a spot no strut can reach - a ledge a strut is too wide for, against a wall - is held as
+     Bambu holds it, by a thin column straight down to the plate: THIN_TIP_SIDE_MM across (one loop of line), moved off the wall along its own
+     face as far as THIN_TIP_NUDGE_MM, standing GAP_MM under the face, its foot flared where there is room */
+  var THIN_TIP_SIDE_MM = 0.85;
+  var THIN_TIP_NUDGE_MM = [0, 0.3, 0.6, 0.9, 1.2, 1.5];
+  var THIN_TIP_FACE_MM = 0.6;       /* the face over a moved column is the spot's own: within this of the spot's height */
+  var THIN_TIP_FLARE = { mm: 2.5, r: 1.4 };   /* the foot: from this radius on the plate to the column's at this height, where there is room */
+  /* A CONE'S TIP (the top of a cavity's ceiling, a few tenths of a mm2 of face over the stack under it) is held through the tip under it:
+     a reached tip of the same area within CONE_TIP_REACH_MM in plan and CONE_TIP_RISE_MM under the spot, with air straight down from the
+     spot to that tip's height */
+  var CONE_TIP_REACH_MM = 2, CONE_TIP_RISE_MM = 1;
+  var THIN_TIP_FOOT_GAP_MM = 0.2;   /* a thin column that stands on the part keeps this off its face (Bambu's support_bottom_z_distance) */
+  var THIN_TIP_REST_MIN_MM = 1;     /* ...and is at least this tall */   /* x the strut side: how far a tip may move off a wall */
   var FOOT_LAYER_MM = 0.2;     /* a foot pad is one first layer thick (the 0.2 mm layers this file's gaps are sized for) */
   var FOOT_CLUSTER_MM = 6;     /* trunks whose feet stand this close (centre to centre, in plan) share one pad */
   var FOOT_GROW_MM = 4;        /* a pad is its trunks' footprints grown by this */
@@ -238,7 +252,9 @@
   var CROWN_BRANCH_TAPER_DEG = 0;   /* between two joins a Bambu branch holds its width (its 30-layer stretches measure -0.5 to -1.0 deg); only the trunk widens, at JOINS.taperDeg and over the law */
   var CROWN_STUB_SIDES = 20;          /* a crown tip's round stub: sides */
   var CROWN_TRUNK_SINK_MM = 1;       /* ...the trunk stops this far under its top, inside the smooth body's shoulder */
+  var CROWN_BLOB_TWIG_CELLS = 1.7;    /* ...and never coarser than a twig's radius over this (a twig two cells across or more) */
   var CROWN_BLOB_TRIS = 24000;        /* ...and no body is meshed finer than this many triangles allow */
+  var BLOB_REPAIR_TRIES = 20;         /* ...its pinched edges filled this many times before the body is given up for the plain build (8: two of the mouse's trees, at the twig's grid) */
   var CROWN_BLEND_MM = 0.25;          /* the branches of a crown flow into one another and into the trunk: the smooth union's blend (crown.blendMm) */
   var CROWN_BLOB_CELL_MM = 0.25;      /* ...meshed on a grid this fine (crown.blobCellMm) */
   var CROWN_TUBE_SIDES = 20;        /* a branch is a round tube of this many sides... */
@@ -260,10 +276,11 @@
     return {
       nudgeTips: o.nudgeTips == null ? true : !!o.nudgeTips, nudgeMarginMm: pick(o.nudgeMarginMm, 0), maxKids: Math.max(2, Math.round(pick(o.maxKids, CROWN_MAX_KIDS))), areaRatio: pick(o.areaRatio, CROWN_AREA_RATIO), tipDropMm: pick(o.tipDropMm, CROWN_TIP_DROP_MM), nodeDropMm: pick(o.nodeDropMm, CROWN_NODE_DROP_MM),
       ovalMax: pick(o.ovalMax, CROWN_OVAL_MAX), branchTaperDeg: pick(o.branchTaperDeg, CROWN_BRANCH_TAPER_DEG), rootFloorMm: pick(o.rootFloorMm, CROWN_ROOT_FLOOR_MM), leanHardDeg: pick(o.leanHardDeg, CROWN_LEAN_HARD_DEG),
-      designLeanDeg: o.designLeanDeg == null ? null : +o.designLeanDeg, nodeRings: Array.isArray(o.nodeRings) ? o.nodeRings.slice() : CROWN_NODE_RINGS.slice(),
+      spreadJoins: !!o.spreadJoins, branchByDrop: !!o.branchByDrop, designLeanDeg: o.designLeanDeg == null ? null : +o.designLeanDeg, nodeRings: Array.isArray(o.nodeRings) ? o.nodeRings.slice() : CROWN_NODE_RINGS.slice(),
       searchStepMm: pick(o.searchStepMm, CROWN_SEARCH_STEP_MM), tipRiseMm: pick(o.tipRiseMm, 0),
+      bambuLaw: !!o.bambuLaw, tipDiameterMm: o.tipDiameterMm == null ? null : +o.tipDiameterMm,
       smooth: o.smooth == null ? true : !!o.smooth, blendMm: pick(o.blendMm, CROWN_BLEND_MM), blobCellMm: pick(o.blobCellMm, CROWN_BLOB_CELL_MM), tubeSides: Math.max(6, Math.round(pick(o.tubeSides, CROWN_TUBE_SIDES))),
-      trunk: { tipMm: pick(t.tipMm, TRUNK_TIP_MM), angleDeg: pick(t.angleDeg, TRUNK_ANGLE_DEG), flareMm: pick(t.flareMm, FLARE_MM), flareAngleDeg: pick(t.flareAngleDeg, FLARE_ANGLE_DEG), footClearMm: pick(t.footClearMm, TRUNK_FOOT_CLEAR_MM), uniformH: t.uniformH == null ? null : +t.uniformH, padGrowMm: t.padGrowMm == null ? null : +t.padGrowMm }
+      trunk: { meetBody: !!t.meetBody, tipMm: pick(t.tipMm, TRUNK_TIP_MM), angleDeg: pick(t.angleDeg, TRUNK_ANGLE_DEG), flareMm: pick(t.flareMm, FLARE_MM), flareAngleDeg: pick(t.flareAngleDeg, FLARE_ANGLE_DEG), footClearMm: pick(t.footClearMm, TRUNK_FOOT_CLEAR_MM), uniformH: t.uniformH == null ? null : +t.uniformH, padGrowMm: t.padGrowMm == null ? null : +t.padGrowMm }
     };
   }
 
@@ -512,11 +529,11 @@
   function feedBeacons(rawTris, opts, F) {
     var bc = beaconsFor(rawTris, F.mode === 'custom' && !opts._stairBeacons ? Object.assign({}, opts, { beacons: [] }) : opts);
     if (!bc.ok) return bc;
-    var list = [], off = [], erased = [], refused = [];
+    var list = [], off = [], erased = [], refused = [], offAt = [];
     bc.beacons.forEach(function (b) {
       var id = tipId(b.p, false);
-      if (F.off[id]) { off.push(id); return; }
-      if (F.exSet[id]) { erased.push(id); return; }
+      if (F.off[id]) { off.push(id); offAt.push(b.p.slice()); return; }
+      if (F.exSet[id]) { erased.push(id); offAt.push(b.p.slice()); return; }
       list.push(Object.assign({}, b, { tid: id }));
     });
     var seen = {};
@@ -528,11 +545,12 @@
       var nf = nearestFace(rawTris, q);
       if (!nf || nf.d > SNAP_MM) { refused.push({ tip: id, why: 'on no face of the piece within ' + SNAP_MM + ' mm' }); return; }
       if (nf.n[2] > UP_MAX) { refused.push({ tip: id, why: 'on a face turned up: nothing hangs there' }); return; }
-      list.push({ p: nf.p.slice(), n: nf.n.slice(), regionId: t.regionId, key: t.key, source: 'given', tid: id });
+      list.push({ p: nf.p.slice(), n: nf.n.slice(), regionId: t.regionId, key: t.key, source: 'given', tid: id, fork: t.fork != null ? t.fork : undefined });
     });
     list.forEach(function (b, i) { b.id = i; });
     bc.beacons = list;
     bc.feed = { mode: F.mode, off: off, erased: erased, refused: refused };
+    bc.offAt = offAt;                                            /* where the spots left out are: the flow tree fills no spot back in beside one */
     if (!list.length) { bc.ok = false; bc.reason = 'no tips to plan: ' + (refused.length ? refused.length + ' refused, ' : '') + (off.length + erased.length) + ' left out'; }
     return bc;
   }
@@ -575,6 +593,12 @@
         return h > 0 ? t0 + h : -1;
       }
       var best = cast(a, 0, L), offs = [];
+      /* a bare line (no section, no clearance, no caps): the eight rails are the axis itself, cast again eight times to the same answer, and the
+         inside tests likewise - the horn's probes and its map of the undersides (hornUnderMap) are thousands of these */
+      if (side === 0 && clear === 0 && !capA && !capB) {
+        if (best >= 0) return best;
+        return A.lineInsideAt(obstacles, a, u, L) >= 0 ? 0 : -1;
+      }
       /* Eight rails on the section's circumscribed circle: every member's
          square is turned by its own phase (see PHASE), so the probe takes
          the circle any turn of it fits in. */
@@ -602,7 +626,9 @@
       }
       return -1;
     }
-    return { leg: leg };
+    /* the nearest face straight down from `org` within maxD (distance from org), or -1 */
+    function down(org, maxD) { var h = A._nearestHitDown(grid, org, RAY_EPS, maxD); return h > 0 ? h : -1; }
+    return { leg: leg, down: down };
   }
 
   /* Two square columns, each free to turn (PHASE), touch inside this
@@ -720,7 +746,26 @@
     var nodes = leaves.map(function (L, i) {
       return { id: i, leaf: true, kids: [], tips: [i], pos: L.pos.slice(), keys: [L.key], level: 0 };
     });
-    var cur = nodes.map(function (n) { return n.id; }), rounds = [cur.length];
+    var cur = [];
+    /* A TIP'S SHOOTS (TIP_FORK, leaves that share a `fork`): joined first, under their own tips, as one branch - the rest of the tree is
+       grouped as it was, with the fork in its tip's place */
+    var pre = {}, preOrder = [];
+    nodes.slice().forEach(function (n) {
+      var f = leaves[n.id].fork;
+      if (f == null) { cur.push(n.id); return; }
+      if (!pre[f]) { pre[f] = []; preOrder.push(f); }
+      pre[f].push(n.id);
+    });
+    preOrder.forEach(function (f) {
+      var gr = pre[f];
+      if (gr.length < 2) { cur.push(gr[0]); return; }
+      var c = [0, 0, 0], tips = [], keys = [];
+      gr.forEach(function (id) { c = add(c, nodes[id].pos); tips = tips.concat(nodes[id].tips); keys = keys.concat(nodes[id].keys); });
+      var nn = { id: nodes.length, leaf: false, fork: true, kids: gr.slice(), tips: tips, keys: keys, level: 1, pos: mul(c, 1 / gr.length) };
+      nodes.push(nn); cur.push(nn.id);
+    });
+    cur.sort(function (a, b) { return Math.min.apply(null, nodes[a].tips) - Math.min.apply(null, nodes[b].tips); });
+    var rounds = [cur.length];
     var banned = function (idsA) {
       if (!forbid) return false;
       var ks = [];
@@ -1154,6 +1199,12 @@
          the lean limit (tiltDeg) - its join stands lower, or its end meets the trunk lower, where it is going. A stair's own tree (_stairTree) holds
          the lean limit throughout. The legs between the two are as the plan has always made them (the marked over-lean members). */
       var tanLim = Math.tan(tiltDeg * Math.PI / 180), tanHard = opts._stairTree ? tanLim : Math.tan(Math.max(tiltDeg, CK.leanHardDeg) * Math.PI / 180);
+      /* A BRANCH KEEPS THE SLICER'S DISTANCE FROM THE PART (the owner's 2x Negative Sphere and Base: a branch broken mid path, carried on past the
+         break). The slicer cuts the tree back supportXyMm (0.35) from the part's section on every layer it shares with it; a branch tested at the
+         probe's 0.2 grazed a stem and lost its middle. Under the column rule a branch is tested at that distance and a bead more, and a tip's leg as
+         wide as it is drawn (Bambu's law: the branch diameter, not the strut's square) */
+      var edgeClear = opts.columnRule ? CROWN_EDGE_CLEAR_MM : CLEAR_MM;
+      var leafSide = CK.bambuLaw && CK.trunk && CK.trunk.tipMm ? Math.max(s0, CK.trunk.tipMm / 2 * Math.SQRT2) : s0;
       var thProbes = null;
       function probesTH() {
         if (!thProbes) thProbes = TH && typeof TH.prepare === 'function' ? obstacles.filter(function (sp) { return sp && sp.length >= 9; }).map(function (sp) { return probeOf(TH, sp); }).filter(Boolean) : [];
@@ -1184,7 +1235,7 @@
           else out.tight.push(b.id);          /* no move clears it: the tip is built where it is (a wall beside it is the interface's to meet) */
         }
         var side = b.n[2] > -cosT + LEAN_TOL, hz = unit([b.n[0], b.n[1], 0]) || [1, 0, 0];
-        return { b: b, p: q, side: side, attach: side ? add(q, mul(hz, s0 + CLEAR_MM)) : q.slice(), key: tidOf(b) };
+        return { b: b, p: q, side: side, attach: side ? add(q, mul(hz, s0 + CLEAR_MM)) : q.slice(), key: tidOf(b), fork: b.fork };
       });
 
       /* ---- 2. a tip's circle ---- */
@@ -1228,7 +1279,7 @@
       /* ---- 3 - 6. a circle's tree ---- */
       function buildCrown(zi, list) {
         var zone = Z[zi], ci = out.crowns.length;
-        var topo = crownTopology(list.map(function (t) { return { pos: t.attach, key: t.key }; }), forbid, zone.maxKids || CK.maxKids), nodes = topo.nodes, root = nodes[topo.root];
+        var topo = crownTopology(list.map(function (t) { return { pos: t.attach, key: t.key, fork: t.fork }; }), forbid, zone.maxKids || CK.maxKids), nodes = topo.nodes, root = nodes[topo.root];
         var Dleaf = 1;
         (function walk(n, d, par) { n.depth = d; n.parent = par; n.kids.forEach(function (c) { walk(nodes[c], d + 1, n.id); }); if (n.leaf) Dleaf = Math.max(Dleaf, d); })(root, 0, -1);
         var order = nodes.slice().sort(function (a, b) { return (a.level - b.level) || (a.id - b.id); });
@@ -1254,25 +1305,40 @@
         var rootKids = root.kids;
 
         /* where everything stands, for a trunk on (Ax, Ay) */
-        function solve(Ax, Ay, check) {
+        function solve(Ax, Ay, check, rLand) {
           var P = {}, S = {}, zOf = {};
           nodes.forEach(function (n) {
             if (n.leaf) { P[n.id] = list[n.tips[0]].attach.slice(); return; }
             if (n.root) return;
-            var w = 1 - n.depth / Dleaf;
+            /* spread joins (below): a depth-d join stands d/(d+1) of the way out from the trunk's axis to its own tips, as it stands that far up
+               - on the line from the trunk's top to its branches, a Y every level, not a bundle at the axis */
+            var w = n.fork ? 0 : CK.spreadJoins ? 1 / (n.depth + 1) : 1 - n.depth / Dleaf;   /* a fork stands under its shoots */
             P[n.id] = [n.pos[0] + w * (Ax - n.pos[0]), n.pos[1] + w * (Ay - n.pos[1]), 0];
           });
-          var rEst = rTipOf(n0) * 1.15, kEst = ovalK(rEst), aEst = rEst * Math.sqrt(kEst);
-          rootKids.forEach(function (cid) {
+          /* rLand: the trunk's own top radius (Bambu's law, below) - the legs land inside the trunk they join, not on the width the area law
+             would give it (the owner's mouse: a 30-tip tree's legs landed 2 - 3 mm off a 1.8 mm trunk and ended in the air beside it) */
+          var rEst = rLand != null ? rLand : rTipOf(n0) * 1.15, kEst = ovalK(rEst), aEst = rEst * Math.sqrt(kEst), bEst = rEst / Math.sqrt(kEst);
+          function landS(cid) {
             var cp = P[cid], pr = (cp[0] - Ax) * uAx[0] + (cp[1] - Ay) * uAx[1], lim = Math.max(0, aEst - rTipOf(nodes[cid].tips.length)) * 0.9;
             var s = Math.max(-lim, Math.min(lim, pr));
-            S[cid] = [Ax + uAx[0] * s, Ay + uAx[1] * s, 0];
-          });
+            /* ...and across the oval as far as its short side lets it: a leg landed on the long axis's line from a join beside it jogged
+               sideways just over the trunk's top (a dogleg of 60 deg, the owner's "softer bends") */
+            var pq = -(cp[0] - Ax) * uAx[1] + (cp[1] - Ay) * uAx[0], limB = Math.max(0, bEst - rTipOf(nodes[cid].tips.length)) * 0.9;
+            var t = opts.columnRule ? Math.max(-limB, Math.min(limB, pq)) : 0;
+            S[cid] = [Ax + uAx[0] * s - uAx[1] * t, Ay + uAx[1] * s + uAx[0] * t, 0];
+          }
+          rootKids.forEach(landS);
           order.forEach(function (n) {
             if (n.leaf) { zOf[n.id] = P[n.id][2]; return; }
             var floor = n.root ? zRootMin : zRootMin + n.depth * CK.nodeDropMm;
             /* how high the join may sit over (or under) its branches when it stands at `lat` */
             function zAt(lat) {
+              /* a fork: under its shoots, each a short straight rise and then a gentle lean in (TIP_FORK) - they run together as Bambu's do */
+              if (n.fork) {
+                var zf = Infinity, tf = Math.tan(TIP_FORK.leanDeg * Math.PI / 180);
+                n.kids.forEach(function (cid) { zf = Math.min(zf, zOf[cid] - TIP_FORK.riseMm - hdist(P[cid], lat) / tf, zOf[cid] - 0.5); });
+                return Math.max(zf, plateZ + LEAN_FLOOR_MM);
+              }
               var base = Infinity, mn = Infinity;
               n.kids.forEach(function (cid) {
                 var c = nodes[cid], to = n.root ? S[cid] : lat, h = hdist(P[cid], to);
@@ -1283,6 +1349,16 @@
                  bar that will not print (the owner: "comes off the trunk at a 90"). The root's own legs are lowered one by one below (S). */
               var zOld = Math.min(Math.max(base, floor), mn - 0.5);
               if (n.root) return zOld;
+              /* THE JOINS SPREAD DOWN THE TREE (the column rule: the owner's mouse beside Bambu's): a join stands part of the way down from its
+                 branches to the trunk's top - a depth-d join d/(d+1) of the way up - not as high as its lean lets it. Bambu's tree forks all the
+                 way down (the mouse: 20 trunks at the plate, 30, 47, 79, 162 branches every 5 mm up); a tree whose joins all stand under its
+                 tips is a bundle of long legs from there to a stub of a trunk (16 columns to 15 mm, then 280 tips), and its legs cross flat */
+              if (CK.spreadJoins && !n.fork) {
+                var mnB = Infinity;
+                n.kids.forEach(function (cid) { mnB = Math.min(mnB, zOf[cid] - (nodes[cid].leaf ? CK.tipDropMm : CK.nodeDropMm)); });
+                var zSpread = zRootMin + (mnB - zRootMin) * n.depth / (n.depth + 1);
+                if (zSpread < zOld) zOld = Math.max(zSpread, Math.min(floor, zOld));
+              }
               var over = false, zLn = Infinity;
               n.kids.forEach(function (cid) {
                 var top = zOf[cid] - (nodes[cid].leaf ? CK.tipRiseMm : 0), h2 = hdist(P[cid], lat);
@@ -1291,6 +1367,8 @@
               });
               return over ? Math.min(zOld, Math.max(zLn, plateZ + LEAN_FLOOR_MM)) : zOld;
             }
+            /* the root's legs land under where their joins now stand (a join moved round the piece landed where it first stood: across the trunk) */
+            if (n.root && check && opts.columnRule) rootKids.forEach(landS);
             if (n.root || !check) { zOf[n.id] = zAt(P[n.id]); if (!n.root) P[n.id][2] = zOf[n.id]; return; }
             /* against the piece (and what is erased): the join stands where its branches reach it clear - at its place, else
                the nearest place round it, first toward the trunk */
@@ -1299,7 +1377,7 @@
               var z = zAt(lat), at = [lat[0], lat[1], z];
               for (var ki = 0; ki < n.kids.length; ki++) {
                 var c = nodes[n.kids[ki]];
-                if (probe.leg(P[c.id], at, c.leaf ? s0 : rTipOf(c.tips.length) * Math.SQRT2, c.leaf ? s0 : 0, 0) >= 0) return null;
+                if (probe.leg(P[c.id], at, c.leaf ? leafSide : rTipOf(c.tips.length) * Math.SQRT2, c.leaf ? s0 : 0, 0, edgeClear) >= 0) return null;
               }
               return z;
             }
@@ -1328,6 +1406,38 @@
              tube 8 mm across over a 4 mm stem (the owner: "abnormally thick compared to the others") */
           var capR = CK.trunk.uniformH != null ? law(zTop, Hmax) : Infinity;
           var rTop = {}, rBot = {}, Abot = {}, rootA = 0;
+          if (CK.bambuLaw) {
+            /* Bambu's: the branch diameter at a branch's top, tan(angle) more a side for every mm under its highest tip; a tip the tip diameter */
+            var bR = CK.trunk.tipMm / 2, bT = Math.tan(CK.trunk.angleDeg * Math.PI / 180), tipR = CK.tipDiameterMm != null ? CK.tipDiameterMm / 2 : Math.sqrt(tipArea / Math.PI);
+            /* the distance is ALONG the branches, from the farthest tip down to here (Bambu's: a leaning branch is longer than its drop -
+               the 2x Sphere's trunk, 8.2 mm at z 2, is the law along its leaning crown, not straight down from its tips) */
+            var dN = {}, D3 = function (u, w) { return Math.hypot(u[0] - w[0], u[1] - w[1], u[2] - w[2]); };
+            var endOf = function (n) { return nodes[n.parent] && nodes[n.parent].root ? S[n.id] : P[n.parent]; };
+            /* THE BRANCHES APART FROM THE TRUNK (the owner: "separate trunk width from branch width - we are on the super thick side up top"): a
+               branch widens with how far it stands under its highest tip, as Bambu's does layer by layer (the mouse, an island's median width:
+               Bambu's 3.2 mm at z 17 and 4.6 at z 9; ours by the path along a wide crown 5.4 and 7.8); the trunk keeps the path's length (dRoot
+               below: the 2x heads' trunks) */
+            var vTop = {};
+            order.forEach(function (n) {
+              if (n.root) return;
+              if (n.leaf) { dN[n.id] = 0; vTop[n.id] = P[n.id][2]; }
+              else { var mx = 0, vt = -Infinity; n.kids.forEach(function (cid) { mx = Math.max(mx, dN[cid] + D3(P[cid], P[n.id])); vt = Math.max(vt, vTop[cid]); }); dN[n.id] = mx; vTop[n.id] = vt; }
+              var len = D3(P[n.id], endOf(n));
+              /* ...and at Bambu's rate: its branch diameter angle widens the DIAMETER, tan 5 deg a mm - half of it a side (the mouse at the full
+                 rate: 9.3 mm islands at z 6 where Bambu's are 5.1; at half, 4.6) */
+              var dA = CK.branchByDrop ? vTop[n.id] - P[n.id][2] : dN[n.id], dB = CK.branchByDrop ? vTop[n.id] - endOf(n)[2] : dN[n.id] + len, bTb = CK.branchByDrop ? bT / 2 : bT;
+              if (n.leaf) { rTop[n.id] = tipR; rBot[n.id] = Math.max(tipR, bR + bTb * (CK.branchByDrop ? Math.max(0, dB) : len)); }      /* the tip diameter widening to the branch's at its join */
+              else { rTop[n.id] = bR + bTb * Math.max(0, dA); rBot[n.id] = bR + bTb * Math.max(0, dB); }
+              Abot[n.id] = Math.PI * rBot[n.id] * rBot[n.id];
+            });
+            var dRoot = 0;
+            rootKids.forEach(function (cid) { dRoot = Math.max(dRoot, dN[cid] + D3(P[cid], S[cid]) + Math.max(0, S[cid][2] - zTop)); });
+            var pathAdd = Math.max(0, zTop + dRoot - Hmax), lawB = law(zTop, Hmax + pathAdd);
+            /* the legs were landed on an estimate of the trunk's width: where the trunk is narrower, they are landed again on its own */
+            if (rLand == null && rEst > lawB + 1e-9) return solve(Ax, Ay, check, lawB);
+            return { A: [Ax, Ay], P: P, S: S, z: zOf, zTop: zTop, rTop: rTop, rBot: rBot, rNeed: lawB, lawTop: lawB, rEqTop: lawB, pathAdd: pathAdd,
+                     dR: 0, k: ovalK(lawB), a: lawB * Math.sqrt(ovalK(lawB)), b: lawB / Math.sqrt(ovalK(lawB)) };
+          }
           order.forEach(function (n) {
             if (n.leaf) { rTop[n.id] = rBot[n.id] = Math.sqrt(tipArea / Math.PI); Abot[n.id] = tipArea; return; }
             var A0 = 0;
@@ -1406,10 +1516,10 @@
           var par = nodes[n.parent], t = n.leaf ? list[n.tips[0]] : null;
           var from = sol.P[n.id], to = par.root ? sol.S[n.id] : sol.P[par.id];
           var rB = sol.rBot[n.id];
-          edges.push({ n: n, from: from, to: to, mid: null, side: n.leaf ? s0 : rB * Math.SQRT2, capA: n.leaf ? s0 : 0, tip: t });
+          edges.push({ n: n, from: from, to: to, mid: null, side: n.leaf ? leafSide : rB * Math.SQRT2, capA: n.leaf ? s0 : 0, tip: t });
         });
         edges.forEach(function (e) {
-          if (probe.leg(e.from, e.to, e.side, e.capA, 0) < 0) return;
+          if (probe.leg(e.from, e.to, e.side, e.capA, 0, edgeClear) < 0) return;
           var mid = [(e.from[0] + e.to[0]) / 2, (e.from[1] + e.to[1]) / 2, (e.from[2] + e.to[2]) / 2], W = null, span = e.from[2] - e.to[2];
           /* one bend: out from the middle of the branch, up to 16 mm, at a few heights between its ends, 32 ways round */
           for (var ring = 1; ring <= 16 && !W; ring = ring < 4 ? ring + 1 : ring < 8 ? ring + 2 : ring + 4) {
@@ -1418,7 +1528,7 @@
                 beat();
                 var tt = 2 * Math.PI * h4 / (2 * STEER_HEADINGS), cand = [mid[0] + ring * Math.cos(tt), mid[1] + ring * Math.sin(tt), mid[2] + [0, 0.25, -0.25][fz] * span];
                 if (cand[2] >= e.from[2] - 0.5 || cand[2] <= e.to[2] + 0.5) continue;
-                if (probe.leg(e.from, cand, e.side, e.capA, 0) < 0 && probe.leg(cand, e.to, e.side, 0, 0) < 0) W = cand;
+                if (probe.leg(e.from, cand, e.side, e.capA, 0, edgeClear) < 0 && probe.leg(cand, e.to, e.side, 0, 0, edgeClear) < 0) W = cand;
               }
             }
           }
@@ -1434,7 +1544,7 @@
             pts.push(e.tip.p.slice()); if (e.tip.side) pts.push(e.tip.attach.slice());
             /* a tip stands straight for its cap's rise before it leans to its join: legs that lean from the contact cross the
                cap's height closer than their tips stand, and no cap fits (the pickup's vertical last run, TIP_RISE_SIDES) */
-            var rise = Math.min(CK.tipRiseMm, e.from[2] - e.to[2] - 0.5), pa = e.tip.attach;
+            var rise = Math.min(nodes[e.n.parent] && nodes[e.n.parent].fork ? TIP_FORK.riseMm : CK.tipRiseMm, e.from[2] - e.to[2] - 0.5), pa = e.tip.attach;
             if (rise > 0.25 && hdist(pa, e.to) > 1e-6) pts.push([pa[0], pa[1], pa[2] - rise]);
           } else pts.push(e.from.slice());
           if (e.mid) pts.push(e.mid.slice());
@@ -1459,7 +1569,7 @@
         });
         var rm = newMember([[sol.A[0], sol.A[1], sol.zTop], [sol.A[0], sol.A[1], plateZ]], n0, beaconsOfNode(root), 'crown', 0);
         rm.round = true; rm.end = 'plate'; rm.free = false; rm.crown = ci; rm.side = 2 * sol.a;
-        rm.oval = { ux: uAx[0], uy: uAx[1], ang: spreadAng, k: sol.k, dR: sol.dR, law: CK.trunk };
+        rm.oval = { ux: uAx[0], uy: uAx[1], ang: spreadAng, k: sol.k, dR: sol.dR, law: sol.pathAdd ? Object.assign({}, CK.trunk, { pathAddMm: sol.pathAdd }) : CK.trunk };
         mOf[root.id] = rm.id;
         edges.forEach(function (e) { if (e.blocked) { M[mOf[e.n.id]].blocked = true; out.blocked.forEach(function (b) { if (b.crown === ci && b.node === e.n.id) b.tips = e.n.tips.map(function (ti) { return list[ti].key; }).sort(); }); } });
         nodes.forEach(function (n) {
@@ -1780,8 +1890,11 @@
        same float32 pinch docs/SUPPORT-TREE.md section 5 measured at shared
        branch roots. Run on, each end is its own point inside the column. */
     if (m.end === 'merge' || m.end === 'pickup') {
-      var nL = pts.length, lastU = unit(sub(pts[nL - 1], pts[nL - 2]));
-      pts[nL - 1] = add(pts[nL - 1], mul(lastU, m.childSide / 4));
+      var nL = pts.length, lastU = unit(sub(pts[nL - 1], pts[nL - 2])), runOn = m.childSide / 4;
+      /* ...never through the plate: a leg that lands low on its trunk, steep, ran on under it (the mouse: a support 0.7 - 1.1 mm under the plate,
+         and the whole plate lifted onto it) */
+      if (P && P.plateZ != null && lastU && lastU[2] < -1e-9) runOn = Math.max(0, Math.min(runOn, (pts[nL - 1][2] - P.plateZ - RUN_ON_FLOOR_MM) / -lastU[2]));
+      pts[nL - 1] = add(pts[nL - 1], mul(lastU, runOn));
     }
     var first = unit(sub(pts[1], pts[0])), up = seed || (Math.abs(first[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]);
     if (m.crownRound > 0 && pts.length >= 2) {
@@ -1973,6 +2086,11 @@
       area += 4 * Math.PI * pr.r[0] * pr.r[0];
     });
     h = Math.max(h, Math.sqrt(2 * area / CROWN_BLOB_TRIS));
+    /* ...but never coarser than the thinnest twig allows (CROWN_BLOB_TWIG_CELLS cells to its radius): a tree of 50 tips was meshed at 0.8 mm,
+       its 0.64 mm twigs fell between the grid's nodes, and came out as beads with gaps (the owner's mouse: branches broken mid path, stray blobs) */
+    var rMin = Infinity;
+    prims.forEach(function (pr) { pr.r.forEach(function (v) { if (v > 0.05) rMin = Math.min(rMin, v); }); });
+    if (rMin < Infinity) h = Math.min(h, Math.max(CROWN_BLOB_CELL_MM, rMin / CROWN_BLOB_TWIG_CELLS));
     var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], reach = 7 * k;
     prims.forEach(function (pr) {
       pr.box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
@@ -2130,15 +2248,17 @@
       return bad.concat(broken);
     }
     var bads = null;
-    for (var attempt = 0; attempt < 8; attempt++) {
+    for (var attempt = 0; attempt < BLOB_REPAIR_TRIES; attempt++) {
       bads = extract();
       if (!bads.length) break;
+      /* a pinched edge is FILLED: the outside corners of its cells taken in (a hair of body more), never the inside ones put out - opening a pinch on a
+         twig three or four cells across cut it through (the owner's 2x Negative Sphere: a branch with a slit across its middle, carried on past it) */
       bads.forEach(function (vs) {
         vs.forEach(function (vi) {
           var cc = vcell[vi];
           for (var q = 0; q < 8; q++) {
             var ni = (cc[2] + ((q >> 2) & 1)) * ny * nx + (cc[1] + ((q >> 1) & 1)) * nx + cc[0] + (q & 1);
-            if (F[ni] < 0) F[ni] = 0.002;
+            if (F[ni] >= 0) F[ni] = -0.002;
           }
         });
       });
@@ -2159,6 +2279,9 @@
       verts = nv;
     }
     verts.forEach(function (v) { walk(v, 2); });          /* ...every vertex onto the surface, along the field's gradient */
+    /* cut.flat: the body stands on the plate - the cut's vertices (those of the cells the plane crosses, left a few hundredths off it by the
+       smoothing) are put exactly on it, so the foot is flat and nothing of the body is under the plate */
+    if (cut && cut.flat && cut.zMin != null) verts.forEach(function (v) { if (Math.abs(v[2] - cut.zMin) < 0.45 * h || v[2] < cut.zMin) v[2] = cut.zMin; });
     var out = [];
     quads.forEach(function (qd) {
       var A = verts[qd[0]], B = verts[qd[1]], C = verts[qd[2]], D = verts[qd[3]];
@@ -2211,6 +2334,7 @@
   }
   /* the heights a trunk's rings stand at over its flare: the bottom, FLARE_RINGS between, the flare's top, the top */
   var FLARE_RINGS = 6;
+  var TRUNK_MEET_SLOPE = 0.65;  /* a trunk's shell narrows to its crown's body at most this much a side a mm (0.18 a 0.28 layer, under half a bead: a hollow ring keeps its bead on the one under it; the foot keeps its width) */
   function ringZs(z0, zf, top) {
     var out = [z0];
     if (zf > z0 + 1e-6 && zf < top - 1e-6) {
@@ -2241,7 +2365,7 @@
     var cr = g.crown, cx = f.c[0], cy = f.c[1], top = Math.max(g.top, z0 + 2 * thick), LW = cr.law;
     if (LW) { ta = Math.tan(LW.angleDeg * Math.PI / 180); tb = Math.tan(LW.flareAngleDeg * Math.PI / 180); zf = plateZ + LW.flareMm; }
     var tipMm = LW ? LW.tipMm : TRUNK_TIP_MM;
-    var Hl = LW && LW.uniformH != null ? plateZ + LW.uniformH : g.H;
+    var Hl = LW && LW.uniformH != null ? plateZ + LW.uniformH : g.H + ((LW && LW.pathAddMm) || 0);   /* Bambu's law: the length along the crown (pathAddMm) */
     var law = function (z) { return tipMm / 2 + ta * Math.max(0, Hl - z) + flareAt(z, zf, tb, LW ? LW.flareMm : FLARE_MM) + cr.dR; };
     var rec = { c: [cx, cy], H: g.H, stemTop: g.top, top: top, rings: null, why: null, crown: true, k: cr.k, ang: cr.ang };
     f.grown = rec;
@@ -2302,13 +2426,41 @@
       taperBase(rings, floorR, zf);
       rec.narrowed = true; rec.k = 1;
     }
+    /* THE SHELL MEETS THE BODY FLUSH (the owner's P1S print: the Circular's and the Base's trunks stepped in 0.33 - 0.52 mm a side in one
+       layer where the shell stopped under its crown's smooth body - the body's radius has no flare - and the hollow ring over the step sagged
+       into an oval): a shell wider than the body at its top narrows to the body's radius there, no faster than TRUNK_MEET_SLOPE a mm on the
+       way up */
+    var topZ = rings[rings.length - 1][0], base0 = rings[0].slice();   /* the foot's pad and core keep the uncapped base */
+    /* the body's radius there: the law without the flare and without the crown's path (stepCrown's rTr: tipTopOf, no pathAddMm) */
+    var Hb = LW && LW.uniformH != null ? plateZ + LW.uniformH : g.H, rBody = tipMm / 2 + ta * Math.max(0, Hb - topZ) + cr.dR;
+    /* ...on the column rule's crown, where it was seen (LW.meetBody): a fed crown's trunk keeps its law to its top, area for area and oval (support:feed) */
+    if (LW && LW.meetBody && Math.max(rings[rings.length - 1][1], rings[rings.length - 1][2]) * cosN > rBody + 0.02) {
+      rings.forEach(function (rg) {
+        var cap = (rBody + TRUNK_MEET_SLOPE * (topZ - rg[0])) / cosN;
+        if (rg[1] > cap || rg[2] > cap) { var sc = cap / Math.max(rg[1], rg[2]); rg[1] *= sc; rg[2] *= sc; }
+      });
+      /* ...and the cap's rings in between, so the narrowing is a cone, not one step at the last ring */
+      var dense = [];
+      for (var ri = 0; ri < rings.length; ri++) {
+        dense.push(rings[ri]);
+        if (ri + 1 < rings.length) {
+          var r0 = rings[ri], r1 = rings[ri + 1], nIn = Math.floor((r1[0] - r0[0]) / 0.5);
+          for (var u = 1; u < nIn; u++) {
+            var zu = r0[0] + (r1[0] - r0[0]) * u / nIn, f0 = u / nIn, a = r0[1] + (r1[1] - r0[1]) * f0, bb = r0[2] + (r1[2] - r0[2]) * f0;
+            var capU = (rBody + TRUNK_MEET_SLOPE * (topZ - zu)) / cosN, scU = Math.min(1, capU / Math.max(a, bb));
+            dense.push([zu, a * scU, bb * scU]);
+          }
+        }
+      }
+      rings = dense;
+    }
     rec.rings = rings;
     rec.top = rings[rings.length - 1][0];
     rec.axis = [ca, sa];
     var ph = ((GOLDEN_DEG * (fi + 1)) % (360 / TRUNK_SIDES)) * Math.PI / 180;
     f.shell = revolveSoup(cx, cy, rings, TRUNK_SIDES, ph, cr.ang);
-    f.core = Math.max(f.r * Math.SQRT1_2, Math.min(rings[0][1], rings[0][2]) * cosN);
-    f.r = Math.max(f.r, rings[0][1]);
+    f.core = Math.max(f.r * Math.SQRT1_2, Math.min(base0[1], base0[2]) * cosN);
+    f.r = Math.max(f.r, base0[1]);
   }
 
   /* Every foot with a trunk record (f.grow: { H, top, side, tips }) gets its
@@ -2531,6 +2683,7 @@
   /* how far a foot's pad is grown past its trunk's base: FOOT_GROW_MM, or - the crown's trunk, with its own law (crown.trunk.padGrowMm) - that:
      a pad a hand wider than the trunk, the way Bambu's is round a model's stem (the owner's, on the first cone) */
   function padGrowOf(f) {
+    if (f.padGrowMm != null) return Math.min(FOOT_GROW_MM, f.padGrowMm);     /* the flow tree's foot says its own */
     var law = f.grow && f.grow.crown && f.grow.crown.law;
     return law && law.padGrowMm != null ? Math.min(FOOT_GROW_MM, law.padGrowMm) : FOOT_GROW_MM;
   }
@@ -2960,7 +3113,7 @@
       ((b && b.solids) || []).forEach(function (sd, si) {
         var key = bi + ':' + si;
         idOf[key] = ids.length; ids.push([bi, si]);
-        (sd.feet || []).forEach(function (f) { feet.push(f.grow ? { key: key, c: f.c, r: f.r, grow: f.grow } : { key: key, c: f.c, r: f.r }); footOf.push(f); });
+        (sd.feet || []).forEach(function (f) { var ff = f.grow ? { key: key, c: f.c, r: f.r, grow: f.grow } : { key: key, c: f.c, r: f.r }; if (f.padGrowMm != null) ff.padGrowMm = f.padGrowMm; feet.push(ff); footOf.push(f); });
       });
     });
     var obstacles = [piece].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; });
@@ -3514,7 +3667,9 @@
             /* its whole post and leg, from its stub's top to its join: a primitive of the crown's body, cut flat a little under the stub's top and a hair
                thinner along the stub (the stub's own surface is the one seen there); the bend where the post leans into its leg is a round joint of the same
                radius, so the post runs into the leg with no crease */
-            var rt = m.crownRound, st0 = ms.points[0], st1 = ms.points[1], su = unit(sub(st0, st1)), sl = len(sub(st0, st1));
+            /* under Bambu's law a tip's leg is a branch: its diameter (Tree settings' Branch diameter), not the strut's square (the mouse: Bambu's tips
+               are 3 mm2 a millimetre under the contact, ours 1.1 - and a 0.64 mm twig meshed in beads) */
+            var rt = CKn.bambuLaw && CKn.trunk && CKn.trunk.tipMm ? Math.max(m.crownRound, CKn.trunk.tipMm / 2) : m.crownRound, st0 = ms.points[0], st1 = ms.points[1], su = unit(sub(st0, st1)), sl = len(sub(st0, st1));
             var lp = ms.points.map(function (q) { return q.slice(); });
             if (twig) {
               /* the twig narrows to the tip and dies a hair into the strip over it: its top is cut flat there, its radius running from the tip's down to the leg's
@@ -3532,7 +3687,11 @@
         m.points = pts.map(function (q) { return q.slice(); });
         if (smooth) {
           var bp = pts.map(function (q) { return q.slice(); }), bn = bp.length;
-          if (rootKids[m.id]) bp[bn - 1] = add(bp[bn - 1], mul(unit(sub(bp[bn - 1], bp[bn - 2])), R[bn - 1]));
+          if (rootKids[m.id]) {
+            var ubb = unit(sub(bp[bn - 1], bp[bn - 2])), rob = R[bn - 1];
+            if (ubb && ubb[2] < -1e-9) rob = Math.max(0, Math.min(rob, (bp[bn - 1][2] - p.plateZ - RUN_ON_FLOOR_MM) / -ubb[2]));
+            bp[bn - 1] = add(bp[bn - 1], mul(ubb, rob));
+          }
           prims.push({ pts: bp, r: R.slice() });
           continue;
         }
@@ -3540,7 +3699,11 @@
         for (var s = 0; s + 1 < pts.length; s++) {
           var a = pts[s], b = pts[s + 1];
           /* a branch off the trunk runs on into it by its own radius: it ends inside the trunk's body, not on its face */
-          if (s + 2 === pts.length && rootKids[m.id]) b = add(b, mul(unit(sub(b, a)), R[s + 1]));
+          if (s + 2 === pts.length && rootKids[m.id]) {
+            var ub = unit(sub(b, a)), ro = R[s + 1];
+            if (ub && ub[2] < -1e-9) ro = Math.max(0, Math.min(ro, (b[2] - p.plateZ - RUN_ON_FLOOR_MM) / -ub[2]));    /* ...but never through the plate */
+            b = add(b, mul(ub, ro));
+          }
           parts.push({ soup: tubeSoup(a, R[s], b, R[s + 1], TS, crownPhase(m.id + 3 * s + 1, TS)) });
           if (s + 2 < pts.length) parts.push({ soup: ballSoup(pts[s + 1], R[s + 1], TS, crownPhase(m.id + 3 * s + 2, TS)) });
         }
@@ -3566,7 +3729,7 @@
       /* the trunk: its foot, and (growTrunks) its body */
       if (foot && tr.landing === 'plate' && !(opts._graft && opts._graft[cr.zone] != null)) {
         var A0 = rootM.path[0], H = tipTopOf(tr), LW = rootM.oval.law || { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG };
-        var Hlaw = LW.uniformH != null ? p.plateZ + LW.uniformH : H;
+        var Hlaw = LW.uniformH != null ? p.plateZ + LW.uniformH : H + (LW.pathAddMm || 0);
         var zTr = A0[2] - (smooth && prims.length ? CROWN_TRUNK_SINK_MM : 0);   /* the exact trunk stops a little under its top: the crown's smooth body is the shoulder over it */
         var gw = { H: H, top: zTr, side: rootM.side, tips: null, crown: { ang: rootM.oval.ang, k: rootM.oval.k, dR: rootM.oval.dR, law: LW } };
         var aBase = LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, Hlaw - p.plateZ) + Math.tan(LW.flareAngleDeg * Math.PI / 180) * LW.flareMm + rootM.oval.dR;
@@ -3851,6 +4014,7 @@
     opts = opts || {};
     if (!p || !p.ok) return Promise.resolve({ ok: false, reason: (p && p.reason) || 'no plan' });
     if (!p.trunks.length) return Promise.resolve({ ok: true, soup: new Float32Array(0), solids: [], reason: p.reason });
+    if (p.flow) { var ftp = flowParts(p, Object.assign({}, opts, { rawTris: opts.rawTris || p.rawTris, occluders: opts.occluders || p.occluders })); return Promise.resolve(ftp.ok ? flowShells(p, ftp) : ftp); }
     var tp = trunkParts(p, Object.assign({}, opts, { rawTris: opts.rawTris || p.rawTris, occluders: opts.occluders || p.occluders }));
     if (!tp.ok) return Promise.resolve({ ok: false, reason: tp.reason });
     return weld(p, tp, opts);
@@ -3864,6 +4028,7 @@
   function parts(p, opts) {
     opts = opts || {};
     if (!p || !p.ok) return Promise.resolve({ ok: false, reason: (p && p.reason) || 'no plan' });
+    if (p.flow && p.trunks.length) return Promise.resolve(flowParts(p, opts));
     if (!p.trunks.length) return Promise.resolve({ ok: true, trunks: [], fingersDropped: 0, pads: { count: 0, clusters: 0, clustersSplit: 0, hemmed: 0, holesFilled: 0, holesSlotted: 0 }, padGroups: [], feet: [] });
     /* the sheet is planned before the first trunk, and counts its own tips
        (sheet()'s opts.progress); the beat between them is a repeat */
@@ -4195,6 +4360,7 @@
     if (!p || !p.ok) return { ok: false, reason: (p && p.reason) || 'no plan' };
     if (!p.trunks.length) return { ok: true, soup: new Float32Array(0), solids: [], reason: p.reason, shells: 0 };
     if (!tp || !tp.ok) return { ok: false, reason: (tp && tp.reason) || 'no parts' };
+    if (p.flow) return flowShells(p, tp);
     var E = tp.trunks, parent = E.map(function (x, k) { return k; }), entryOf = {}, MB = membersOf(p, tp);
     function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
     function join(a, b) { a = find(a); b = find(b); if (a !== b) parent[Math.max(a, b)] = Math.min(a, b); }
@@ -4559,6 +4725,31 @@
     designLeanDeg: 38,    /* the canopy is designed to this lean; Bambu's branch angle is 45 and its joins measure up to 47.7 */
     tiltDeg: 50           /* ...and only a lean past this is marked */
   };
+  /* THE COLUMN RULE'S TREE (the owner's reference, Bambu's Negative Sphere in supp_ref: one trunk, its flare a mm, split from 5 mm, every
+     branch leaning all the way to a tip a mm and a half straight under the rim). Under the column rule the crown has a short straight tip, a
+     short flare and a first join as low as the flare and the trunk's shoulder allow: the height of a head whose overhang is 9 mm over the plate
+     goes to its branches' lean (3.2 mm of tip over a join no lower than 6.5 left them a few tenths: arms 70 deg off). */
+  /* ...and its tips: no cap or sheet spreads a tip's hold under the column rule (the slicer's stack spans between tips), so they stand closer - Bambu's
+     under its plates are 2 - 3 mm apart */
+  var COLUMN_ONE = { coverMm: 2.2, tiltDeg: 45 };
+  /* BAMBU'S TREE LAW (its Tree settings: branch diameter 2, branch diameter angle 5, tip diameter 0.8): every branch is the branch diameter at
+     its top, widening tan(angle) a side for every mm under its highest tip - the trunk too (supp_ref_2x 02.09: 5.9 mm at z 8 under tips at 30,
+     the law's 5.85). NSO's trunk was capped at a 10 mm-tall law (uniformH): 4.4 mm where Bambu's is 8.2. */
+  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 45, bambuLaw: true, tipDiameterMm: 0.8, spreadJoins: true, branchByDrop: true, trunk: { flareMm: 2, tipMm: 2, angleDeg: 5, uniformH: null, meetBody: true } };
+  /* the card's Tree settings (opts.treeKnobs, Bambu's names) over the column crown: branch distance, diameter, angle, diameter angle, tip diameter */
+  /* a spot's reach to its tip, as a share of the Tree settings' branch distance (5 mm -> 2.2). Wider (0.62, 0.8) stood the owner's mouse fewer tips,
+     nearer Bambu's count, but thinned the small heads' trees: supp_ref's Oblique trunk stepped in from 5.5 to 4 mm over its foot (a wall over
+     air), and the gate failed */
+  var COLUMN_TIP_COVER = 0.44;
+  var COLUMN_TIP_COVER_WIDE = 1.0, COLUMN_WIDE_SPOTS = 300;   /* ...and an area of this many spots or more, the branch distance itself (below) */
+  var RUN_ON_FLOOR_MM = 0.3;     /* a member's run-on into the one it joins stops this far over the plate */
+  var TREE_KNOBS = { branchDistanceMm: 5, branchDiameterMm: 2, branchAngleDeg: 45, branchDiameterAngleDeg: 5, tipDiameterMm: 0.8 };
+  function columnCrownOf(tk) {
+    var k = Object.assign({}, TREE_KNOBS, tk || {}), cc = Object.assign({}, COLUMN_CROWN, { trunk: Object.assign({}, COLUMN_CROWN.trunk) });
+    cc.tipDiameterMm = +k.tipDiameterMm; cc.leanHardDeg = +k.branchAngleDeg;
+    cc.trunk.tipMm = +k.branchDiameterMm; cc.trunk.angleDeg = +k.branchDiameterAngleDeg;
+    return { cc: cc, k: k };
+  }   /* a 2 mm flare (was 1.5, a stick on a pad: the owner's 2x Oblique came off the plate; Bambu's P1S trunks taper 7.0 -> 4.3 over 7 mm) */   /* leanHardDeg: no leg past the lean limit (Bambu's branch angle 45) */
   function thinTips(list, coverMm, minTips) {
     var n = list.length;
     if (n <= 1) return list.map(function (b, i) { return i; });
@@ -4632,7 +4823,11 @@
       var cx = 0, cy = 0, lo = Infinity, hi = -Infinity, r = 0;
       list.forEach(function (b) { cx += b.x / list.length; cy += b.y / list.length; lo = Math.min(lo, b.z); hi = Math.max(hi, b.z); });
       list.forEach(function (b) { r = Math.max(r, Math.hypot(b.x - cx, b.y - cy)); });
-      return r <= ck.clusterMm + 1e-9 && hi - lo <= ck.zWindowMm + 1e-9;
+      /* under the column rule a group is as wide as one trunk's canopy reaches at the lean limit from its lowest spot (planOneTrunk's own
+         clusters): a 2x head's rim in three areas stood a trunk each, and a fourth for its upper face - four legs where Bambu stands two */
+      var rMax = ck.clusterMm;
+      if (ck.reachByHeight) rMax = Math.max(rMax, 0.9 * (lo - (ck.plateZ || 0) - COLUMN_CROWN.rootFloorMm - COLUMN_CROWN.tipDropMm) * Math.tan(45 * Math.PI / 180));
+      return r <= rMax + 1e-9 && hi - lo <= ck.zWindowMm + 1e-9;
     }
     var left = areas.map(function (a, i) { return i; }), out = [];
     while (left.length) {
@@ -4645,12 +4840,435 @@
     }
     return out;
   }
+  /* A STEP NO SLICER CALLS AN OVERHANG: the part stands within a layer's reach at the threshold angle (layer / tan(angle), 0.35 mm at
+     0.2 mm and 30 deg) sideways of the spot, just under it - the step where two shells meet a quarter of a mm apart. It prints as the
+     layer's own wall; Bambu does not support it. */
+  var STEP_LAYER_MM = 0.2;
+  function subThresholdStep(b, kit, opts) {
+    if (!kit) return false;
+    var th = ((opts && opts.angleDeg) || (opts && opts.thresholdDeg) || 30) * Math.PI / 180, reach = STEP_LAYER_MM / Math.tan(th);
+    /* at ONE layer under the spot, as a slicer asks it (a layer's section past the one under it by more than reach): a probe from z - layer to
+       z - layer - 0.05 (from z - 0.05 down it took a gentle dome's own flank beside the spot for a wall, and the Sphere stood no support) */
+    var a = [b.p[0], b.p[1], b.p[2] - STEP_LAYER_MM], c = [b.p[0], b.p[1], b.p[2] - STEP_LAYER_MM - 0.05];
+    return kit.pr.leg(a, c, reach * Math.SQRT2, 0, 0, 0) >= 0;
+  }
+  /* a cone's tip: held through a reached tip of its area just under it, where there is air straight down from the spot to that tip */
+  function coneTipCover(b, chosen, kit) {
+    if (!kit || !chosen) return null;
+    var best = null, bd = Infinity;
+    chosen.forEach(function (c) {
+      if (c.regionId !== b.regionId) return;
+      var d = Math.hypot(b.p[0] - c.p[0], b.p[1] - c.p[1]), rise = b.p[2] - c.p[2];
+      if (d > CONE_TIP_REACH_MM || rise < -1e-6 || rise > CONE_TIP_RISE_MM || d >= bd) return;
+      var top = [b.p[0], b.p[1], b.p[2] - 0.02], bottom = [b.p[0], b.p[1], Math.min(c.p[2] - GAP_MM, top[2] - 0.05)];
+      if (kit.pr.leg(top, bottom, 0.02, 0, 0, 0.01) >= 0) return;
+      bd = d; best = c;
+    });
+    return best ? { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), by: best.id, byKey: best.key, mm: bd, cone: true } : null;
+  }
+  /* a ledge: a thin column straight down to the plate, moved off the wall along the spot's own face; null when none fits */
+  function thinColumn(b, kit) {
+    if (!kit || kit.plateZ == null) return null;
+    var pz = kit.plateZ, S = THIN_TIP_SIDE_MM, rest = null, dbg = ((typeof process !== 'undefined' && process.env && process.env.NSO_THIN_DEBUG) || (root && root.NSO_THIN_DEBUG)) ? { noFace: 0, otherFace: 0, low: 0, blocked: 0, at: [] } : null;
+    for (var di = 0; di < THIN_TIP_NUDGE_MM.length; di++) {
+      var d = THIN_TIP_NUDGE_MM[di];
+      for (var h = 0; h < (d ? STEER_HEADINGS : 1); h++) {
+        var th = 2 * Math.PI * h / STEER_HEADINGS, x = b.p[0] + Math.cos(th) * d, y = b.p[1] + Math.sin(th) * d;
+        /* the face over the moved column: straight down from above the spot (from inside the part, its underside is the first face) */
+        var hz = kit.pr.down([x, y, b.p[2] + THIN_TIP_FACE_MM], 2 * THIN_TIP_FACE_MM);
+        if (hz < 0) { if (dbg) dbg.noFace++; continue; }
+        var fz = b.p[2] + THIN_TIP_FACE_MM - hz;
+        if (Math.abs(fz - b.p[2]) > THIN_TIP_FACE_MM) { if (dbg) dbg.otherFace++; continue; }
+        var top = [x, y, fz - GAP_MM];
+        if (!(top[2] - pz > S)) { if (dbg) dbg.low++; continue; }
+        var hitL = kit.pr.leg(top, [x, y, pz], S, 0, 0);
+        if (hitL >= 0) {
+          /* no way to the plate: the part is under it (a notch's floor). Bambu stands its thin column on the part there (on build plate only is
+             off by default); so does this one, its foot THIN_TIP_FOOT_GAP_MM off the part's face - the one exception "may rest on the part" off
+             allows, and the plan's reason says so. Not when the opening is shorter than THIN_TIP_REST_MIN_MM. */
+          if (rest == null) {
+            var sz = top[2] - hitL;                                    /* the highest point of the floor under the column's whole width */
+            for (var lift = 0; lift <= 0.4 + 1e-9 && rest == null; lift += 0.2) {
+              var bz = sz + THIN_TIP_FOOT_GAP_MM + lift;
+              if (top[2] - bz < THIN_TIP_REST_MIN_MM) break;
+              if (kit.pr.leg(top, [x, y, bz], S, 0, 0) < 0) rest = { x: x, y: y, top: top, bz: bz, sz: sz, d: d };
+            }
+          }
+          if (dbg) { dbg.blocked++; if (dbg.at.length < 12) dbg.at.push([+x.toFixed(2), +y.toFixed(2), +fz.toFixed(2), +(top[2] - hitL).toFixed(2)]); }
+          continue;
+        }
+        /* the foot flares where it has room (a column of 0.85 mm on the plate alone lets go) */
+        var fh = Math.min(THIN_TIP_FLARE.mm, (top[2] - pz) / 3), flare = kit.pr.leg([x, y, pz + fh], [x, y, pz], 2 * THIN_TIP_FLARE.r * Math.SQRT1_2, 0, 0) < 0;
+        var rr = S / 2, rings = flare ? [[pz, THIN_TIP_FLARE.r], [pz + fh * 0.35, (THIN_TIP_FLARE.r + rr) / 2 + 0.1], [pz + fh, rr], [top[2], rr]] : [[pz, rr], [top[2], rr]];
+        return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), top: top, bottom: [x, y, pz], sideMm: S, moveMm: d, flare: flare,
+                 soup: revolveSoup(x, y, rings, 12, 0, 0) };
+      }
+    }
+    if (rest) {
+      return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), top: rest.top, bottom: [rest.x, rest.y, rest.bz], sideMm: S, moveMm: rest.d, flare: false,
+               rest: true, onZ: rest.sz, soup: revolveSoup(rest.x, rest.y, [[rest.bz, S / 2], [rest.top[2], S / 2]], 12, 0, 0) };
+    }
+    if (dbg) console.log('thin column for spot ' + b.p.map(function (v) { return v.toFixed(2); }).join(',') + ': ' + JSON.stringify(dbg));
+    return null;
+  }
+  /* A HORN (the owner's: "add the upper branches back in, to catch those little edges their horns do ... a ring tip or something similar at that
+     point of contact"). A spot on a step no slicer calls an overhang - the shoulder where two shells meet a quarter of a mm apart - stands no
+     interface; Bambu catches its edge with a horn: a twig a ring of line across (0.5 mm) whose top stands under the step's edge, HORN.wallMm off the
+     wall under it, leaning out from the wall at HORN.leanDeg (Bambu's lean 0.6 mm a mm, measured on supp_ref's four domed heads) until it has a
+     straight drop to the plate, and from there a thin column down, its foot flared. The slicer keeps it plain Support (no interface: not an
+     overhang), xy and gap off the part as the tree is. Null when no route is clear. */
+  var HORN = { wallMm: 0.45, topR: 0.25, kneeR: 0.42, leanDeg: 30, stepMm: 0.25, leanMaxMm: 6, wallProbeMm: 1.2, clearMm: 0.05, leanClearMm: 0.15, capMm: 0.8 };   /* leanClearMm: the slicer keeps a twig 0.2 off the part (COLUMN_TWIG_XY_MM) */
+  var HORN_WHY = '';
+  function hornLean(b, kit, top, lx, ly, tanL, S, pz, mv) {
+    for (var dz = 0; dz * tanL <= HORN.leanMaxMm + 1e-9 && top[2] - dz - pz > S; dz += HORN.stepMm) {
+      var q = [top[0] + lx * dz * tanL, top[1] + ly * dz * tanL, top[2] - dz];
+      if (dz > 0 && kit.pr.leg(top, q, HORN.topR * Math.SQRT2, 0, 0, HORN.leanClearMm) >= 0) { HORN_WHY += ' lean blocked at ' + dz; break; }     /* the lean runs into the part: no horn */
+      if (kit.pr.leg(q, [q[0], q[1], pz], S, dz > 0 ? 0 : HORN.capMm, 0, HORN.clearMm) >= 0) continue;
+      var fh = Math.min(THIN_TIP_FLARE.mm, (q[2] - pz) / 3), flare = kit.pr.leg([q[0], q[1], pz + fh], [q[0], q[1], pz], 2 * THIN_TIP_FLARE.r * Math.SQRT1_2, 0, 0) < 0;
+      var rr = S / 2, rings = flare ? [[pz, THIN_TIP_FLARE.r], [pz + fh * 0.35, (THIN_TIP_FLARE.r + rr) / 2 + 0.1], [pz + fh, rr], [q[2], rr]] : [[pz, rr], [q[2], rr]];
+      var col = revolveSoup(q[0], q[1], rings, 12, 0, 0), parts = [col];
+      if (dz > 0) { parts.push(tubeSoup(top, HORN.topR, q, HORN.kneeR, 12, 0)); parts.push(ballSoup(q, rr, 12, 0)); }
+      else { rings[rings.length - 1] = [q[2] - 0.5, rr]; rings.push([q[2], HORN.topR]); parts[0] = revolveSoup(q[0], q[1], rings, 12, 0, 0); }
+      var n0 = 0; parts.forEach(function (sp) { n0 += sp.length; });
+      var soup = new Float32Array(n0), w = 0; parts.forEach(function (sp) { soup.set(sp, w); w += sp.length; });
+      return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), top: top, knee: q, bottom: [q[0], q[1], pz], sideMm: S, moveMm: mv, leanMm: dz * tanL,
+               flare: flare, horn: true, soup: soup };
+    }
+    return null;
+  }
+  /* A HORN OFF THE TREE (the owner's reference, Bambu's Negative Sphere: its horns are branches of the one trunk, passing outside the rim's
+     interface and up to the shoulders). From the horn's top it leans out as before; from a knee it drops outside the overhangs' stacks (no part
+     within HORN_TREE.shadowMm over it, HORN_TREE.shadowXyMm round), then joins a branch of the tree under it at no more than HORN_TREE.joinDeg -
+     the highest join it reaches. Null when none is clear (the horn then stands its own column on the plate). */
+  var HORN_SLIDE = { stepsMm: [0.5, 0.75, 1, 1.25, 1.5, 2], headings: 16, roomMm: 0.55 };   /* a pocketed top slides out this far along its face to this much room */
+  var HORN_TREE = { shadowMm: 2.2, shadowXyMm: 1.1, shadowRingsMm: [0.4, 0.75, 1.1], slopeMaxMm: 0.6, exemptMm: 2.2, joinDeg: 45, stepMm: 0.25, kneeStepMm: 0.5, kneeMaxMm: 1.5, dropStepMm: 0.5, shadowStepMm: 0.5, joinEndMm: 0.8, cands: 4, rV: 0.5, rJoin: 0.6, headings: 1 };
+  /* THE COLUMN RULE'S SPOTS UNDER A PLATE (the owner's: "the interfaces also supported from below"; Bambu's Negative Sphere2 rim stands on five or
+     six tips, ours on the detector's three). Every FILL.pitchMm round an area's spots (FILL.reachMm out), the part's underside straight over the
+     point: kept as a spot of the area where it is an overhang at the threshold (flatter than its tan, read off the underside a FILL.slopeMm step
+     each way), in the area's height band, and no spot of the area within FILL.apartMm. The slicer's stack then has a tip under it every few mm. */
+  var FILL = { pitchMm: 1, reachMm: 4, slopeMm: 0.3, apartMm: 1.8, bandMm: 1 };   /* a 1 mm grid: a rim round a cavity is a ring 1.5 - 2 mm wide */
+  function fillSpots(bc, byArea, kit, ck) {
+    var tanT = Math.tan(((ck && ck.thresholdDeg) || 30) * Math.PI / 180), added = 0;
+    Object.keys(byArea).forEach(function (k) {
+      var list = byArea[k];
+      if (!list.length) return;
+      var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, zlo = Infinity, zhi = -Infinity;
+      list.forEach(function (b) { x0 = Math.min(x0, b.p[0]); x1 = Math.max(x1, b.p[0]); y0 = Math.min(y0, b.p[1]); y1 = Math.max(y1, b.p[1]); zlo = Math.min(zlo, b.p[2]); zhi = Math.max(zhi, b.p[2]); });
+      var zA = zlo - FILL.bandMm - 2, zB = zhi + FILL.bandMm, why = { apart: 0, none: 0, band: 0, low: 0, steep: 0, at: [] };
+      /* the lowest face over (x, y) in the band: a cast up from the band's foot (a hair off the vertical: the probe's straight casts run down) */
+      var under = function (x, y) { var d = kit.pr.leg([x, y, zA], [x + 1e-5, y, zB], 0, 0, 0, 0); return d > 0 ? zA + d * (zB - zA) / Math.hypot(1e-5, zB - zA) : null; };
+      for (var x = x0 - FILL.reachMm; x <= x1 + FILL.reachMm + 1e-9; x += FILL.pitchMm) {
+        for (var y = y0 - FILL.reachMm; y <= y1 + FILL.reachMm + 1e-9; y += FILL.pitchMm) {
+          if (list.some(function (b) { return Math.hypot(b.p[0] - x, b.p[1] - y) < FILL.apartMm; })) { why.apart++; continue; }
+          var z = under(x, y);
+          if (z == null) { why.none++; continue; }
+          if (z < zlo - FILL.bandMm || z > zhi + FILL.bandMm) { why.band++; if (why.at.length < 6) why.at.push([+x.toFixed(1), +y.toFixed(1), +z.toFixed(2)]); continue; }
+          if (z - kit.plateZ < ONE.lowMm) { why.low++; continue; }
+          var flat = true;
+          [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) { if (!flat) return; var z2 = under(x + d[0] * FILL.slopeMm, y + d[1] * FILL.slopeMm); if (z2 == null || Math.abs(z2 - z) > tanT * FILL.slopeMm) flat = false; });
+          if (!flat) { why.steep++; continue; }
+          var b = { id: bc.beacons.length, p: [x, y, z], n: [0, 0, -1], regionId: list[0].regionId, key: 'fill:' + x.toFixed(2) + ',' + y.toFixed(2) + ',' + z.toFixed(2), source: 'column-fill' };
+          bc.beacons.push(b); list.push(b); added++;
+        }
+      }
+      if (root && root.NSO_TIPS_DEBUG) console.log('fill area ' + k + ' z ' + zlo.toFixed(2) + '..' + zhi.toFixed(2) + ' plate ' + kit.plateZ + ': ' + JSON.stringify(why));
+    });
+    return added;
+  }
+  /* under a stack: part within HORN_TREE.shadowMm over the point, out to HORN_TREE.shadowXyMm round it (the stack's reach past an overhang's edge and
+     a horn's own width), whose underside is an overhang the slicer lays a stack under - flatter than the threshold (tan 30 a mm); a steep flank over
+     the point (the Sphere's dome under its shoulder) has no stack under it and a horn may pass beside it. Read off a map of the part's undersides
+     (hornUnderMap: every face met going up, on a HORN_MAP.cellMm grid round the horns, each flat or not), built once a piece. */
+  var HORN_MAP = { cellMm: 0.2, halfMm: 10, hits: 12, reuseMm: 5 };
+  function hornUnderMap(kit, cx, cy) {
+    var M = kit.underMap;
+    if (M && Math.abs(cx - M.cx) < HORN_MAP.reuseMm && Math.abs(cy - M.cy) < HORN_MAP.reuseMm) return M;   /* a head's horns share one */
+    var C = HORN_MAP.cellMm, n = Math.round(2 * HORN_MAP.halfMm / C) + 1, x0 = cx - HORN_MAP.halfMm, y0 = cy - HORN_MAP.halfMm, zA = kit.plateZ - 0.5, zB = kit.plateZ + 60;
+    var faces = new Array(n * n), tanT = Math.tan(30 * Math.PI / 180);
+    for (var j = 0; j < n; j++) for (var i = 0; i < n; i++) {
+      var x = x0 + i * C, y = y0 + j * C, z = zA, under = [];
+      for (var h = 0; h < HORN_MAP.hits; h++) {
+        var d = kit.pr.leg([x, y, z], [x + 1e-5, y, zB], 0, 0, 0, 0);
+        if (!(d >= 0)) break;
+        var zh = z + d * (zB - z) / Math.hypot(1e-5, zB - z);
+        if (h % 2 === 0) under.push(zh);                                   /* going up from air: an underside, then the top of that body, ... */
+        z = zh + 0.01;
+      }
+      faces[j * n + i] = under;
+    }
+    /* each underside flat or not: its neighbours' nearest underside rises no more than the threshold a cell - a face falling away (none near, or one
+       more than HORN_TREE.slopeMaxMm off) is the overhang's edge, not a slope */
+    var flat = new Array(n * n);
+    for (var j2 = 0; j2 < n; j2++) for (var i2 = 0; i2 < n; i2++) {
+      flat[j2 * n + i2] = faces[j2 * n + i2].map(function (z0) {
+        var steep = false;
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (o) {
+          var ii = i2 + o[0], jj = j2 + o[1]; if (ii < 0 || jj < 0 || ii >= n || jj >= n) return;
+          var best = null; faces[jj * n + ii].forEach(function (z1) { if (best == null || Math.abs(z1 - z0) < Math.abs(best - z0)) best = z1; });
+          if (best != null && Math.abs(best - z0) > tanT * C + 0.02 && Math.abs(best - z0) <= HORN_TREE.slopeMaxMm) steep = true;
+        });
+        return !steep;
+      });
+    }
+    return (kit.underMap = { cx: cx, cy: cy, x0: x0, y0: y0, n: n, C: C, faces: faces, flat: flat });
+  }
+  function hornShadow(kit, pt) {
+    var M = kit.underMap;
+    if (!M) return false;
+    HORN_STATS.shadow++;
+    var R = HORN_TREE.shadowXyMm, C = M.C, i0 = Math.max(0, Math.floor((pt[0] - R - M.x0) / C)), i1 = Math.min(M.n - 1, Math.ceil((pt[0] + R - M.x0) / C));
+    var j0 = Math.max(0, Math.floor((pt[1] - R - M.y0) / C)), j1 = Math.min(M.n - 1, Math.ceil((pt[1] + R - M.y0) / C));
+    for (var j = j0; j <= j1; j++) for (var i = i0; i <= i1; i++) {
+      var dx = M.x0 + i * C - pt[0], dy = M.y0 + j * C - pt[1];
+      if (dx * dx + dy * dy > R * R) continue;
+      var F = M.faces[j * M.n + i], L = M.flat[j * M.n + i];
+      for (var k = 0; k < F.length; k++) if (F[k] > pt[2] && F[k] <= pt[2] + HORN_TREE.shadowMm && L[k]) return true;
+    }
+    return false;
+  }
+  var HORN_STATS = { legs: 0, shadow: 0 };
+  function hornLegClear(kit, a, c, topZ, endFree) {
+    HORN_STATS.legs++;
+    if (kit.pr.leg(a, c, HORN.topR * Math.SQRT2, 0, 0, HORN.leanClearMm) >= 0) return false;
+    var L = Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]), n = Math.max(1, Math.ceil(L / HORN_TREE.shadowStepMm));
+    for (var i = 0; i <= n; i++) {
+      var t = i / n, q = [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t, a[2] + (c[2] - a[2]) * t];
+      if (q[2] > topZ - HORN_TREE.exemptMm) continue;                       /* the shoulder over the horn's own top is no stack */
+      if (endFree && (1 - t) * L < HORN_TREE.joinEndMm) continue;            /* the join's own end is in the branch it meets */
+      if (hornShadow(kit, q)) return false;
+    }
+    return true;
+  }
+  /* A horn's corners rounded: at each inner corner of the polyline a quadratic fillet from a point HORN_BEND radius before it to one after it
+     (never past half a leg), sampled; the widest radius whose fillet stays clear of the part and the stacks (hornLegClear), else the corner kept */
+  var HORN_BEND = { radiiMm: [2, 1.2, 0.6], samples: 6 };
+  function smoothHornPath(kit, P, topZ) {
+    var out = [P[0]];
+    var D3 = function (u, w) { return Math.hypot(u[0] - w[0], u[1] - w[1], u[2] - w[2]); };
+    var lerp = function (u, w, t) { return [u[0] + (w[0] - u[0]) * t, u[1] + (w[1] - u[1]) * t, u[2] + (w[2] - u[2]) * t]; };
+    for (var i = 1; i + 1 < P.length; i++) {
+      var A = P[i - 1], V = P[i], B = P[i + 1], done = false;
+      for (var ri = 0; ri < HORN_BEND.radiiMm.length && !done; ri++) {
+        var r = HORN_BEND.radiiMm[ri], ra = Math.min(r, 0.5 * D3(A, V)), rb = Math.min(r, 0.5 * D3(V, B));
+        if (!(ra > 0.05 && rb > 0.05)) continue;
+        var s0 = lerp(V, A, ra / D3(A, V)), s1 = lerp(V, B, rb / D3(V, B)), arc = [];
+        for (var k = 0; k <= HORN_BEND.samples; k++) { var t = k / HORN_BEND.samples, m = 1 - t; arc.push([m * m * s0[0] + 2 * m * t * V[0] + t * t * s1[0], m * m * s0[1] + 2 * m * t * V[1] + t * t * s1[1], m * m * s0[2] + 2 * m * t * V[2] + t * t * s1[2]]); }
+        var clear = true;
+        for (var k2 = 0; k2 + 1 < arc.length && clear; k2++) if (!hornLegClear(kit, arc[k2], arc[k2 + 1], topZ, false)) clear = false;
+        if (clear) { arc.forEach(function (q) { out.push(q); }); done = true; }
+      }
+      if (!done) out.push(V);
+    }
+    out.push(P[P.length - 1]);
+    return out;
+  }
+  function hornToTree(b, kit, top, lx, ly, tanL, segs, mv) {
+    if (!segs || !segs.length) return null;
+    var tanJ = Math.tan(HORN_TREE.joinDeg * Math.PI / 180), pz = kit.plateZ, best = null;
+    var D3 = function (u, w) { return Math.hypot(u[0] - w[0], u[1] - w[1], u[2] - w[2]); };
+    for (var dz = HORN_TREE.kneeStepMm; dz * tanL <= HORN_TREE.kneeMaxMm + 1e-9 && top[2] - dz - pz > 1; dz += HORN_TREE.kneeStepMm) {
+      var q = [top[0] + lx * dz * tanL, top[1] + ly * dz * tanL, top[2] - dz], lq = D3(top, q);
+      if (best && lq >= best.len) break;
+      if (!hornLegClear(kit, top, q, top[2], false)) break;                 /* the lean runs into the part or a stack: no further this way */
+      for (var zv = q[2]; zv - pz > 1; zv -= HORN_TREE.dropStepMm) {
+        var v = [q[0], q[1], zv], lv = lq + (q[2] - zv);
+        if (best && lv >= best.len) break;
+        if (zv < q[2] - 1e-9 && !hornLegClear(kit, [q[0], q[1], zv + HORN_TREE.dropStepMm], v, top[2], false)) break;
+        var cand = segs.filter(function (c) { return c[2] < zv - 0.3 && Math.hypot(c[0] - v[0], c[1] - v[1]) <= (zv - c[2]) * tanJ + 1e-9; });
+        cand.sort(function (a2, b2) { return D3(v, a2) - D3(v, b2); });
+        for (var ci = 0; ci < Math.min(cand.length, HORN_TREE.cands); ci++) {
+          var c = cand[ci], len = lv + D3(v, c);
+          if (best && len >= best.len) break;
+          if (!hornLegClear(kit, v, c, top[2], true)) continue;
+          best = { q: q, v: v, c: c.slice(0, 3), len: len, dz: dz };
+          break;
+        }
+      }
+    }
+    if (!best) return null;
+    var q2 = best.q, v2 = best.v, c2 = best.c;
+    /* its bends rounded (the owner's: "softer bends"): each corner of top - knee - drop - join a fillet as wide as stays clear (HORN_BEND.radiiMm,
+       widest first; none clear, the corner as it is) */
+    var corners = [top, q2];
+    if (v2[2] < q2[2] - 1e-9) corners.push(v2);
+    corners.push(c2);
+    var path = smoothHornPath(kit, corners, top[2]);
+    var N = path.length - 1, rAt = function (i) { return HORN.topR + (HORN_TREE.rJoin - HORN.topR) * i / N; };   /* thin at the top, thick at the tree */
+    var parts = [];
+    for (var k = 0; k < N; k++) { parts.push(tubeSoup(path[k], rAt(k), path[k + 1], rAt(k + 1), 12, 0)); if (k > 0) parts.push(ballSoup(path[k], rAt(k), 12, 0)); }
+    parts.push(ballSoup(c2, HORN_TREE.rJoin, 12, 0));
+    var n0 = 0; parts.forEach(function (sp) { n0 += sp.length; });
+    var soup = new Float32Array(n0), w = 0; parts.forEach(function (sp) { soup.set(sp, w); w += sp.length; });
+    return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), top: top, knee: q2, drop: v2, join: c2, bottom: c2, sideMm: 2 * HORN.kneeR,
+             moveMm: mv, leanMm: best.dz * tanL, lengthMm: best.len, flare: false, horn: true, onTree: true, smooth: true, soup: soup };
+  }
+  /* a branch from a spot straight into the tree (no wall to stand off): its top under the face over the spot, leaning out at the horn's lean
+     on eight headings, the shortest that joins */
+  function treeBranch(b, kit, segs) {
+    if (!kit || kit.plateZ == null || !segs || !segs.length) return null;
+    var tanL = Math.tan(HORN.leanDeg * Math.PI / 180);
+    hornUnderMap(kit, b.p[0], b.p[1]);
+    /* its top where a thin column's would stand: the spot, else moved along its face (THIN_TIP_NUDGE_MM, the nearest first) to where the face is
+       at the spot's height - a ledge's spot whose own column is blocked lower down (the thin pillar stood 2.25 mm off it) */
+    for (var di = 0; di < THIN_TIP_NUDGE_MM.length; di++) {
+      var d = THIN_TIP_NUDGE_MM[di], best = null;
+      for (var hn = 0; hn < (d ? STEER_HEADINGS : 1); hn++) {
+        var th = 2 * Math.PI * hn / STEER_HEADINGS, x = b.p[0] + Math.cos(th) * d, y = b.p[1] + Math.sin(th) * d;
+        var hz = kit.pr.down([x, y, b.p[2] + THIN_TIP_FACE_MM], 2 * THIN_TIP_FACE_MM);
+        if (hz < 0) continue;
+        var fz = b.p[2] + THIN_TIP_FACE_MM - hz;
+        if (Math.abs(fz - b.p[2]) > THIN_TIP_FACE_MM) continue;
+        var top = [x, y, fz - GAP_MM];
+        if (!(top[2] - kit.plateZ > 2 * THIN_TIP_SIDE_MM)) continue;
+        for (var h = 0; h < 8; h++) {
+          var a = 2 * Math.PI * h / 8, hT = hornToTree(b, kit, top, Math.cos(a), Math.sin(a), tanL, segs, d);
+          if (hT && (!best || hT.lengthMm < best.lengthMm)) best = hT;
+        }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+  function hornColumn(b, kit, segs, treeOnly) {
+    HORN_WHY = 'no kit';
+    if (!kit || kit.plateZ == null) return null;
+    var pz = kit.plateZ, zw = b.p[2] - 0.3, nH = 32, dmin = Infinity, hits = [];
+    /* the wall under the step: the nearest part sideways a layer and a half under the spot */
+    for (var h = 0; h < nH; h++) {
+      var a = 2 * Math.PI * h / nH, ux = Math.cos(a), uy = Math.sin(a);
+      var d = kit.pr.leg([b.p[0], b.p[1], zw], [b.p[0] + ux * HORN.wallProbeMm, b.p[1] + uy * HORN.wallProbeMm, zw], 0, 0, 0, 0);
+      if (d === 0) { HORN_WHY = 'in the part'; return null; }             /* the spot's own column is in the part: no step */
+      if (d > 0) { hits.push([ux, uy, d]); dmin = Math.min(dmin, d); }
+    }
+    HORN_WHY = 'no wall';
+    if (!hits.length) return null;
+    var ox = 0, oy = 0;
+    hits.forEach(function (q) { if (q[2] <= dmin + 0.05) { ox -= q[0]; oy -= q[1]; } });
+    var ol = Math.hypot(ox, oy); if (!(ol > 1e-9)) return null;
+    ox /= ol; oy /= ol;
+    var mv = Math.max(0, HORN.wallMm - dmin), tx = b.p[0] + ox * mv, ty = b.p[1] + oy * mv;
+    /* its top: under the face over it (the step's underside), or level with the spot where the moved top is past the step's edge */
+    var hz = kit.pr.down([tx, ty, b.p[2] + THIN_TIP_FACE_MM], 2 * THIN_TIP_FACE_MM), fz = hz >= 0 ? b.p[2] + THIN_TIP_FACE_MM - hz : b.p[2];
+    if (Math.abs(fz - b.p[2]) > THIN_TIP_FACE_MM) fz = b.p[2];
+    /* the wall can come closer just under the top (a dome bulging under its shoulder): the top keeps HORN.wallMm off it over its first half mm */
+    for (var it = 0; it < 4; it++) {
+      var near = Infinity, rep = [];
+      [0, 0.25, 0.5].forEach(function (dd) {
+        for (var h2 = 0; h2 < nH; h2++) {
+          var a2 = 2 * Math.PI * h2 / nH, d2 = kit.pr.leg([tx, ty, fz - GAP_MM - dd], [tx + Math.cos(a2) * HORN.wallProbeMm, ty + Math.sin(a2) * HORN.wallProbeMm, fz - GAP_MM - dd], 0, 0, 0, 0);
+          if (d2 >= 0) { rep.push([Math.cos(a2), Math.sin(a2), d2]); if (d2 < near) near = d2; }
+        }
+      });
+      if (!(near < HORN.wallMm - 0.02)) break;
+      /* away from every wall nearer than the mark, the nearest the most */
+      var rx = 0, ry = 0;
+      rep.forEach(function (q) { if (q[2] < HORN.wallMm) { var wgt = HORN.wallMm - q[2]; rx -= q[0] * wgt; ry -= q[1] * wgt; } });
+      var rl = Math.hypot(rx, ry); if (!(rl > 1e-9)) break;
+      rx /= rl; ry /= rl;
+      var st = Math.min(0.3, HORN.wallMm - near);
+      tx += rx * st; ty += ry * st; mv += st;
+    }
+    var top = [tx, ty, fz - GAP_MM], tanL = Math.tan(HORN.leanDeg * Math.PI / 180), S = THIN_TIP_SIDE_MM;
+    HORN_WHY = 'low';
+    if (!(top[2] - pz > 2 * S)) return null;
+    HORN_WHY = 'no route from top ' + top.map(function (v) { return v.toFixed(2); }) + ' out ' + ox.toFixed(2) + ',' + oy.toFixed(2) + ' wall ' + dmin.toFixed(2);
+    /* the lean: straight out from the wall first, then turned a sixteenth of a turn at a time either way, as far as square to it */
+    var oa = Math.atan2(oy, ox);
+    hornUnderMap(kit, b.p[0], b.p[1]);                                     /* the undersides round it, once a head (hornShadow) */
+    var bestT = null;
+    for (var t0 = 0; t0 <= HORN_TREE.headings && segs && segs.length; t0++) {
+      for (var sg0 = t0 ? -1 : 1; sg0 <= 1; sg0 += 2) {
+        var ang0 = oa + sg0 * t0 * Math.PI / 8, hT = hornToTree(b, kit, top, Math.cos(ang0), Math.sin(ang0), tanL, segs, mv);
+        if (hT && (!bestT || hT.lengthMm < bestT.lengthMm)) bestT = hT;
+      }
+    }
+    if (bestT) return bestT;
+    /* A TOP IN A POCKET (the 2x supp_ref's ears: a tab over a post, the spot under it part on three sides half a mm off - every lean from there
+       ran into it, and three heads lost the horns Bambu stands about 1.5 mm out under the tab's open edge): the top slides along the face it
+       stands under, HORN_SLIDE.stepsMm on HORN_SLIDE.headings, to the nearest point with HORN_SLIDE.roomMm of clear round it, and leans from
+       there on every heading */
+    if (segs && segs.length) {
+      for (var si = 0; si < HORN_SLIDE.stepsMm.length && !bestT; si++) {
+        var dS = HORN_SLIDE.stepsMm[si];
+        for (var sh2 = 0; sh2 < HORN_SLIDE.headings; sh2++) {
+          var aS = 2 * Math.PI * sh2 / HORN_SLIDE.headings, sx = top[0] + Math.cos(aS) * dS, sy = top[1] + Math.sin(aS) * dS;
+          var hzS = kit.pr.down([sx, sy, b.p[2] + THIN_TIP_FACE_MM], 2 * THIN_TIP_FACE_MM);
+          if (hzS < 0) continue;                                            /* past the face's edge: nothing over it to hold */
+          var fzS = b.p[2] + THIN_TIP_FACE_MM - hzS;
+          if (Math.abs(fzS - b.p[2]) > THIN_TIP_FACE_MM) continue;
+          var topS = [sx, sy, fzS - GAP_MM], room = Infinity;
+          for (var hr = 0; hr < 16 && room >= HORN_SLIDE.roomMm; hr++) {
+            var ar = 2 * Math.PI * hr / 16, dr = kit.pr.leg(topS, [sx + Math.cos(ar) * HORN_SLIDE.roomMm, sy + Math.sin(ar) * HORN_SLIDE.roomMm, topS[2]], 0, 0, 0, 0);
+            if (dr >= 0) room = Math.min(room, dr);
+          }
+          if (room < HORN_SLIDE.roomMm) continue;
+          for (var hS = 0; hS < 8; hS++) {
+            var aL = 2 * Math.PI * hS / 8, hT2 = hornToTree(b, kit, topS, Math.cos(aL), Math.sin(aL), tanL, segs, mv + dS);
+            if (hT2 && (!bestT || hT2.lengthMm < bestT.lengthMm)) bestT = hT2;
+          }
+        }
+      }
+      if (bestT) return bestT;
+    }
+    if (treeOnly) { HORN_WHY = 'no way into the tree'; return null; }   /* tree mode: no column of its own to the plate */
+    for (var t = 0; t <= 4; t++) {
+      for (var sg = t ? -1 : 1; sg <= 1; sg += 2) {
+        var ang = oa + sg * t * Math.PI / 8, lx = Math.cos(ang), ly = Math.sin(ang);
+        var hc = hornLean(b, kit, top, lx, ly, tanL, S, pz, mv);
+        if (hc) return hc;
+      }
+    }
+    return null;
+  }
+  /* A TIP SPLIT INTO SHOOTS (the owner's 2x Oblique beside Bambu's: "not a cone, not a cup. Split each tip shoot into multiple"). Bambu's tree slim
+     stands a tip on every few spots of a slope, and they run together a mm or two down in twos and threes - lobed heads; NSO's one tip per 3 mm
+     stood one round shoot. Each tip of the column rule's crown takes up to TIP_FORK.max of the spots it covers (TIP_FORK.minMm - maxMm off it,
+     TIP_FORK.apartMm apart, within TIP_FORK.dzMm of its height) as tips of its own, joined to it first (crownTopology's fork: a join under the
+     shoots, the tip's straight drop under the lower of them); the tree under the fork is grouped as it was. */
+  var TIP_FORK = { max: 2, minMm: 1.0, maxMm: 2.6, apartMm: 1.4, spanMm: 2.6, otherMm: 2.8, minHeightMm: 12, areaRiseMm: 2, dzMm: 1.5, riseMm: 0.3, leanDeg: 30 };
+  function tipForkSpots(chosen, covered, bc, plateZ) {
+    var out = {}, byKey = {};
+    /* a fork costs its tree a couple of mm of height: a squat head (its tip within TIP_FORK.minHeightMm of the plate) keeps its single shoot - the
+       Negative Sphere's tree at 10.8 mm, forked, crowded its joins into its trunk's shoulder and printed 2.8 mm2 over air (Bambu's 0.2) */
+    /* ...and a flat face keeps its single shoots: the slicer's stack spans its tips, and a forked Base printed its tree over air at the trunk (3 mm2,
+       Bambu's 0.0). A slope (its area's spots TIP_FORK.areaRiseMm or more apart in height) is where Bambu's tips run together in twos and threes */
+    var zr = {};
+    bc.beacons.forEach(function (b) { var r = zr[b.regionId] || (zr[b.regionId] = [Infinity, -Infinity]); r[0] = Math.min(r[0], b.p[2]); r[1] = Math.max(r[1], b.p[2]); });
+    chosen.forEach(function (b) { var r = zr[b.regionId]; if (b.p[2] - plateZ >= TIP_FORK.minHeightMm && r && r[1] - r[0] >= TIP_FORK.areaRiseMm) byKey[b.key] = b; });
+    var mine = {}, taken = [];
+    covered.forEach(function (c) { if (!c.cone && byKey[c.byKey]) (mine[c.byKey] = mine[c.byKey] || []).push(c); });
+    /* every shoot keeps TIP_FORK.otherMm off every other tip and its shoots (the owner's 2x Oblique: "some webbing" - a shoot 2 mm off the next
+       tip's ran into it, and the smooth body's blend between them sliced as a thin web of walls) */
+    chosen.forEach(function (b) { taken.push({ k: b.key, p: b.p }); });
+    Object.keys(mine).forEach(function (k) {
+      var t = byKey[k], took = [];
+      mine[k].slice().sort(function (a, b) { return (a.mm - b.mm) || (a.beacon - b.beacon); }).forEach(function (c) {
+        if (took.length >= TIP_FORK.max) return;
+        var b = bc.beacons[c.beacon];
+        if (!b) return;
+        var d = Math.hypot(b.p[0] - t.p[0], b.p[1] - t.p[1]);
+        if (d < TIP_FORK.minMm || d > TIP_FORK.maxMm || Math.abs(b.p[2] - t.p[2]) > TIP_FORK.dzMm) return;
+        if (took.some(function (o) { return Math.hypot(o.p[0] - b.p[0], o.p[1] - b.p[1]) < TIP_FORK.apartMm; })) return;
+        if (took.some(function (o) { return Math.hypot(o.p[0] - b.p[0], o.p[1] - b.p[1]) > TIP_FORK.spanMm; })) return;   /* a tight head: no shoot across the fork from another */
+        if (taken.some(function (o) { return o.k !== k && Math.hypot(o.p[0] - b.p[0], o.p[1] - b.p[1]) < TIP_FORK.otherMm; })) return;
+        taken.push({ k: k, p: b.p });
+        took.push(b);
+      });
+      if (took.length) out[k] = took;
+    });
+    return out;
+  }
   function planOneTrunk(rawTris, opts) {
     var bc = beaconsFor(rawTris, opts);
     if (!bc.ok || !bc.beacons.length) return null;                      /* the ordinary plan says why, in its own words */
     var say = progressOf(opts);
     say('detecting', null, null, true);
-    var ck = Object.assign({}, ONE, (opts.oneTrunk && typeof opts.oneTrunk === 'object') ? opts.oneTrunk : {});
+    var ck = Object.assign({}, ONE, opts.columnRule ? COLUMN_ONE : {}, (opts.oneTrunk && typeof opts.oneTrunk === 'object') ? opts.oneTrunk : {});
+    var CCK = columnCrownOf(opts.treeKnobs), CC = CCK.cc;
+    if (opts.columnRule && opts.treeKnobs) {
+      /* branch distance: tips about that far apart (the cover is the spots' reach to their tip: 5 mm -> 2.2, the column rule's own) */
+      ck.coverMm = COLUMN_TIP_COVER * CCK.k.branchDistanceMm; ck.coverWideMm = COLUMN_TIP_COVER_WIDE * CCK.k.branchDistanceMm; ck.tiltDeg = +CCK.k.branchAngleDeg;
+    }
     ck.crown = Object.assign({}, ONE.crown, (opts.oneTrunk && opts.oneTrunk.crown) || {});
     var byArea = {}, order = [];
     bc.beacons.forEach(function (b) {
@@ -4661,7 +5279,49 @@
     /* a spot whose tip no branch can reach round the piece, even alone (plan.blocked left after every split) has no route to the
        plate: it is not built, and is the plan's unreachable - the same word the lattice planner gives it. The pool is thinned
        again without it, so the spots beside it stand tips of their own. */
-    var lost = {}, nLost = 0, p = null, chosen, covered, thinned, clusters, rounds, onPlate = [], plateZ1 = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0;
+    var lost = {}, nLost = 0, p = null, chosen, covered, thinned, clusters, rounds, onPlate = [], plateZ1 = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0, kit = null, stepHeld = [];
+    /* under the column rule a step's spot is caught by a horn (hornColumn); spots within HORN_ONE_MM of one already caught share it */
+    var HORN_ONE_MM = 1.5;
+    var HORN_COVER = { xyMm: 4.1, downMm: 1.5, upMm: 0.3 };   /* 4.1: the 2x Oblique's steps 2.8 and 4.05 off a slope's spot sit in its stack (Bambu's interface there, no horn) */   /* an overhang's spot this near (in plan: the spots' grid and its interface's reach) and this far under the step's (or a hair over) */
+    /* the tree a horn (or a branch to a spot no leg reached) may join: the crowns' branches and trunks, and the legs to the tips under their
+       straight columns (which stand in the stacks), sampled every half mm */
+    function treeSegsOf() {
+      var treeSegs = [];
+      if (p && p.ok && p.crowns) p.crowns.forEach(function (cr) {
+        (cr.nodes || []).forEach(function (n) {
+          if (!n.pos || !n.to) return;
+          var pts = n.mid ? [n.pos, n.mid, n.to] : [n.pos, n.to], zTipCol = n.kind === 'tip' ? n.pos[2] - COLUMN_CROWN.tipDropMm : Infinity;
+          for (var k = 0; k + 1 < pts.length; k++) {
+            var a = pts[k], c = pts[k + 1], L = Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]), m = Math.max(1, Math.ceil(L / 0.5));
+            for (var j = 0; j <= m; j++) { var sp = [a[0] + (c[0] - a[0]) * j / m, a[1] + (c[1] - a[1]) * j / m, a[2] + (c[2] - a[2]) * j / m]; if (sp[2] < zTipCol) treeSegs.push(sp); }
+          }
+        });
+      });
+      return treeSegs;
+    }
+    function hornsOf(steps) {
+      if (!opts.columnRule || opts.noHorns) return [];                   /* the card's Exclude small overhangs: the steps are the part's to hold */
+      var treeSegs = treeSegsOf();
+      var out = [], isStep = {};
+      steps.forEach(function (sh) { isStep[sh.beacon] = true; });
+      steps.forEach(function (sh) {
+        if (out.some(function (h) { return Math.hypot(h.p[0] - sh.p[0], h.p[1] - sh.p[1]) < HORN_ONE_MM && Math.abs(h.p[2] - sh.p[2]) < HORN_ONE_MM; })) return;
+        /* an edge just over an overhang's own spot is the interface's: its stack reaches past that edge (the Oblique's, as Bambu lays it) */
+        var cover = bc.beacons.find(function (o2) {
+          if (isStep[o2.id] || lost[o2.id] === true) return false;
+          var dz = sh.p[2] - o2.p[2];
+          return dz > -HORN_COVER.upMm && dz < HORN_COVER.downMm && Math.hypot(o2.p[0] - sh.p[0], o2.p[1] - sh.p[1]) < HORN_COVER.xyMm;
+        });
+        if (root && root.NSO_STEP_DEBUG && cover) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': none, the interface of ' + cover.p.map(function (v) { return v.toFixed(2); }) + ' covers it');
+        if (cover) return;
+        var tH = Date.now(), nLeg0 = HORN_STATS.legs, nSh0 = HORN_STATS.shadow;
+        var hc = hornColumn(bc.beacons[sh.beacon], kit, treeSegs, true);      /* tree mode: a horn joins the tree or is not built - no pillar of its own */
+        if (root && root.NSO_STEP_DEBUG) console.log('  horn time ' + (Date.now() - tH) + ' ms, legs ' + (HORN_STATS.legs - nLeg0) + ', shadow checks ' + (HORN_STATS.shadow - nSh0));
+        if (root && root.NSO_STEP_DEBUG) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': ' + (hc ? 'top ' + hc.top.map(function (v) { return v.toFixed(2); }) + ' knee ' + hc.knee.map(function (v) { return v.toFixed(2); }) + ' lean ' + hc.leanMm.toFixed(2) + (hc.onTree ? ' drop ' + hc.drop[2].toFixed(2) + ' joins the tree at ' + hc.join.map(function (v) { return v.toFixed(2); }) : ' to the plate') + ' (tree ' + treeSegs.length + ' points)' : 'none ' + HORN_WHY));
+        if (hc) out.push(hc);
+      });
+      return out;
+    }
     bc.beacons.forEach(function (b) { if (b.p[2] - plateZ1 < ck.lowMm) { lost[b.id] = 'plate'; onPlate.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); } });
     /* A SPOT WITH NO ROUTE DOWN stands no tip, and is not covered by one beside it: a spot over the part's own base, or the middle of
        a tunnel's ceiling, has a neighbour within the sheet's reach whose column reaches the plate, but the sheet does not lie under
@@ -4672,6 +5332,8 @@
       var A0 = SA(opts), st = A0 && A0.buildStrut ? A0.buildStrut(opts) : null, plateZ0 = bc.detect && bc.detect.plateZ;
       if (!st || !st.ok || plateZ0 == null) return;
       var pr = makeProbe(A0, [rawTris].concat(opts.occluders || [])), tanL = Math.tan((opts.branchTiltDeg == null ? ST(opts).BRANCH_TILT_DEG : +opts.branchTiltDeg) * Math.PI / 180) * 0.97, side = st.sideMm;
+      kit = { pr: pr, plateZ: plateZ0 };
+      if (opts.columnRule) fillSpots(bc, byArea, kit, ck);
       /* the route a tip at `at` has down: straight, leaning to the plate, or leaning a while and then straight (the lattice planner's
          steer: the leaning line walked down a node's height at a time, a clear leg and a clear drop at each) */
       function routeDown(at, straightOnly) {
@@ -4694,6 +5356,9 @@
       }
       bc.beacons.forEach(function (b) {
         if (b.p[2] - plateZ0 < ck.lowMm) return;                           /* on the plate's first layers: held by the plate (below) */
+        /* under the column rule (opts.columnRule: the slicer lays the interface) a spot on a step no slicer calls an overhang stands no tip,
+           reachable or not: its branch was an arm run out flat to a shoulder a quarter of a mm deep (the owner's gate 3, printable angles) */
+        if (opts.columnRule && subThresholdStep(b, kit, opts)) { lost[b.id] = 'step'; stepHeld.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); return; }
         var ok = routeDown(b.p);
         /* a tip against a wall is moved off it along its face, as the lattice planner moves one (NUDGE_STEPS of the strut's side) */
         for (var si = 0; si < NUDGE_STEPS.length && !ok && b.n[2] < -1e-6; si++) {
@@ -4702,6 +5367,7 @@
             ok = routeDown([b.p[0] + dx, b.p[1] + dy, b.p[2] - (b.n[0] * dx + b.n[1] * dy) / b.n[2]], true);   /* a nudged tip: a straight drop (the leaning search is the spot's own, once) */
           }
         }
+        if (!ok && subThresholdStep(b, kit, opts)) { lost[b.id] = 'step'; stepHeld.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); return; }
         if (!ok) { lost[b.id] = true; nLost++; }
       });
     })();
@@ -4711,7 +5377,10 @@
       order.forEach(function (k) {
         var pool = byArea[k].filter(function (b) { return !lost[b.id]; });
         if (!pool.length) return;
-        var pick = thinTips(pool, ck.coverMm, Math.min(ck.minTips, pool.length)), isTip = {}, mine = [];
+        /* a big hanging area thins its tips to the branch distance itself (COLUMN_TIP_COVER_WIDE): the owner's mouse, one area of 1800 spots, stood
+           385 tips a mm and a half under it where Bambu stands 194; a small head keeps the close cover its trunk was tuned on (the gate's heads) */
+        var cov = ck.coverWideMm && pool.length >= COLUMN_WIDE_SPOTS ? ck.coverWideMm : ck.coverMm;
+        var pick = thinTips(pool, cov, Math.min(ck.minTips, pool.length)), isTip = {}, mine = [];
         pick.forEach(function (i) { isTip[i] = true; mine.push(pool[i]); });
         pool.forEach(function (b, i) {
           if (isTip[i]) return;
@@ -4722,16 +5391,38 @@
         });
         mine.forEach(function (b) { chosen.push(b); });
       });
-      if (!chosen.length) return null;                                     /* nothing left to stand: the ordinary plan says why */
+      if (!chosen.length) {
+        /* nothing left to stand. Where every spot is on the plate, on a step, or held by a thin column, that is the plan - with no trunk; else
+           the ordinary plan says why */
+        var thin0 = [], rest0 = [];
+        Object.keys(lost).forEach(function (id) { if (lost[id] === true) { var tc = thinColumn(bc.beacons[+id], kit); if (tc) thin0.push(tc); else rest0.push(id); } });
+        if (rest0.length || (!thin0.length && !stepHeld.length && !onPlate.length)) return null;
+        var horns0 = hornsOf(stepHeld); thin0 = thin0.concat(horns0);
+        return { ok: true, reason: 'no tips to stand: ' + (thin0.length ? thin0.length + ' thin column(s)' + (horns0.length ? ' (' + horns0.length + ' of them horns)' : '') : '') + (thin0.length && stepHeld.length ? ', ' : '') + (stepHeld.length ? stepHeld.length + ' spot(s) on a step the part holds' : '') + '.',
+                 stage: 'done', members: [], stubs: [], merges: [], pickups: [], steered: [], nudged: [], tight: [], unreachable: [], resting: [], inside: [], held: 0,
+                 trunks: [], beacons: [], stations: [], plateZ: plateZ1,
+                 oneTrunk: { coverMm: ck.coverMm, areas: order.length, clusters: [], tips: 0, beacons: bc.beacons.length, thinned: 0, covered: [], onPlate: onPlate, splits: 0, lost: 0,
+                             thin: thin0, coneTips: 0, selfHeld: stepHeld.slice() } };
+      }
+      /* 1b. each tip's shoots (TIP_FORK): spots it covers, near it and apart from one another */
+      var forkSpots = opts.columnRule && !opts.noTipForks ? tipForkSpots(chosen, covered, bc, plateZ1) : {}, nForks = 0;
       /* 2. the tips of every area, in bands of height, clustered; a cluster whose canopy has a branch with no way round the
          piece (plan.blocked) is split smaller and planned again - a tip is never left without its branch */
       clusters = [];
       zBands(chosen, ck.zWindowMm).forEach(function (band) {
-        clusterTips(band.map(function (i) { return chosen[i]; }), ck.clusterMm).forEach(function (g) { clusters.push({ tips: g.map(function (j) { return chosen[band[j]]; }), r: ck.clusterMm }); });
+        /* under the column rule a trunk serves as wide a canopy as its height reaches at the lean limit (a branch at 45 deg goes as far out as
+           it drops), not a fixed 12 mm: a head at 2x stood two and three trunks where Bambu stands one (supp_ref_2x: six feet, one a head) */
+        var rC = ck.clusterMm;
+        if (opts.columnRule) {
+          var zlB = Math.min.apply(null, band.map(function (i) { return chosen[i].p[2]; }));
+          rC = Math.max(rC, 0.9 * (zlB - plateZ1 - COLUMN_CROWN.rootFloorMm - COLUMN_CROWN.tipDropMm) * Math.tan((ck.tiltDeg || 45) * Math.PI / 180));
+        }
+        clusterTips(band.map(function (i) { return chosen[i]; }), rC).forEach(function (g) { clusters.push({ tips: g.map(function (j) { return chosen[band[j]]; }), r: rC }); });
       });
       rounds = 0;
       for (;;) {
         var tips = [], zones = [];
+        nForks = 0;
         clusters.forEach(function (c) {
           /* the circle stands under the tips' centroid - weighted toward the higher tips when a first plan had a branch with no way
              round (c.bias): under a slope the room is under its high end, and a branch can climb from there to a lower tip, where a
@@ -4755,18 +5446,24 @@
           /* ...and as many branches to a join as the head's height asks: a squat head has no room for a join under a join (a
              branch from a join 0.5 mm under its tips leans along the underside it should clear), so its tips go to the trunk's top
              in as few levels as the room allows - a flat umbrella - and a tall head keeps Bambu's pairs (2 - 3 to a join) */
-          var room = zlo - ck.crown.rootFloorMm - ck.crown.tipDropMm, allowed = Math.max(0, Math.floor(room / ck.crown.nodeDropMm + 1e-9)), K = 3, mm = c.tips.length, rds = 0;
+          var ckc = opts.columnRule ? Object.assign({}, ck.crown, CC) : ck.crown;
+          var room = zlo - ckc.rootFloorMm - ckc.tipDropMm, allowed = Math.max(0, Math.floor(room / ckc.nodeDropMm + 1e-9)), K = 3, mm = c.tips.length, rds = 0;
           for (K = 3; K < c.tips.length; K++) {
             mm = c.tips.length; rds = 0;
             while (mm > K) { mm = Math.max(1, Math.floor(mm / 2)); rds++; }
             if (rds <= allowed) break;
           }
           zones.push({ x: cx / wsum, y: cy / wsum, r: ck.circleMm, maxKids: Math.max(3, Math.min(K, c.tips.length)) });
-          c.tips.forEach(function (b) { tips.push({ x: b.p[0], y: b.p[1], z: b.p[2], regionId: b.regionId, key: b.key, beaconId: b.id }); });
+          c.tips.forEach(function (b) {
+            var fk = forkSpots[b.key] || [];
+            tips.push({ x: b.p[0], y: b.p[1], z: b.p[2], regionId: b.regionId, key: b.key, beaconId: b.id, fork: fk.length ? b.key : undefined });
+            fk.forEach(function (f) { tips.push({ x: f.p[0], y: f.p[1], z: f.p[2], regionId: f.regionId, key: f.key, beaconId: f.id, fork: b.key }); nForks++; });
+          });
         });
         var o2 = Object.assign({}, opts, {
           feed: { mode: 'custom', tips: tips, landingZones: zones },
-          crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.crown || {}, { trunk: Object.assign({ footClearMm: ck.footClearMm }, (ck.crown && ck.crown.trunk) || {}, (opts.crown && opts.crown.trunk) || {}) }),
+          crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.columnRule ? CC : {}, opts.crown || {},
+                               { trunk: Object.assign({ footClearMm: ck.footClearMm }, (ck.crown && ck.crown.trunk) || {}, opts.columnRule ? CC.trunk : {}, (opts.crown && opts.crown.trunk) || {}) }),
           branchTiltDeg: opts.branchTiltDeg == null ? ck.tiltDeg : opts.branchTiltDeg,
           beacons: undefined, oneTrunk: undefined
         });
@@ -4797,25 +5494,314 @@
       p.blocked.forEach(function (bl) { (bl.tips || []).forEach(function (tid) { var b = byTid[tid]; if (b && !lost[b.id]) { lost[b.id] = true; nLost++; found++; } }); });
       if (!found) break;
     }
+    if (root && root.NSO_TIPS_DEBUG && chosen) console.log('spots ' + JSON.stringify(bc.beacons.map(function (b) { return b.p.map(function (v) { return +v.toFixed(1); }).concat([chosen.indexOf(b) >= 0 ? 'T' : lost[b.id] ? 'L' : 'c']); })));
     if (p.ok) {
-      /* the lost spots, as unreachable beacons of the plan (its beacons list is the card's key for every id it answers with) */
-      Object.keys(lost).filter(function (id) { return lost[id] === true; }).map(Number).sort(function (x, y) { return x - y; }).forEach(function (id) {
+      /* the lost spots: a cone's tip held through the tip under it, a ledge by a thin column; what is left is unreachable */
+      var thin = [], coneHeld = 0, thinHeld = 0, branched = 0, segsL = null, selfHeld = stepHeld.slice();
+      var stillLost = Object.keys(lost).filter(function (id) { return lost[id] === true; }).map(Number).sort(function (x, y) { return x - y; }).filter(function (id) {
+        var b = bc.beacons[id];
+        if (subThresholdStep(b, kit, opts)) { selfHeld.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); return false; }
+        var cv = coneTipCover(b, chosen, kit);
+        if (cv) { covered.push(cv); coneHeld++; return false; }
+        /* TREE MODE HAS NO PILLARS (the owner: "remove the pillars from ever coming back on tree mode, and fix the unreachable zones"): a spot no
+           leg reached is caught by a branch into the tree (the horn's route: off its wall, else straight from the spot), else it is named
+           unreachable - never a thin column of its own on the plate */
+        if (opts.columnRule) {
+          if (!segsL) segsL = treeSegsOf();
+          var br = hornColumn(b, kit, segsL, true) || treeBranch(b, kit, segsL);
+          if (br) { br.branch = true; thin.push(br); branched++; return false; }
+          if (root && root.NSO_BRANCH_DEBUG) console.log('no branch for ' + b.p.map(function (v) { return v.toFixed(2); }) + ': ' + HORN_WHY + ' (tree ' + segsL.length + ' points)');
+          return true;
+        }
+        var tc = thinColumn(b, kit);
+        if (tc) { thin.push(tc); thinHeld++; return false; }
+        return true;
+      });
+      var horns = hornsOf(selfHeld); thin = thin.concat(horns);
+      stillLost.forEach(function (id) {
         var b = bc.beacons[id], at = p.beacons.length;
         p.beacons.push({ id: at, p: b.p.slice(), n: b.n.slice(), regionId: b.regionId, key: b.key, source: b.source || 'given', tid: tipId(b.p, true) });
         p.unreachable.push(at);
       });
       p.oneTrunk = { coverMm: ck.coverMm, areas: order.length, clusters: clusters.map(function (c) { return { tips: c.tips.length, radiusMm: c.r }; }),
-                     tips: chosen.length, beacons: bc.beacons.length, thinned: thinned, covered: covered, onPlate: onPlate, splits: rounds, lost: nLost };
+                     tips: chosen.length, beacons: bc.beacons.length, thinned: thinned, covered: covered, onPlate: onPlate, splits: rounds, lost: nLost - coneHeld - thinHeld - branched - (selfHeld.length - stepHeld.length), branched: branched,
+                     thin: thin, coneTips: coneHeld, selfHeld: selfHeld, forks: nForks };
+      if (horns.length) p.reason += ' ' + horns.length + ' horn(s) catch the edge of a step no slicer calls an overhang.';
+      if (branched) p.reason += ' ' + branched + ' spot(s) no leg reached are caught by a branch into the tree.';
+      thin = thin.filter(function (t) { return !t.horn; });
+      if (thin.length) p.reason += ' ' + thin.length + ' spot(s) on a ledge no strut fits are held by a thin column (' + THIN_TIP_SIDE_MM + ' mm)' +
+        (thin.some(function (t) { return t.rest; }) ? ', ' + thin.filter(function (t) { return t.rest; }).length + ' of them standing on the part (no way to the plate under the ledge)' : '') + '.';
+      if (coneHeld) p.reason += ' ' + coneHeld + ' spot(s) at a cone\'s tip are held through the tip under it.';
+      if (selfHeld.length) p.reason += ' ' + selfHeld.length + ' spot(s) on a step narrower than a layer\'s overhang at the threshold angle are no overhang: the part holds them.';
       p.reason = p.reason + (thinned ? ' ' + thinned + ' more spot(s) of the ' + bc.beacons.length + ' lie within ' + ck.coverMm + ' mm of a tip and are held through it.' : '');
     }
     return p;
+  }
+
+  /* =====================================================================
+     THE FLOW TREE (nso_support_flow.js, docs/SUPPORT-FLOW.md) - Auto's tree under the column rule.
+
+     ONE program grows every tree: the spots are thinned to tips a branch distance apart (the same thinning as ever), a step no slicer calls an
+     overhang gets a twig, and NSO_SupportFlow carries every tip down level by level - drifting to its neighbours, joining them, walking round
+     the part where a way down exists - with one thickness law for twig, branch and trunk. Its branches are one smooth body (blobSoup), kept
+     off the part and cut at the plate. There is no cluster, landing circle, fork rule, horn route or trunk shell here: where the trunks stand
+     and where the forks are is what the descent gives.
+
+     The plan is the planner's own shape (beacons, trunks, unreachable, oneTrunk's counts), so the card, the worker and the gates read it as
+     any other; plan.flow carries the tree.
+     ===================================================================== */
+  function flowOf(opts) { return (opts && opts.supportFlow) || (root && root.NSO_SupportFlow) || null; }
+  var FLOW = { oneSupportMm: 12, blendMm: 0.18, cellMm: 0.3, awayCellMm: 0.5, bottomGapMm: 0.2, keepMm: TRUNK_KEEP_MM + 0.05, padGrowMm: 0.6, twigOneMm: 1.5,
+               twigCover: { xyMm: 4.1, downMm: 1.5, upMm: 0.3 } };   /* a step this near an overhang's own spot is in its interface's stack: no twig (the Oblique's steps, as Bambu lays them) */
+  var FLOW_KNOBS = { tipCover: [0.2, 1.2], tipDropMm: [0.8, 8], gather: [0, 1], reach: [0.2, 1.5], rootFloorMm: [0.5, 10], flareMm: [0, 6], flareTan: [0, 1.5],
+                     padGrowMm: [0, 4], xyMm: [0.2, 2], bottomGapMm: [0, 1] };
+  function flowKnobsOf(k) {
+    var out = { flow: {}, given: {} };
+    if (!k || typeof k !== 'object') return out;
+    Object.keys(FLOW_KNOBS).forEach(function (name) {
+      var v = +k[name];
+      if (k[name] == null || !isFinite(v)) return;
+      v = Math.max(FLOW_KNOBS[name][0], Math.min(FLOW_KNOBS[name][1], v));
+      out.given[name] = v;
+      if (name === 'tipCover' || name === 'padGrowMm' || name === 'bottomGapMm') out[name] = v; else out.flow[name] = v;
+    });
+    return out;
+  }
+  /* F: the user's feed (feedOf), or none. ASSISTED's spots are the detector's less the ones turned off, thinned to tips as Auto's are; CUSTOM's
+     tips are every tip, each one stood as given (no thinning, no twigs, no spots added). The flow tree has no members to erase and takes no
+     landing circles: it lands where the reach field lets it (docs/PRINT-CARD.md "One planner"). */
+  function planFlow(rawTris, opts, F) {
+    var FL = flowOf(opts);
+    if (!FL) return null;
+    var bc = F ? feedBeacons(rawTris, opts, F) : beaconsFor(rawTris, opts), custom = !!F && F.mode === 'custom';
+    if (F && !bc.ok && /^no tips to plan/.test(bc.reason || '')) return { ok: false, stage: 'feed', reason: bc.reason, feed: bc.feed };
+    if (!bc.ok || !bc.beacons.length) return null;
+    var say = progressOf(opts);
+    say('detecting', null, null, true);
+    var ck = Object.assign({}, ONE, COLUMN_ONE, (opts.oneTrunk && typeof opts.oneTrunk === 'object') ? opts.oneTrunk : {}), CCK = columnCrownOf(opts.treeKnobs);
+    /* ADVANCED (opts.flowKnobs, the card's Advanced section): the planner's own numbers, each held to a range a tree can be grown in */
+    var AK = flowKnobsOf(opts.flowKnobs);
+    ck.coverMm = (AK.tipCover != null ? AK.tipCover : COLUMN_TIP_COVER) * CCK.k.branchDistanceMm; ck.coverWideMm = Math.max(ck.coverMm, COLUMN_TIP_COVER_WIDE * CCK.k.branchDistanceMm);
+    var plateZ = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0, A0 = SA(opts);
+    var kit = A0 ? { pr: makeProbe(A0, [rawTris].concat(opts.occluders || [])), plateZ: plateZ } : null;
+    var rec = function (b) { return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }; };
+    /* what each spot is: on the plate's first layers (the plate holds it), a step (a twig, or the part's own to hold), or a tip's */
+    var onPlate = [], steps = [], pool = [], lost = {};
+    /* the spots: the detector's, and on a 1 mm grid the flat undersides its pitch steps over (a rim round a cavity is a ring 1.5 - 2 mm wide) */
+    if (kit && !custom) {
+      var areas0 = {}; bc.beacons.forEach(function (b) { var k0 = b.regionId == null ? -1 : b.regionId; (areas0[k0] = areas0[k0] || []).push(b); }); fillSpots(bc, areas0, kit, ck);
+      /* ASSISTED: a spot the user turned off stays off - no filled spot within the detector's pitch of one */
+      if (F && bc.offAt && bc.offAt.length) {
+        var near = Math.max(1.5, +bc.pitchMm || 0);
+        bc.beacons = bc.beacons.filter(function (b) { return b.source !== 'column-fill' || !bc.offAt.some(function (q) { return Math.hypot(q[0] - b.p[0], q[1] - b.p[1]) < near && Math.abs(q[2] - b.p[2]) < near; }); });
+        bc.beacons.forEach(function (b, i) { b.id = i; });
+      }
+    }
+    bc.beacons.forEach(function (b) {
+      if (b.p[2] - plateZ < ck.lowMm) onPlate.push(rec(b));
+      else if (!custom && subThresholdStep(b, kit, opts)) steps.push(b);
+      else pool.push(b);
+    });
+    var selfHeld = [], twigs = [];
+    steps.forEach(function (b) {
+      selfHeld.push(rec(b));
+      if (opts.noHorns) return;
+      if (twigs.some(function (t) { return Math.hypot(t.p[0] - b.p[0], t.p[1] - b.p[1]) < FLOW.twigOneMm && Math.abs(t.p[2] - b.p[2]) < FLOW.twigOneMm; })) return;
+      var cov = pool.some(function (o2) { var dz = b.p[2] - o2.p[2]; return dz > -FLOW.twigCover.upMm && dz < FLOW.twigCover.downMm && Math.hypot(o2.p[0] - b.p[0], o2.p[1] - b.p[1]) < FLOW.twigCover.xyMm; });
+      if (!cov) twigs.push(b);
+    });
+    var byArea = {}, order = [];
+    pool.forEach(function (b) { var k = b.regionId == null ? -1 : b.regionId; if (!byArea[k]) { byArea[k] = []; order.push(k); } byArea[k].push(b); });
+    var chosen = [], covered = [], fl = null, soups = [rawTris].concat(opts.occluders || []);
+    say('planning', 0, 1, true);
+    /* every spot is asked for its way down first (a spot with none stands no tip, and is not covered by one beside it: the middle of a tunnel's
+       ceiling has a neighbour by the mouth whose column reaches the plate, but nothing is under the spot for that); the rest are thinned */
+    /* May rest on the part (opts.restOnModel): the tree may land on the part's own top faces, as Bambu's does with On build plate only off */
+    var flowOpts = Object.assign({}, AK.flow, opts.flow || {}, { rest: !!opts.restOnModel });
+    fl = FL.plan({ soups: soups, plateZ: plateZ, knobs: CCK.k, opts: flowOpts,
+      candidates: pool.map(function (b) { return { id: b.id, p: b.p }; }).concat(twigs.map(function (b) { return { id: b.id, p: b.p, twig: true }; })),
+      pick: function (noWay) {
+        noWay.forEach(function (id) { lost[id] = true; });
+        twigs = twigs.filter(function (b) { return !lost[b.id]; });           /* a twig with no way down is not built: the part holds its step */
+        order.forEach(function (k) {
+          var area = byArea[k].filter(function (b) { return !lost[b.id]; });
+          if (!area.length) return;
+          var cov = area.length >= COLUMN_WIDE_SPOTS ? ck.coverWideMm : ck.coverMm, isTip = {}, mine = [];
+          var pick = custom ? area.map(function (b, i) { return i; }) : thinTips(area, cov, Math.min(ck.minTips, area.length));
+          pick.forEach(function (i) { isTip[i] = true; mine.push(area[i]); });
+          area.forEach(function (b, i) {
+            if (isTip[i]) return;
+            var by = null, bd = Infinity;
+            mine.forEach(function (c) { var d = Math.hypot(b.p[0] - c.p[0], b.p[1] - c.p[1]); if (d < bd) { bd = d; by = c; } });
+            covered.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), by: by.id, byKey: by.key, mm: bd });
+          });
+          mine.forEach(function (b) { chosen.push(b); });
+        });
+        return chosen.map(function (b) { return { id: b.id, p: b.p }; }).concat(twigs.map(function (b) { return { id: b.id, p: b.p, twig: true }; }));
+      } });
+    if (!fl.ok) return { ok: false, stage: 'flow', reason: fl.reason };
+    /* a branch that lost its way on the way down (the reach field says none does; a coarse grid may): its tip, and the spots held through it, are lost */
+    var unT = {}; fl.unreachable.forEach(function (id) { unT[id] = true; });
+    twigs = twigs.filter(function (b) { return !unT[b.id]; });
+    chosen.forEach(function (b) { if (unT[b.id]) lost[b.id] = true; });
+    covered.forEach(function (c) { if (unT[c.by]) lost[c.beacon] = true; });
+    chosen = chosen.filter(function (b) { return !unT[b.id]; });
+    covered = covered.filter(function (c) { return !unT[c.by]; });
+    twigs.forEach(function (b) { delete lost[b.id]; });
+    steps.forEach(function (b) { delete lost[b.id]; });                        /* a step is the part's to hold, twig or none */
+    /* the lost: a cone's tip is held through the tip under it; what is left is unreachable */
+    var coneHeld = 0, stillLost = [];
+    Object.keys(lost).map(Number).sort(function (x, y) { return x - y; }).forEach(function (id) {
+      var b = bc.beacons[id], cv = coneTipCover(b, chosen, kit);
+      if (cv) { covered.push(cv); coneHeld++; } else stillLost.push(b);
+    });
+    if (!chosen.length && !twigs.length && stillLost.length) return null;   /* nothing stands: the ordinary plan says why */
+    /* the plan, in the planner's shape */
+    var beacons = [], at = {};
+    chosen.concat(twigs).concat(stillLost).forEach(function (b) {
+      at[b.id] = beacons.length;
+      beacons.push({ id: beacons.length, p: b.p.slice(), n: b.n.slice(), regionId: b.regionId, key: b.key, source: b.source || 'given', tid: b.tid || tipId(b.p, true) });
+    });
+    var twigIds = {}; twigs.forEach(function (b) { twigIds[b.id] = true; });
+    fl.branches.forEach(function (br) { br.tips = br.tips.map(function (id) { return at[id]; }); if (br.tip != null) { br.twig = !!twigIds[br.tip]; br.tip = at[br.tip]; } });
+    fl.trunks.concat(fl.rests || []).forEach(function (tr) { tr.tips = tr.tips.map(function (id) { return at[id]; }); });
+    var held = chosen.map(function (b) { return at[b.id]; });
+    /* what stands on the plate and what on the part: two entries (the card says each spot's landing), one support */
+    var onPart = {}; (fl.rests || []).forEach(function (rs) { rs.tips.forEach(function (i) { onPart[i] = true; }); });
+    var heldPlate = held.filter(function (i) { return !onPart[i]; }), heldRest = held.filter(function (i) { return onPart[i]; }), trunkList = [];
+    if (fl.trunks.length) trunkList.push({ id: 0, flow: true, members: [], beacons: heldPlate, landing: 'plate', root: null });
+    if ((fl.rests || []).length) trunkList.push({ id: trunkList.length, flow: true, members: [], beacons: heldRest, landing: 'rest', root: null });
+    var p = { ok: true, stage: 'done', members: [], stubs: [], merges: [], pickups: [], steered: [], nudged: [], tight: [], resting: [], inside: [], stations: [],
+              unreachable: stillLost.map(function (b) { return at[b.id]; }), held: held.length, beacons: beacons, plateZ: plateZ, sideMm: CCK.k.branchDiameterMm,
+              trunks: trunkList,
+              flow: { branches: fl.branches, trunks: fl.trunks, rests: fl.rests || [], stats: fl.stats, knobs: CCK.k, twigs: twigs.length,
+                      groups: Array.isArray(opts.solidGroups) ? opts.solidGroups.map(function (g) { return g.slice(); }) : null,
+                      adv: { padGrowMm: AK.padGrowMm != null ? AK.padGrowMm : FLOW.padGrowMm, bottomGapMm: AK.bottomGapMm != null ? AK.bottomGapMm : FLOW.bottomGapMm }, advGiven: AK.given },
+              oneTrunk: { coverMm: ck.coverMm, areas: order.length, clusters: fl.trunks.map(function (tr) { return { tips: tr.tips.length, radiusMm: tr.r }; }), tips: chosen.length, beacons: bc.beacons.length,
+                          thinned: covered.length - coneHeld, covered: covered, onPlate: onPlate, splits: 0, lost: stillLost.length, branched: 0, thin: [], coneTips: coneHeld,
+                          selfHeld: selfHeld, forks: 0, twigs: twigs.length } };
+    if (F) {
+      p.feed = bc.feed;
+      p.excluded = { members: [], tips: bc.feed.erased, notErased: [], unknown: F.excluded.filter(function (id) { return bc.feed.erased.indexOf(id) < 0; }) };
+      p.offZone = []; p.zoneLanded = []; p.unmerged = [];
+    }
+    p.reason = chosen.length + ' tip(s) on ' + fl.trunks.length + ' trunk(s), ' + ((fl.rests || []).length ? fl.rests.length + ' foot/feet on the part, ' : '') + fl.branches.length + ' branch(es) grown down together.' +
+      (twigs.length ? ' ' + twigs.length + ' twig(s) catch the edge of a step no slicer calls an overhang.' : '') +
+      (coneHeld ? ' ' + coneHeld + ' spot(s) at a cone\'s tip are held through the tip under it.' : '') +
+      (selfHeld.length ? ' ' + selfHeld.length + ' spot(s) on a step narrower than a layer\'s overhang at the threshold angle are no overhang: the part holds them.' : '') +
+      (covered.length - coneHeld ? ' ' + (covered.length - coneHeld) + ' more spot(s) of the ' + bc.beacons.length + ' lie within ' + ck.coverMm.toFixed(1) + ' mm of a tip and are held through it.' : '');
+    return p;
+  }
+  /* the flow tree's body: every tree (the branches that run to one trunk) one smooth solid, kept off the part, cut at the plate */
+  function flowParts(p, opts) {
+    var FL = flowOf(opts), say = progressOf(opts);
+    if (!FL) return { ok: false, reason: 'nso_support_flow.js is not loaded' };
+    var prims = FL.prims(p.flow), B = p.flow.branches, rootOf = B.map(function () { return -1; });
+    function rootB(i) { var guard = 0; while (B[i].into >= 0 && guard++ < 1e5) i = B[i].into; return i; }
+    var byRoot = {}, roots = [];
+    prims.forEach(function (pr) { var r = rootB(pr.branch); rootOf[pr.branch] = r; if (!byRoot[r]) { byRoot[r] = []; roots.push(r); } byRoot[r].push(pr); });
+    var ADV = p.flow.adv || { padGrowMm: FLOW.padGrowMm, bottomGapMm: FLOW.bottomGapMm };
+    var THc = TM(opts), keepR = FLOW.keepMm, probesC = THc ? [opts.rawTris || p.rawTris || []].concat(opts.occluders || p.occluders || []).filter(function (sp) { return sp && sp.length >= 9; })
+      .map(function (sp) { return probeOf(THc, sp); }).filter(Boolean) : [];
+    var cutB = { zMax: null, zMin: p.plateZ, flat: true, keep: keepR,
+      away: probesC.length ? awayFast : null };
+    /* the part's distance, asked once a lattice point (FLOW.awayCellMm) and read between them: the mesher asks it at every node and vertex near the
+       part, and a tree under a low part is near it everywhere (a 40 x 50 mm test piece: 13 of its build's 25 s) */
+    var AL = FLOW.awayCellMm, aCap = keepR + 0.3 + AL, aMap = new Map();
+    function awayAt(ix, iy, iz) {
+      var key = ((iz + 65536) * 131072 + (iy + 65536)) * 131072 + (ix + 65536), v = aMap.get(key);
+      if (v !== undefined) return v;
+      v = aCap;
+      for (var q = 0; q < probesC.length; q++) {
+        var hit = probesC[q].nearest([ix * AL, iy * AL, iz * AL], aCap);
+        if (!hit) continue;
+        /* a face of the part UNDER the point (a foot standing on the part): the body comes down to the bottom distance over it (Bambu's
+           support_bottom_z_distance, 0.2), not the keep it holds off walls and undersides */
+        var dv = hit.point && iz * AL - hit.point[2] > 0.85 * hit.dist ? hit.dist + (keepR - ADV.bottomGapMm) : hit.dist;
+        if (dv < v) v = dv;
+      }
+      aMap.set(key, v);
+      return v;
+    }
+    function awayFast(x, y, z) {
+      var fx = x / AL, fy = y / AL, fz = z / AL, ix = Math.floor(fx), iy = Math.floor(fy), iz = Math.floor(fz), tx = fx - ix, ty = fy - iy, tz = fz - iz;
+      var c00 = awayAt(ix, iy, iz) * (1 - tx) + awayAt(ix + 1, iy, iz) * tx, c10 = awayAt(ix, iy + 1, iz) * (1 - tx) + awayAt(ix + 1, iy + 1, iz) * tx;
+      var c01 = awayAt(ix, iy, iz + 1) * (1 - tx) + awayAt(ix + 1, iy, iz + 1) * tx, c11 = awayAt(ix, iy + 1, iz + 1) * (1 - tx) + awayAt(ix + 1, iy + 1, iz + 1) * tx;
+      return (c00 * (1 - ty) + c10 * ty) * (1 - tz) + (c01 * (1 - ty) + c11 * ty) * tz;
+    }
+    var parts = [], n = roots.length;
+    say('building', 0, n, true);
+    for (var t = 0; t < n; t++) {
+      var pr = byRoot[roots[t]], h = FLOW.cellMm, blob = null;
+      /* the mesher's grid holds 12 million nodes: a tree too wide for that at this cell is meshed coarser, never left out */
+      var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      pr.forEach(function (q) { q.pts.forEach(function (v, i) { for (var d = 0; d < 3; d++) { lo[d] = Math.min(lo[d], v[d] - q.r[i]); hi[d] = Math.max(hi[d], v[d] + q.r[i]); } }); });
+      var vol = (hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1);
+      h = Math.max(h, Math.cbrt(vol / 10e6));
+      for (var tries = 0; tries < 4 && !(blob && blob.length); tries++) { blob = blobSoup(pr.map(function (q) { return q.clip ? { pts: q.pts, r: q.r, clip: q.clip } : { pts: q.pts, r: q.r }; }), FLOW.blendMm, h, cutB); h *= 1.3; }
+      if (!blob || !blob.length) return { ok: false, reason: 'the tree\'s body could not be meshed closed (tree ' + (t + 1) + ' of ' + n + ')' };
+      parts.push({ soup: blob, smooth: true, root: roots[t] });
+      say('building', t + 1, n, t + 1 === n);
+    }
+    var feet = p.flow.trunks.map(function (tr, i) { return { key: i, trunk: 0, c: tr.c.slice(), r: tr.r, padGrowMm: ADV.padGrowMm, root: tr.branch }; });
+    return { ok: true, flow: true, trunks: [{ trunk: 0, parts: parts, fingerParts: [], fingers: 0 }], fingersDropped: 0,
+             pads: { count: 0, clusters: 0, clustersSplit: 0, hemmed: 0, holesFilled: 0, holesSlotted: 0 }, padGroups: [], feet: feet };
+  }
+  function flowShells(p, tp) {
+    /* ONE SUPPORT A GROUP OF AREAS (plan.flow.groups, the card's own grouping: a head's areas together, another head's apart), joined where a
+       tree holds tips of two groups; with no groups given, one support. Each tree goes with the group of the tips it holds. */
+    var B = p.flow.branches, groups = p.flow.groups, gOfRegion = {}, parent = [];
+    (groups || []).forEach(function (g, gi) { parent.push(gi); g.forEach(function (rid) { gOfRegion[rid] = gi; }); });
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    var gOfRoot = {}, tipsOfRoot = {}, landOfRoot = {};
+    B.forEach(function (br) {
+      if (br.into >= 0) return;
+      var gs = [];
+      br.tips.forEach(function (i) { var b = p.beacons[i], gi = b && groups ? gOfRegion[b.regionId] : 0; if (gi == null) gi = 0; if (gs.indexOf(gi) < 0) gs.push(gi); });
+      if (!gs.length) gs.push(0);
+      if (groups) for (var q = 1; q < gs.length; q++) { var x = find(gs[0]), y = find(gs[q]); if (x !== y) parent[Math.max(x, y)] = Math.min(x, y); }
+      gOfRoot[br.id] = gs[0]; tipsOfRoot[br.id] = br.tips; landOfRoot[br.id] = br.rest ? 'rest' : 'plate';
+    });
+    var held = {}; p.trunks.forEach(function (t) { t.beacons.forEach(function (i) { held[i] = true; }); });
+    /* ...and where two groups' tips stand within FLOW.oneSupportMm of one another: side by side under one overhang (the slicer lays one stack there,
+       and a stack has one owner), or pocket by pocket in one piece. Heads that stand apart stay supports of their own. */
+    if (groups && groups.length > 1) {
+      var tipsOfG = groups.map(function () { return []; });
+      p.beacons.forEach(function (b, i) { if (!held[i]) return; var gi = gOfRegion[b.regionId]; if (gi != null) tipsOfG[gi].push(b.p); });
+      for (var ga = 0; ga < groups.length; ga++) for (var gb = ga + 1; gb < groups.length; gb++) {
+        if (find(ga) === find(gb)) continue;
+        var near = false, D2 = FLOW.oneSupportMm * FLOW.oneSupportMm;
+        for (var ia = 0; ia < tipsOfG[ga].length && !near; ia++) for (var ib = 0; ib < tipsOfG[gb].length && !near; ib++) {
+          var dx = tipsOfG[ga][ia][0] - tipsOfG[gb][ib][0], dy = tipsOfG[ga][ia][1] - tipsOfG[gb][ib][1];
+          if (dx * dx + dy * dy < D2) near = true;
+        }
+        if (near) { var xa = find(ga), xb = find(gb); parent[Math.max(xa, xb)] = Math.min(xa, xb); }
+      }
+    }
+    var bySet = {}, order = [], count = 0;
+    tp.trunks.forEach(function (x) { x.parts.forEach(function (q) {
+      var gi = groups && q.root != null && gOfRoot[q.root] != null ? find(gOfRoot[q.root]) : 0;
+      if (!bySet[gi]) { bySet[gi] = { soups: [], ids: [], lands: {}, roots: {} }; order.push(gi); }
+      var st = bySet[gi];
+      st.soups.push(q.soup); count++;
+      if (q.root != null) { st.roots[q.root] = true; (tipsOfRoot[q.root] || []).forEach(function (i) { if (held[i]) st.ids.push(i); }); st.lands[landOfRoot[q.root] || 'plate'] = true; }
+      else { p.trunks.forEach(function (t) { t.beacons.forEach(function (i) { st.ids.push(i); }); st.lands[t.landing] = true; }); }
+    }); });
+    var solids = order.sort(function (a, b) { return a - b; }).map(function (gi, k) {
+      var st = bySet[gi], soup = joinAll(st.soups), ls = Object.keys(st.lands), ids = st.ids.slice().sort(function (a, b) { return a - b; });
+      return { soup: soup, box: bounds(soup), trunks: [k], sheets: [], beacons: ids, regionIds: regionIdsOf(p.beacons, ids), landing: ls.length === 1 ? ls[0] : 'mixed',
+        feet: (tp.feet || []).filter(function (f) { return f.root == null || st.roots[f.root]; }).map(function (f) { return { c: f.c, r: f.r, padGrowMm: f.padGrowMm, member: null, carries: [] }; }) };
+    }).filter(function (sd) { return sd.soup.length; });
+    return { ok: true, soup: joinAll(solids.map(function (sd) { return sd.soup; })), solids: solids, shells: count, members: [], unsupported: [], fingersDropped: 0, detached: 0, pads: tp.pads, sheet: null, sheetsAlone: 0, reason: p.reason };
   }
 
   /* plan() keeps what solid() needs to clear gecko fingers. */
   function planSupport(rawTris, opts) {
     var F = feedOf(opts), p;
     if (F && F.error) p = { ok: false, stage: 'feed', reason: F.error };
-    else if (opts && opts.oneTrunk && !F) p = planOneTrunk(rawTris, opts) || plan(rawTris, opts);
+    else if (opts && opts.oneTrunk && !F) p = (opts.columnRule && flowOf(opts) ? planFlow(rawTris, opts) : null) || planOneTrunk(rawTris, opts) || plan(rawTris, opts);
+    /* Assisted and Custom grow the same tree from the user's spots (opts.oneTrunk with a feed: the Print card's Tree type) */
+    else if (opts && opts.oneTrunk && F && opts.columnRule && flowOf(opts)) p = planFlow(rawTris, opts, F) || planFed(rawTris, opts, F);
     else p = F ? planFed(rawTris, opts, F) : plan(rawTris, opts);
     if (p.ok && p.crowns) crownIds(p);
     p.rawTris = rawTris;

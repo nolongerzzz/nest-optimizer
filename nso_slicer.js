@@ -36,6 +36,9 @@
  *                                     the bead is ONE pass down its medial
  *                                     centreline (medialPaths), at the bead's
  *                                     width; the rest gets its walls as ever.
+ *   4c. arachne   arachneWalls()    - wallGenerator 'arachne': thin parts get
+ *                                     walls fitted to their thickness, beads
+ *                                     of variable count and width.
  *   5. shells     classify()        - top / bottom solid layers by region
  *                                     booleans against the layers above and
  *                                     below; bridges; sparse interior.
@@ -93,6 +96,7 @@
  *   scanFill(polys, angleRad, spacing, phase) -> segments (pure JS)
  *   thinWalls(g, region, opts)         -> the thin pieces' centre passes, or null (Detect thin wall)
  *   medialPaths(polys, w, restPolys)   -> a thin piece's centreline as paths (pure JS)
+ *   arachneWalls(g, region, h, opts, above) -> perimeters()' shape plus the variable middle beads (Arachne)
  */
 (function (root, factory) {
   'use strict';
@@ -226,6 +230,9 @@
     onlyOneWallTop: true, minSparseAreaMm2: 15, detectThinWall: false
   };
 
+  /** A pattern by the name Bambu Studio's list gives it: this slicer's zigzag is its Rectilinear. */
+  function patternLabel(p) { return p === 'zigzag' ? 'rectilinear' : p === 'archimedeanchords' ? 'archimedean chords' : p === 'hilbertcurve' ? 'hilbert curve' : p === 'octagramspiral' ? 'octagram spiral' : p === '3dhoneycomb' ? '3D honeycomb' : p === 'adaptivecubic' ? 'adaptive cubic' : p; }
+
   function wallWidthFor(nozzle) {
     var d = (typeof nozzle === 'number' && nozzle > 0) ? nozzle : 0.4;
     return Math.round(d * LINE_RATIO * 1e6) / 1e6;
@@ -260,8 +267,10 @@
       topShellThicknessMm: BAMBU_PROFILE_06.topShellThicknessMm,
       bottomShellThicknessMm: 0,
       sparseDensity: BAMBU_PROFILE_06.sparseDensity,
-      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' | 'lines'
-      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines'
+      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid' | 'cubic' | 'adaptivecubic' | 'honeycomb' | 'lightning'
+      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords' | 'hilbertcurve' | 'octagramspiral': the internal solid infill, and the surfaces unless they say
+      topPattern: null,                    // the top surface's own pattern ('concentric'); null -> solidPattern
+      bottomPattern: null,                 // the first layer's own pattern ('concentric'); null -> solidPattern
       infillDirectionDeg: BAMBU_PROFILE_06.infillDirectionDeg,
       infillWallOverlap: BAMBU_PROFILE_06.infillWallOverlap,
       sliceClosingRadiusMm: BAMBU_PROFILE_06.sliceClosingRadiusMm,
@@ -281,6 +290,17 @@
       // (detect_thin_wall = 0); a support object is sliced with it on
       // (CONSTANTS.thinWall.supportsOn), and an object can say either way.
       detectThinWall: BAMBU_PROFILE_06.detectThinWall,
+      // The wall generator (Bambu's wall_generator): 'classic', or 'arachne' - variable-width walls fitted to the part's thickness
+      // (arachneWalls). Classic unless asked, as both real profiles. The six Arachne levers are Studio's, with its defaults; the four
+      // given as a fraction are of the nozzle's diameter, as Studio's percentages are.
+      wallGenerator: 'classic',
+      gapFill: true,                       // Studio's Gap infill: a strip no wall loop or infill covers is one centreline as wide as its room (perimeters / gapPaths); false: left empty, as before 2026-11-20
+      wallTransitionAngleDeg: 10,          // wall_transition_angle: a wedge opening wider than this gets no middle bead
+      wallTransitionFilterMargin: 0.25,    // wall_transition_filter_deviation: a bead's width changes only when the room moves more than this
+      wallTransitionLength: 1,             // wall_transition_length: the length a bead's width follows the room over
+      wallDistributionCount: 1,            // wall_distribution_count: the innermost walls a side that share the variation
+      minBeadWidth: 0.85,                  // min_bead_width: a narrower bead is printed this wide
+      minFeatureSize: 0.25,                // min_feature_size: a thinner feature is not printed
       thinWallMm: null,                    // null -> CONSTANTS.thinWall.ratio x outer wall width
       // An open section chain (a hole in the mesh) is closed by a straight
       // chord when its ends are this close; wider, it is dropped and counted.
@@ -304,12 +324,38 @@
       brimSupportGapMm: 0.02,
       supportLayerMaxMm: 0,                // 0 = supports are cut on the part's layers; 0.28 = on their own (Bambu's independent_support_layer_height): see sliceObjects
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
+      supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
+      supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
+      supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
+      seamOffOverhang: true,               // a wall loop cut by an overhang begins at a piece on the layer below, not at one hanging over air; false: where its seam fell
+      seamAligned: true,                   // each wall loop starts at its most hidden corner, in line with the seams below (Studio's seam_position aligned); false: where its polygon began
+      bridgeFirst: false,                  // a layer's open-air bridges laid before its walls (a soft filament's: the walls first, the nozzle rides a hanging wall down); false: walls first, as Studio
+      shortFillMm: 0,                      // an open fill piece shorter than this (mm) is dropped: each is a travel, prime and retraction of its own (NO CRUMBS); 0 keeps all, as Studio does (a filament's choice: CR-TPU 1)
+      islandOrder: true,                   // a layer's separate islands print one after the other, each whole (islandOrder), as Studio's do; false: every island's inner walls, then every outer wall, then the fill
+      bridgeFitSpacing: true,              // an open-air bridge's lines evened out to fill its gap wall to wall (Bambu's adjust_solid_spacing); false: the global grid
+      bridgeAnchorMm: 1,                   // an open-air bridge reaches this far onto the solid fill beside its gap, so its lines end on the layer below (bridgeReach); 0: they stop at the gap
+      overhangSpanMinMm: 2,                // a hanging wall this long, a line width or more from the layer below on both sides, is printed as a bridge (spanPieces); 0: never
+      bridgeAngleDeg: 0,                   // Bambu's bridge_angle: every Bridge laid at it (0: auto - over a support, Studio 02.09's 3.6 under the 'profile' / 'studio36' angles)
+      supportInterfaceAngle: 'bridge',     // the column rule's stack angles (the app slices with the card's, 'profile' by default - app-print.js slicerOptions): 'profile' Bambu's own rule off the profile's support_angle / bridge_angle (its first layer at support_angle + 90, its top square to the bridge at bridge_angle - 0: Studio's 3.6 - one turn a layer down; the owner's 2x supp_ref at 20 / 45: 110, then 45 / 135 to a top at 135); 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
+      supportXyMm: 0.35,                   // the column rule's xy distance to the part at a support layer's own height (Bambu's support_object_xy_distance)
+      /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). Each default is what this slicer did before the row existed. */
+      supportBottomGapMm: null,            // support_bottom_z_distance: a support's layer keeps this far over a top face of the part under it (null: the support's mesh as built)
+      supportZOverridesXy: false,          // top_z_overrides_xy_distance: under an overhang the support comes in to COLUMN_Z_OVER_XY_MM of the wall beside it, not the xy distance - the top distance decides
+      supportInterfacePattern: 'default',  // support_interface_pattern: 'default' (the angle rule above) | 'rectilinear' (one direction) | 'rectilinear_interlaced' (a quarter turn a layer) | 'grid' (both, each layer) | 'concentric'
+      supportBasePattern: 'default',       // support_base_pattern: 'default' (a line across each ring under a stack) | 'hollow' (walls alone) | 'rectilinear' | 'rectilinear-grid' (lines through the whole tree)
+      supportBaseSpacingMm: 2.5,           // support_base_pattern_spacing: the base pattern's lines this far apart
+      supportWallLoops: -1,                // tree_support_wall_count: -1 (or 0) automatic - one; else that many
+      supportFirstLayerDensity: 1,         // raft_first_layer_density: a support's first layer filled this dense (1: solid)
+      supportFirstLayerGapMm: null,        // support_object_first_layer_gap: a support's first layer this far from the part's (null: as built)
+      supportExpansionMm: 0,               // support_expansion: the stack reaches this much further past an overhang's edge (or less far, negative)
       weldMm: 1e-4,
       dropToPlate: true,
       filamentDiameterMm: CONSTANTS.flow.filamentDiameterMm,
       emitGcode: true
     };
     if (over) Object.keys(over).forEach(function (k) { if (over[k] !== undefined) o[k] = over[k]; });
+    /* rectilinear is Bambu's name for these lines (its profile's value: zig-zag): one name inside */
+    ['sparsePattern', 'solidPattern', 'topPattern', 'bottomPattern'].forEach(function (k) { if (o[k] === 'rectilinear' || o[k] === 'zig-zag') o[k] = 'zigzag'; });
     if (!(o.firstLayerMm > 0)) o.firstLayerMm = o.layerMm;
     return o;
   }
@@ -346,36 +392,45 @@
    * neighbours, so two points either side of a cell boundary still weld.
    */
   function indexSoup(soup, q) {
-    var n = Math.floor(soup.length / 9);
-    var grid = new Map();
-    var V = [], T = new Int32Array(n * 3);
+    var n = Math.floor(soup.length / 9), nIn = n * 3;
+    /* the grid is an open-addressed table of cells keyed by their three integer coordinates (a string key per lookup was most of a big part's
+       slice); each cell's points are a list in the order they were added, searched in the same order as before - the same V and T */
+    var cap = 1; while (cap < nIn * 2) cap <<= 1;
+    var mask = cap - 1;
+    var kx = new Int32Array(cap), ky = new Int32Array(cap), kz = new Int32Array(cap), head = new Int32Array(cap).fill(-1), tail = new Int32Array(cap);
+    var next = new Int32Array(Math.max(1, nIn));
+    var V = new Float64Array(Math.max(3, nIn * 3)), nv = 0, T = new Int32Array(n * 3);
     var inv = 1 / q, q2 = q * q;
-    for (var i = 0; i < n * 3; i++) {
+    function slot(cx, cy, cz) {
+      var h = (Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663) ^ Math.imul(cz, 83492791)) & mask;
+      while (head[h] >= 0 && (kx[h] !== cx || ky[h] !== cy || kz[h] !== cz)) h = (h + 1) & mask;
+      return h;
+    }
+    for (var i = 0; i < nIn; i++) {
       var x = soup[i * 3], y = soup[i * 3 + 1], z = soup[i * 3 + 2];
       var cx = Math.floor(x * inv), cy = Math.floor(y * inv), cz = Math.floor(z * inv);
       var id = -1;
       for (var a = -1; a <= 1 && id < 0; a++) {
         for (var b = -1; b <= 1 && id < 0; b++) {
           for (var c = -1; c <= 1 && id < 0; c++) {
-            var cell = grid.get((cx + a) + ',' + (cy + b) + ',' + (cz + c));
-            if (!cell) continue;
-            for (var k = 0; k < cell.length; k++) {
-              var j = cell[k] * 3, dx = V[j] - x, dy = V[j + 1] - y, dz = V[j + 2] - z;
-              if (dx * dx + dy * dy + dz * dz <= q2) { id = cell[k]; break; }
+            var hs = slot(cx + a, cy + b, cz + c);
+            for (var k = head[hs]; k >= 0; k = next[k]) {
+              var j = k * 3, dx = V[j] - x, dy = V[j + 1] - y, dz = V[j + 2] - z;
+              if (dx * dx + dy * dy + dz * dz <= q2) { id = k; break; }
             }
           }
         }
       }
       if (id < 0) {
-        id = V.length / 3;
-        V.push(x, y, z);
-        var key = cx + ',' + cy + ',' + cz;
-        var l = grid.get(key);
-        if (!l) grid.set(key, [id]); else l.push(id);
+        id = nv++;
+        V[id * 3] = x; V[id * 3 + 1] = y; V[id * 3 + 2] = z;
+        next[id] = -1;
+        var h0 = slot(cx, cy, cz);
+        if (head[h0] < 0) { head[h0] = id; tail[h0] = id; kx[h0] = cx; ky[h0] = cy; kz[h0] = cz; } else { next[tail[h0]] = id; tail[h0] = id; }
       }
       T[i] = id;
     }
-    return { V: Float64Array.from(V), T: T, nv: V.length / 3, nt: n };
+    return { V: V.slice(0, nv * 3), T: T, nv: nv, nt: n };
   }
 
   /**
@@ -393,21 +448,36 @@
    * For an outward-wound closed mesh that makes outer loops counter-clockwise
    * and holes clockwise - asserted on a tube by tools/nso_slicer_test.js.
    */
-  function sliceMesh(soup, planes, opts) {
-    var q = opts && opts.weldMm > 0 ? opts.weldMm : 1e-4;
-    var gapClose = opts && opts.gapCloseMm != null ? opts.gapCloseMm : 2;
-    var M = indexSoup(soup, q);
-    var V = M.V, T = M.T, nv = M.nv;
-    var zs = planes.map(function (p) { return p.sliceZ; });
-    var buckets = planes.map(function () { return []; });
-    var degenerate = 0;
+  /**
+   * A soup welded once (indexSoup) with each triangle's z range: what
+   * sliceMesh reads, kept so a mesh cut again and again at heights of its own
+   * (makeP's exactAt: the support typing asks one height at a time, hundreds of
+   * times a plate) is not welded again for every cut. Same V / T, same bytes.
+   */
+  function prepSoup(soup, q) {
+    var M = indexSoup(soup, q), V = M.V, T = M.T;
+    var lo = new Float64Array(M.nt), hi = new Float64Array(M.nt), live = new Uint8Array(M.nt), degenerate = 0;
     for (var t = 0; t < M.nt; t++) {
       var a = T[t * 3], b = T[t * 3 + 1], c = T[t * 3 + 2];
       if (a === b || b === c || a === c) { degenerate++; continue; }
       var za = V[a * 3 + 2], zb = V[b * 3 + 2], zc = V[c * 3 + 2];
-      var lo = Math.min(za, zb, zc), hi = Math.max(za, zb, zc);
+      live[t] = 1; lo[t] = Math.min(za, zb, zc); hi[t] = Math.max(za, zb, zc);
+    }
+    return { soup: soup, q: q, M: M, lo: lo, hi: hi, live: live, degenerate: degenerate };
+  }
+
+  function sliceMesh(soup, planes, opts, pre) {
+    var q = opts && opts.weldMm > 0 ? opts.weldMm : 1e-4;
+    var gapClose = opts && opts.gapCloseMm != null ? opts.gapCloseMm : 2;
+    if (!pre || pre.soup !== soup || pre.q !== q) pre = prepSoup(soup, q);
+    var M = pre.M, V = M.V, T = M.T, nv = M.nv, LO = pre.lo, HI = pre.hi, LIVE = pre.live;
+    var zs = planes.map(function (p) { return p.sliceZ; });
+    var buckets = planes.map(function () { return []; });
+    var degenerate = pre.degenerate;
+    for (var t = 0; t < M.nt; t++) {
+      if (!LIVE[t]) continue;
       // planes with lo < z <= hi can be crossed (vertex on the plane = above)
-      var i0 = firstAbove(zs, lo), i1 = firstAbove(zs, hi) - 1;
+      var i0 = firstAbove(zs, LO[t]), i1 = firstAbove(zs, HI[t]) - 1;
       for (var k = i0; k <= i1; k++) buckets[k].push(t);
     }
 
@@ -579,6 +649,12 @@
     var CS = wasm.CrossSection;
     var arena = [];
     function keep(x) { arena.push(x); return x; }
+    /* THE OPERATIONS ARE KEPT BY THEIR INPUTS. A section is never changed once made, so an operation asked again of the same sections (by identity)
+       and the same numbers returns what it returned the first time - the same object, the same bytes. The support typing asks the host's layers
+       the same unions, offsets and cuts for every support layer and every support on it (supp_ref_2x: most of its typing). Cleared by free(). */
+    var ids = new WeakMap(), nextId = 0, opMemo = new Map();
+    function idOf(x) { var v = ids.get(x); if (v == null) { v = ++nextId; ids.set(x, v); } return v; }
+    function memo(key, make) { var r = opMemo.get(key); if (r === undefined) { r = make(); opMemo.set(key, r); } return r; }
     var EMPTY_POLY = [[[0, 0], [0, 0], [0, 0]]];
     function clean(polys) {
       return (polys || []).filter(function (p) { return p && p.length >= 3; });
@@ -591,17 +667,17 @@
       },
       offset: function (cs, d, join, miter) {
         if (cs.isEmpty()) return cs;
-        return keep(cs.offset(d, join || 'Miter', miter || 3, 0));
+        return memo('o' + idOf(cs) + ',' + d + ',' + (join || 'Miter') + ',' + (miter || 3), function () { return keep(cs.offset(d, join || 'Miter', miter || 3, 0)); });
       },
-      union: function (a, b) { return keep(a.add(b)); },
+      union: function (a, b) { return memo('u' + idOf(a) + ',' + idOf(b), function () { return keep(a.add(b)); }); },
       unionAll: function (list) {
         var l = list.filter(function (x) { return x && !x.isEmpty(); });
         if (!l.length) return g.empty();
         if (l.length === 1) return l[0];
-        return keep(CS.union(l));
+        return memo('U' + l.map(idOf).join(','), function () { return keep(CS.union(l)); });
       },
-      diff: function (a, b) { return b.isEmpty() ? a : keep(a.subtract(b)); },
-      inter: function (a, b) { return keep(a.intersect(b)); },
+      diff: function (a, b) { return b.isEmpty() ? a : memo('d' + idOf(a) + ',' + idOf(b), function () { return keep(a.subtract(b)); }); },
+      inter: function (a, b) { return memo('i' + idOf(a) + ',' + idOf(b), function () { return keep(a.intersect(b)); }); },
       simplify: function (cs, eps) { return cs.isEmpty() || !(eps > 0) ? cs : keep(cs.simplify(eps)); },
       area: function (cs) { return cs.area(); },
       isEmpty: function (cs) { return cs.isEmpty(); },
@@ -615,12 +691,15 @@
       /** Drop islands smaller than minArea. */
       dropSmall: function (cs, minArea) {
         if (cs.isEmpty() || !(minArea > 0)) return cs;
-        var parts = g.parts(cs).filter(function (p) { return p.area() >= minArea; });
-        return g.unionAll(parts);
+        return memo('s' + idOf(cs) + ',' + minArea, function () {
+          var parts = g.parts(cs).filter(function (p) { return p.area() >= minArea; });
+          return g.unionAll(parts);
+        });
       },
       free: function () {
         for (var i = 0; i < arena.length; i++) { try { arena[i].delete(); } catch (e) { /* freed */ } }
         arena.length = 0;
+        opMemo.clear();
       },
       arenaSize: function () { return arena.length; }
     };
@@ -630,6 +709,10 @@
   // ===========================================================================
   // Task 4 - scanline infill (pure JS)
   // ===========================================================================
+
+  /* How far past a bridge line's end the layer below is looked for, mm (freeBridgeAngle): from just past the end to past two walls,
+     since a bridge's fill ends inside the walls that stand on what holds it. */
+  var BRIDGE_REACH_MM = [0.3, 0.8, 1.5];
 
   /**
    * One family of parallel lines at `angle`, `spacing` apart, clipped to the
@@ -687,7 +770,105 @@
     return out;
   }
 
+  /**
+   * A layer's separate islands, each printed whole before the next.
+   *
+   * The walls are built a depth at a time and the fill after them, so a layer of
+   * two islands ran inner wall, inner wall, outer wall, outer wall, fill, fill:
+   * five crossings of the gap a layer where one will do, and every crossing is a
+   * retraction and a chance of a string (the owner's TPU string test, 2026-11-14:
+   * two 5 mm cones, strung across from where the layers get small). Bambu Studio
+   * finishes an island - its walls and its fill - and then goes to the next (its
+   * Generic TPU slice of the temperature tower, layer by layer).
+   *
+   * The paths keep their order inside an island; the islands follow each other
+   * nearest first, from the one nearest `from` - where the layer below ended, so
+   * a layer starts on the island the nozzle is already over - or, with no
+   * `from`, the one the layer started on. A layer of one island is left as it
+   * is. Returns where the layer ends.
+   */
+  function islandOrder(g, L, region, from) {
+    var endOf = function (paths) {
+      if (!paths.length) return from || null;
+      var lp = paths[paths.length - 1];
+      return lp.closed ? lp.pts[0] : lp.pts[lp.pts.length - 1];
+    };
+    if (!L || L.paths.length < 2 || !region || g.isEmpty(region)) return endOf(L ? L.paths : []);
+    var parts = g.parts(region);
+    if (parts.length < 2) return endOf(L.paths);
+    var ins = parts.map(function (pc) { return insideIndex(g.polys(pc)); });
+    var groups = parts.map(function () { return []; }), last = -1;
+    var of = function (p) {
+      var pts = p.pts, tries = [pts[0], pts[pts.length >> 1], pts[pts.length - 1]];
+      for (var t = 0; t < tries.length; t++) for (var k = 0; k < ins.length; k++) if (ins[k](tries[t][0], tries[t][1])) return k;
+      return -1;
+    };
+    for (var q = 0; q < L.paths.length; q++) {
+      var k = of(L.paths[q]);
+      if (k < 0) k = last < 0 ? 0 : last;                  /* on no island's inside (a point on an edge): with the path before it */
+      groups[k].push(L.paths[q]); last = k;
+    }
+    groups = groups.filter(function (gr) { return gr.length; });
+    if (groups.length < 2) return endOf(L.paths);
+    var first = 0, fd = Infinity;
+    for (var f = 0; f < groups.length; f++) {
+      if (!from) { if (groups[f][0] === L.paths[0]) first = f; continue; }
+      var fs = groups[f][0].pts[0], dd = Math.hypot(fs[0] - from[0], fs[1] - from[1]);
+      if (dd < fd) { fd = dd; first = f; }
+    }
+    var out = [], cur = groups.splice(first, 1)[0];
+    while (cur) {
+      out = out.concat(cur);
+      var end = endOf(cur);
+      var best = -1, bd = Infinity;
+      for (var n = 0; n < groups.length; n++) {
+        var st = groups[n][0].pts[0], d = Math.hypot(st[0] - end[0], st[1] - end[1]);
+        if (d < bd) { bd = d; best = n; }
+      }
+      cur = best < 0 ? null : groups.splice(best, 1)[0];
+    }
+    L.paths = out;
+    return endOf(out);
+  }
+
   /** Even-odd point in polygon set. */
+  /**
+   * inside(polys, x, y) for many points against the same polygons: each edge filed under the horizontal bands it spans, so a point is tested
+   * against the edges of its band only. An edge that does not span the point's y never toggles the crossing count, and the edges that do are tested
+   * by inside's own expression, so every answer is inside's.
+   */
+  function insideIndex(polys) {
+    var ex = [], ymin = Infinity, ymax = -Infinity;
+    for (var p = 0; p < polys.length; p++) {
+      var poly = polys[p];
+      for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        var yi = poly[i][1], yj = poly[j][1];
+        if (yi === yj) continue;                       /* (yi > y) !== (yj > y) is never true */
+        ex.push(poly[i][0], yi, poly[j][0], yj);
+        if (yi < ymin) ymin = yi; if (yi > ymax) ymax = yi; if (yj < ymin) ymin = yj; if (yj > ymax) ymax = yj;
+      }
+    }
+    var ne = ex.length / 4;
+    if (!ne) return function () { return false; };
+    var nb = Math.max(1, Math.min(4096, Math.ceil(ne / 4))), bh = (ymax - ymin) / nb || 1;
+    var band = function (y) { var b = Math.floor((y - ymin) / bh); return b < 0 ? 0 : b >= nb ? nb - 1 : b; };
+    var lists = [];
+    for (var b = 0; b < nb; b++) lists.push([]);
+    for (var e = 0; e < ne; e++) {
+      var y0 = ex[e * 4 + 1], y1 = ex[e * 4 + 3], b0 = band(Math.min(y0, y1)), b1 = band(Math.max(y0, y1));
+      for (var bb = b0; bb <= b1; bb++) lists[bb].push(e);
+    }
+    return function (x, y) {
+      if (!(y >= ymin && y < ymax)) return false;
+      var L = lists[band(y)], inn = false;
+      for (var k = 0; k < L.length; k++) {
+        var e4 = L[k] * 4, xi = ex[e4], yi = ex[e4 + 1], xj = ex[e4 + 2], yj = ex[e4 + 3];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inn = !inn;
+      }
+      return inn;
+    };
+  }
+
   function inside(polys, x, y) {
     var inn = false;
     for (var p = 0; p < polys.length; p++) {
@@ -704,7 +885,8 @@
    * Connect scan segments into paths: from the end of the current path, go to
    * the NEAREST free segment end - of any family - when the connector is short
    * (<= maxLen) and runs inside the printable area (its midpoint is tested
-   * against `hull`, the region grown to the beads' outer edge). Otherwise
+   * against `hull`, the region grown to the beads' outer edge, and it may not
+   * cut across that outline - a hole it would jump). Otherwise
    * travel, and start a new path at the nearest free end.
    *
    * With one family (solid infill) the nearest end is the next line's, so this
@@ -731,6 +913,125 @@
     });
     return paths;
   }
+  /** A closed ring smoothed along its length: resampled every 0.12 mm and averaged over a Gaussian window of sigma mm (a loop that follows a dome's section, which the union of the part's layers
+   *  makes a scallop 0.1 mm deep every millimetre, is the polygon Bambu's mesh section is). A ring shorter than 6 sigma is left. */
+  function smoothRing(ring, sigma) {
+    var n = ring.length, step = 0.12, L = 0, i, seg = [];
+    for (i = 0; i < n; i++) { var a = ring[i], b = ring[(i + 1) % n], l = Math.hypot(b[0] - a[0], b[1] - a[1]); seg.push(l); L += l; }
+    if (L < 6 * sigma + 1e-6) return ring;
+    var m = Math.max(8, Math.round(L / step)), ds = L / m, pts = [], k = 0, acc = 0;
+    for (i = 0; i < m; i++) {
+      var t = i * ds;
+      while (acc + seg[k] < t - 1e-12 && k < n - 1) { acc += seg[k]; k++; }
+      var a2 = ring[k], b2 = ring[(k + 1) % n], u = seg[k] > 0 ? (t - acc) / seg[k] : 0;
+      pts.push([a2[0] + (b2[0] - a2[0]) * u, a2[1] + (b2[1] - a2[1]) * u]);
+    }
+    var half = Math.ceil(3 * sigma / ds), wts = [], ws = 0;
+    for (i = -half; i <= half; i++) { var wv = Math.exp(-0.5 * (i * ds / sigma) * (i * ds / sigma)); wts.push(wv); ws += wv; }
+    var out = [];
+    for (i = 0; i < m; i++) {
+      var sx = 0, sy = 0;
+      for (var q = -half; q <= half; q++) { var p = pts[((i + q) % m + m) % m], wq = wts[q + half]; sx += p[0] * wq; sy += p[1] * wq; }
+      out.push([sx / ws, sy / ws]);
+    }
+    var closed = out.concat([out[0]]), keep = simplifyIdx(closed, 0.01), res = [];            /* the moves are as long as Bambu's, not one per 0.12 mm */
+    keep.forEach(function (ix) { if (ix < out.length) res.push(out[ix]); });
+    return res.length >= 3 ? res : out;
+  }
+
+  /* Does the straight move p -> q cross the outline of polys (an edge cut through, not touched at an end)? A connector whose midpoint is inside can
+     still cut across a hole: on the owner's Gulf logo an 18 mm sparse connector jumped the G's counter at 0.8, open to the top (2026-11-23). */
+  function crossesOutline(polys, p, q) {
+    var x0 = Math.min(p[0], q[0]), x1 = Math.max(p[0], q[0]), y0 = Math.min(p[1], q[1]), y1 = Math.max(p[1], q[1]);
+    var dx = q[0] - p[0], dy = q[1] - p[1], E = 1e-9;
+    for (var k = 0; k < polys.length; k++) {
+      var P = polys[k], n = P.length;
+      for (var i = 0; i < n; i++) {
+        var a = P[i], b = P[(i + 1) % n];
+        if (Math.max(a[0], b[0]) < x0 || Math.min(a[0], b[0]) > x1 || Math.max(a[1], b[1]) < y0 || Math.min(a[1], b[1]) > y1) continue;
+        var ex = b[0] - a[0], ey = b[1] - a[1], den = dx * ey - dy * ex;
+        if (Math.abs(den) < E) continue;
+        var t = ((a[0] - p[0]) * ey - (a[1] - p[1]) * ex) / den, u = ((a[0] - p[0]) * dy - (a[1] - p[1]) * dx) / den;
+        if (t > 1e-6 && t < 1 - 1e-6 && u >= 0 && u <= 1) return true;
+      }
+    }
+    return false;
+  }
+
+  /* WHERE A LOOP STARTS (Studio's SeamPlacer, seam_position aligned - in short). Every loop has a seam: its start, the seam gap left where it
+     ends, a wipe and a prime beside it. NSO began each loop wherever its polygon began - on the owner's Gulf logo the rim's inner wall began
+     half way down its smooth right side, and the seam showed there as a break with a grey fleck in the white (2026-11-23); Studio's began in the
+     concave corner where the rim meets the white band. Each vertex is scored by the turn of the loop round it (taken ~a millimetre either
+     side, so a curve made of many short edges is one smooth turn): a concave corner (the material's inside angle over 180) is best, a sharp
+     convex one next, a straight or gently curving stretch worst - Studio's compute_angle_penalty. To that is added a little for the distance
+     from the nearest seam on the layer below, so seams line up layer on layer, and a loop with no corner keeps its seam where the one below was. */
+  function placeSeam(pts, polys, prev, w) {
+    var n = pts.length;
+    if (n < 3) return pts;
+    var cum = [0], i;
+    for (i = 1; i <= n; i++) cum.push(cum[i - 1] + Math.hypot(pts[i % n][0] - pts[i - 1][0], pts[i % n][1] - pts[i - 1][1]));
+    var total = cum[n];
+    if (!(total > 4 * w)) return pts;
+    /* which side the material is on: left of the longest edge, or right */
+    var le = 0, ll = -1;
+    for (i = 0; i < n; i++) { var l0 = cum[i + 1] - cum[i]; if (l0 > ll) { ll = l0; le = i; } }
+    var a0 = pts[le], b0 = pts[(le + 1) % n], ex = (b0[0] - a0[0]) / ll, ey = (b0[1] - a0[1]) / ll;
+    var probe = Math.min(w / 2, ll / 2), side = inside(polys, (a0[0] + b0[0]) / 2 - ey * probe, (a0[1] + b0[1]) / 2 + ex * probe) ? 1 : -1;
+    var r = Math.min(Math.max(0.5, 2 * w), total / 6);
+    var at = function (d) {                                     /* the point d along the loop from pts[0] (d may wrap) */
+      d = ((d % total) + total) % total;
+      var lo = 0, hi = n;
+      while (hi - lo > 1) { var mid = (lo + hi) >> 1; if (cum[mid] <= d) lo = mid; else hi = mid; }
+      var p = pts[lo], q = pts[(lo + 1) % n], seg = cum[lo + 1] - cum[lo], u = seg > 0 ? (d - cum[lo]) / seg : 0;
+      return [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u];
+    };
+    var best = 0, bestScore = Infinity;
+    for (i = 0; i < n; i++) {
+      var v = pts[i], bk = at(cum[i] - r), fw = at(cum[i] + r);
+      var ux = v[0] - bk[0], uy = v[1] - bk[1], vx = fw[0] - v[0], vy = fw[1] - v[1];
+      var th = side * Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);       /* > 0 convex, < 0 concave */
+      var pen = Math.exp(-th * th * 1.5) + 1 / (2 + Math.exp(-th));
+      var dmin = 10;
+      for (var k = 0; k < prev.length; k++) { var dd = Math.hypot(prev[k][0] - v[0], prev[k][1] - v[1]); if (dd < dmin) dmin = dd; }
+      var score = pen + 0.02 * dmin;
+      if (score < bestScore - 1e-9) { bestScore = score; best = i; }
+    }
+    return best ? pts.slice(best).concat(pts.slice(0, best)) : pts;
+  }
+
+  /* A TOP SURFACE, ONE RUN A PIECE WHERE IT CAN BE (the owner's Gulf logo, 2026-11-23). Every place a top run stops is a retraction, a wipe, a lift
+     and a prime on the finished face - a mark. The layer's top was filled as one lot, the nearest free line next: the nozzle came into a letter
+     part way along its lines, swept to one end and had to come back for the rest - the l (a plain rectangle) in two runs, the f in five. Now
+     each piece of the top is filled on its own, the nearest piece next, and begun at whichever of its two outermost lines is nearer: a plain
+     shape is one zig-zag from end to end. (Ending a run on a long line, tried first, only moved the wipe from the corner into the middle of the
+     letter, a scar across it - the owner's next print.) */
+  function topRuns(g, cs, angle, spacing, join, hull, L) {
+    var lastOf = function (pa) { return pa.closed ? pa.pts[0] : pa.pts[pa.pts.length - 1]; };
+    var here = L.paths.length ? lastOf(L.paths[L.paths.length - 1]) : null;
+    var pieces = g.parts(cs).map(function (pc) { var sg = scanFill(g.polys(pc), angle, spacing, 0); sg.edge = g.polys(g.offset(pc, spacing / 2)); return sg; }).filter(function (sg) { return sg.length; });
+    var out = [];
+    while (pieces.length) {
+      var bi = 0, bp = null, bd = Infinity;
+      pieces.forEach(function (sg, k) {
+        [sg[0].a, sg[0].b, sg[sg.length - 1].a, sg[sg.length - 1].b].forEach(function (p) {
+          var d = here ? Math.hypot(p[0] - here[0], p[1] - here[1]) : 0;
+          if (d < bd) { bd = d; bi = k; bp = p; }
+        });
+      });
+      var runs = connect(pieces[bi], join, hull, bp), edge = pieces[bi].edge;
+      pieces.splice(bi, 1);
+      /* a piece that still takes more than one run (a concave one: the G, the f) goes from run to run inside itself without a stop - a short move
+         that crosses no edge of the piece, at the layer's height, nothing retracted (path.glide; Studio's top goes from line to line the same way) */
+      runs.forEach(function (r, k) {
+        if (k) { var a = runs[k - 1].pts[runs[k - 1].pts.length - 1], b = r.pts[0];
+          if (Math.hypot(b[0] - a[0], b[1] - a[1]) <= TOP_GLIDE_MM && inside(edge, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2) && !crossesOutline(edge, a, b)) r.glide = true; }
+        out.push(r);
+      });
+      if (runs.length) here = runs[runs.length - 1].pts[runs[runs.length - 1].pts.length - 1];
+    }
+    return out;
+  }
+
   function connect(segs, maxLen, hull, startAt) {
     var n = segs.length;
     if (!n) return [];
@@ -752,13 +1053,726 @@
       var sg = segs[best];
       var s0 = flip ? sg.b : sg.a, s1 = flip ? sg.a : sg.b;
       var join = path && bd <= maxLen2 &&
-        (!hull || inside(hull, (cur[0] + s0[0]) / 2, (cur[1] + s0[1]) / 2));
+        (!hull || (inside(hull, (cur[0] + s0[0]) / 2, (cur[1] + s0[1]) / 2) && (bd < 1 || !crossesOutline(hull, cur, s0))));
       if (join) path.pts.push(s0, s1);
       else { path = { closed: false, pts: [s0, s1] }; paths.push(path); }
       used[best] = 1; left--;
       cur = s1;
     }
     return paths;
+  }
+
+  // ===========================================================================
+  // Concentric fill - rings that follow the region's outline
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (concentric.gcode.3mf: ten flat shapes, A1 mini, 0.4 nozzle, 0.2 layers, every surface and the
+     solid infill concentric; docs/SLICER.md "Concentric"):
+       - the outermost ring lies half a line spacing inside the fill region, each next one a whole spacing further in (0.377 at 0.42 / 0.2, 0.457
+         at the first layer's 0.5): every ring but the innermost has the nominal width;
+       - the middle takes up what the spacing does not divide: the beads across the region are its width over the spacing, rounded, and the last
+         one or two share the remainder - an even count ends in a ring wider or narrower than the rest (0.354 - 0.63 against 0.42 / 0.5), an odd
+         count in one line down the middle (0.55 - 0.69);
+       - the rings print from the middle outward, each starting beside the last one's start (the seams in a row). */
+  var CONCENTRIC_DOT_MM = 0.1;        // a middle with no length (a disc's) is a dot this long: the reference's is 0.11
+  var CONCENTRIC_WIDTH_STEP_MM = 0.04; // a middle line's width follows the room along it in steps (the reference's: 0.556, 0.600, 0.643, 0.686)
+
+  /** How deep a piece is: the largest inset that leaves something of it, within (0, hi]. */
+  function insetDepth(g, cs, hi) {
+    var lo = 0;
+    for (var k = 0; k < 14; k++) {
+      var mid = (lo + hi) / 2;
+      if (g.isEmpty(g.offset(cs, -mid))) hi = mid; else lo = mid;
+    }
+    return lo;
+  }
+
+  /** Distance from a point to the outline of polys. */
+  function outlineDistance(polys, x, y) {
+    var best = Infinity;
+    for (var k = 0; k < polys.length; k++) {
+      var P = polys[k], n = P.length;
+      for (var i = 0; i < n; i++) {
+        var a = P[i], b = P[(i + 1) % n];
+        var dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+        var t = l2 > 0 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2)) : 0;
+        var d = Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy);
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  }
+
+  /** A closed ring turned to start at its point nearest `at` (a new vertex where that falls inside an edge). */
+  function ringFrom(pts, at) {
+    var n = pts.length, best = Infinity, bi = 0, bt = 0;
+    for (var i = 0; i < n; i++) {
+      var a = pts[i], b = pts[(i + 1) % n];
+      var dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+      var t = l2 > 0 ? Math.max(0, Math.min(1, ((at[0] - a[0]) * dx + (at[1] - a[1]) * dy) / l2)) : 0;
+      var d = Math.hypot(at[0] - a[0] - t * dx, at[1] - a[1] - t * dy);
+      if (d < best) { best = d; bi = i; bt = t; }
+    }
+    var out = [], a0 = pts[bi], b0 = pts[(bi + 1) % n];
+    if (bt > 1e-6 && bt < 1 - 1e-6) out.push([a0[0] + bt * (b0[0] - a0[0]), a0[1] + bt * (b0[1] - a0[1])]);
+    else if (bt <= 1e-6) bi = (bi + n - 1) % n;
+    for (var k = 1; k <= n; k++) out.push(pts[(bi + k) % n]);
+    return out;
+  }
+
+  /**
+   * A region filled with rings parallel to its outline -> [{ closed, pts, width }], in print order (from each middle outward).
+   *   w, h      the line's width and the layer's height
+   *   pitch     ring to ring; the bead spacing for a solid fill, wider for a sparse one
+   *   solid     the middle shares out the remainder (above); a sparse fill's rings stop where the next does not fit
+   *   startAt   where the nozzle comes from, for the first seam
+   */
+  function concentricFill(g, cs, w, h, pitch, solid, startAt) {
+    if (g.isEmpty(cs)) return [];
+    var s = spacingOf(w, h), fat = w - s, out = [];
+    var rings = function (c, inset, width) {
+      g.polys(g.offset(c, -inset)).forEach(function (pl) { if (pl.length > 2) out.push({ closed: true, pts: pl, width: width }); });
+    };
+    /* one line down the middle of a piece 2r across at its widest, as wide as the room along it */
+    var middle = function (c, r) {
+      var polys = g.polys(c), wMid = 2 * r + fat;
+      var med = medialPaths(polys, wMid, []);
+      if (!med) {
+        var core = g.polys(g.offset(c, -r * 0.98))[0] || polys[0], cx = 0, cy = 0;
+        core.forEach(function (q) { cx += q[0] / core.length; cy += q[1] / core.length; });
+        out.push({ closed: false, pts: [[cx - CONCENTRIC_DOT_MM / 2, cy], [cx + CONCENTRIC_DOT_MM / 2, cy]], width: wMid });
+        return;
+      }
+      med.forEach(function (pa) {
+        var pts = pa.closed ? pa.pts.concat([pa.pts[0]]) : pa.pts, run = null;
+        for (var i = 0; i + 1 < pts.length; i++) {
+          var a = pts[i], b = pts[i + 1], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (2 * w)));
+          for (var k = 0; k < n; k++) {
+            var p0 = [a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n], p1 = [a[0] + (b[0] - a[0]) * (k + 1) / n, a[1] + (b[1] - a[1]) * (k + 1) / n];
+            var room = 2 * outlineDistance(polys, (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
+            var wk = room < 0.5 * s ? 0 : Math.round((Math.min(room, 2 * r) + fat) / CONCENTRIC_WIDTH_STEP_MM) * CONCENTRIC_WIDTH_STEP_MM;
+            if (Math.abs(wk - wMid) < CONCENTRIC_WIDTH_STEP_MM) wk = wMid;
+            if (run && run.width === wk) run.pts.push(p1);
+            else { run = wk > 0 ? { closed: false, pts: [p0, p1], width: wk } : null; if (run) out.push(run); }
+          }
+        }
+      });
+    };
+    /* the beads across a middle x spacings wide: a pair of rings takes up to 2.75 before a line goes between them (the reference's hexagon top
+       keeps two at 2.50; its rectangle's first layer has two at 1.70) */
+    var beads = function (x) { return x < 0.5 ? 0 : x < 1.5 ? 1 : x < 2.75 ? 2 : x < 3.5 ? 3 : 4; };
+    /* a piece less than a spacing deep: nothing, a line, or one ring of its own width */
+    var last = function (c, r) {
+      var n = beads(2 * r / s);
+      if (n === 1) middle(c, r);
+      else if (n >= 2) rings(c, r / 2, r + fat);
+    };
+    var fill = function (c) {
+      if (solid && g.isEmpty(g.offset(c, -2 * s))) {
+        var r = insetDepth(g, c, 2 * s);
+        if (beads(2 * r / s) <= 2) { last(c, r); return; }
+        g.parts(g.offset(c, -s)).forEach(function (d) { last(d, insetDepth(g, d, s)); });
+        rings(c, s / 2, w);
+        return;
+      }
+      var ring = g.offset(c, -s / 2);
+      if (g.isEmpty(ring)) return;
+      g.parts(g.offset(c, -pitch)).forEach(fill);
+      rings(c, s / 2, w);
+    };
+    g.parts(cs).forEach(fill);
+    var cur = startAt || null;
+    out.forEach(function (p) {
+      if (p.closed) { if (cur) p.pts = ringFrom(p.pts, cur); cur = p.pts[0]; }
+      else {
+        var e = p.pts[p.pts.length - 1];
+        if (cur && Math.hypot(e[0] - cur[0], e[1] - cur[1]) < Math.hypot(p.pts[0][0] - cur[0], p.pts[0][1] - cur[1])) p.pts.reverse();
+        cur = p.pts[p.pts.length - 1];
+      }
+    });
+    return out;
+  }
+
+  // ===========================================================================
+  // Archimedean chords - one spiral, cut to the region
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (archimedeanchords.gcode.3mf: the ten shapes of the concentric plate, 9.8 mm tall, every pattern
+     Archimedean chords; docs/SLICER.md "Archimedean chords"):
+       - one spiral a fill: from its centre a straight stroke one pitch long at 135 degrees, then counter-clockwise outward, a pitch further out
+         with every turn - the same on every layer (it is not turned with the layer);
+       - the pitch is the bead spacing in a solid fill (0.377 at 0.42 / 0.2) and the spacing over the density in a sparse one (2.713 at 0.45, 15 %);
+       - a solid fill's centre is the middle of the region's box in the frame turned 45 degrees (the infill direction); a sparse fill's is the
+         middle of the object's own box, so every sparse layer lies on the one below;
+       - the spiral is cut where it leaves the region; in a sparse fill the cut ends are joined along the walls. */
+  var SPIRAL_START_DEG = 135;
+  var SPIRAL_SAG_MM = 0.01;           // the spiral as a polyline: no further than this from the true curve
+
+  /** The middle of polys' bounding box in the frame turned by angle (rad). */
+  function turnedBoxCentre(polys, angle) {
+    var c = Math.cos(angle), s = Math.sin(angle), u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (q) {
+      var u = q[0] * c + q[1] * s, v = -q[0] * s + q[1] * c;
+      if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v;
+    }); });
+    var um = (u0 + u1) / 2, vm = (v0 + v1) / 2;
+    return [um * c - vm * s, um * s + vm * c];
+  }
+
+  /**
+   * An open polyline cut to the inside of polys (even-odd) -> its pieces in the line's own order:
+   * [{ pts, a, b }], a / b where the piece starts / ends on the outline ({ p: polygon, e: edge, t: along it }) or null (the line's own end).
+   */
+  function clipLine(pts, polys) {
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, ne = 0;
+    polys.forEach(function (P) { ne += P.length; P.forEach(function (q) { if (q[0] < x0) x0 = q[0]; if (q[0] > x1) x1 = q[0]; if (q[1] < y0) y0 = q[1]; if (q[1] > y1) y1 = q[1]; }); });
+    if (!ne || pts.length < 2) return [];
+    /* the outline's edges on a grid, so a segment meets only the edges near it */
+    var cell = Math.max(0.5, Math.sqrt((x1 - x0) * (y1 - y0) / Math.max(1, ne)) * 2), nx = Math.max(1, Math.ceil((x1 - x0) / cell)), ny = Math.max(1, Math.ceil((y1 - y0) / cell));
+    var grid = new Map(), cx = function (x) { var i = Math.floor((x - x0) / cell); return i < 0 ? 0 : i >= nx ? nx - 1 : i; }, cy = function (y) { var j = Math.floor((y - y0) / cell); return j < 0 ? 0 : j >= ny ? ny - 1 : j; };
+    var E = [];
+    polys.forEach(function (P, pi) {
+      for (var e = 0; e < P.length; e++) {
+        var a = P[e], b = P[(e + 1) % P.length], id = E.length;
+        E.push({ p: pi, e: e, a: a, b: b });
+        for (var i = cx(Math.min(a[0], b[0])); i <= cx(Math.max(a[0], b[0])); i++) for (var j = cy(Math.min(a[1], b[1])); j <= cy(Math.max(a[1], b[1])); j++) {
+          var k = j * nx + i, l = grid.get(k);
+          if (!l) grid.set(k, l = []);
+          l.push(id);
+        }
+      }
+    });
+    var isIn = insideIndex(polys), seen = new Int32Array(E.length).fill(-1), out = [], cur = null;
+    for (var n = 0; n + 1 < pts.length; n++) {
+      var A = pts[n], B = pts[n + 1], dx = B[0] - A[0], dy = B[1] - A[1];
+      if (Math.max(A[0], B[0]) < x0 || Math.min(A[0], B[0]) > x1 || Math.max(A[1], B[1]) < y0 || Math.min(A[1], B[1]) > y1) { if (cur) { out.push(cur); cur = null; } continue; }
+      var cuts = [];
+      for (var i2 = cx(Math.min(A[0], B[0])); i2 <= cx(Math.max(A[0], B[0])); i2++) for (var j2 = cy(Math.min(A[1], B[1])); j2 <= cy(Math.max(A[1], B[1])); j2++) {
+        var l2 = grid.get(j2 * nx + i2);
+        if (!l2) continue;
+        for (var q = 0; q < l2.length; q++) {
+          var id2 = l2[q];
+          if (seen[id2] === n) continue;
+          seen[id2] = n;
+          var ed = E[id2], ex = ed.b[0] - ed.a[0], ey = ed.b[1] - ed.a[1], den = dx * ey - dy * ex;
+          if (Math.abs(den) < 1e-14) continue;
+          var t = ((ed.a[0] - A[0]) * ey - (ed.a[1] - A[1]) * ex) / den, u = ((ed.a[0] - A[0]) * dy - (ed.a[1] - A[1]) * dx) / den;
+          if (t > 0 && t < 1 && u >= 0 && u < 1) cuts.push({ t: t, p: ed.p, e: ed.e, u: u });
+        }
+      }
+      cuts.sort(function (c1, c2) { return c1.t - c2.t; });
+      var t0 = 0, h0 = null;
+      for (var c = 0; c <= cuts.length; c++) {
+        var t1 = c < cuts.length ? cuts[c].t : 1, h1 = c < cuts.length ? cuts[c] : null;
+        if (t1 - t0 > 1e-12) {
+          var tm = (t0 + t1) / 2;
+          if (isIn(A[0] + dx * tm, A[1] + dy * tm)) {
+            if (!cur) cur = { pts: [[A[0] + dx * t0, A[1] + dy * t0]], a: h0 ? { p: h0.p, e: h0.e, t: h0.u } : null, b: null };
+            cur.pts.push([A[0] + dx * t1, A[1] + dy * t1]);
+            cur.b = h1 ? { p: h1.p, e: h1.e, t: h1.u } : null;
+          } else if (cur) { out.push(cur); cur = null; }
+        }
+        t0 = t1; h0 = h1;
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  /**
+   * A polygon's outline as a track: where a hit lies along it, and the points passed walking it.
+   *   pos(h)            mm from vertex 0 to the hit { e, t }
+   *   walk(h, dir, d)   the points from the hit on, d mm the way dir (+1 with the vertices, -1 against), the hit itself left out
+   */
+  function outlineTrack(P) {
+    var n = P.length, cum = [0];
+    for (var i = 0; i < n; i++) cum.push(cum[i] + Math.hypot(P[(i + 1) % n][0] - P[i][0], P[(i + 1) % n][1] - P[i][1]));
+    var total = cum[n];
+    var at = function (pos) {
+      pos = ((pos % total) + total) % total;
+      var lo = 0, hi = n - 1;
+      while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (cum[mid] <= pos) lo = mid; else hi = mid - 1; }
+      var l = cum[lo + 1] - cum[lo], t = l > 0 ? (pos - cum[lo]) / l : 0, a = P[lo], b = P[(lo + 1) % n];
+      return { e: lo, pt: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] };
+    };
+    return {
+      total: total,
+      pos: function (h) { return cum[h.e] + h.t * (cum[h.e + 1] - cum[h.e]); },
+      walk: function (h, dir, d) {
+        var p0 = cum[h.e] + h.t * (cum[h.e + 1] - cum[h.e]), end = at(p0 + dir * d), out = [], e = h.e, guard = 0;
+        if (dir > 0) { while (e !== end.e && guard++ <= n) { e = (e + 1) % n; out.push(P[e]); } }
+        else { while (e !== end.e && guard++ <= n) { out.push(P[e]); e = (e - 1 + n) % n; } }
+        if (h.e === end.e && d > cum[h.e + 1] - cum[h.e]) return out;      /* all the way round: not asked for */
+        out.push(end.pt);
+        return out;
+      }
+    };
+  }
+
+  /**
+   * A region filled with one Archimedean spiral about `centre` -> [{ closed: false, pts }], from the middle outward.
+   *   pitch    turn to turn
+   *   linkMm   where the spiral leaves the region and comes back, the two cut ends are joined along the outline, the shorter way round, when
+   *            that is no longer than this and no earlier join already runs there (0: never)
+   *   hookMm   two ends left unjoined each turn this far along the outline towards the other (Bambu's infill anchor: 4 spacings); 0: none
+   *   octagram the spiral of eight-pointed stars in place of the round one (below)
+   */
+  function spiralFill(polys, centre, pitch, linkMm, hookMm, octagram) {
+    if (!polys.length || !(pitch > 0)) return [];
+    var R = 0;
+    polys.forEach(function (P) { P.forEach(function (q) { var d = Math.hypot(q[0] - centre[0], q[1] - centre[1]); if (d > R) R = d; }); });
+    var a0 = SPIRAL_START_DEG * Math.PI / 180, line = [centre.slice()];
+    if (octagram) {
+      /* THE OCTAGRAM SPIRAL (octagramspiral.gcode: Bambu's, read off the circle's solid layer in spacings from the centre). Ring n is an
+         eight-pointed star: its sides lie n spacings from the centre's axes (so ring to ring is one spacing), its points n (1 + sqrt 2) out,
+         its notches n sqrt 2 out on the axes. From the centre the first stroke goes to (-1, 1) - 135 degrees, as the round spiral's - and each
+         ring ends on the +Y axis, from where the line steps out to the next ring's first corner. The same on every layer. */
+      var q2 = Math.SQRT2, at = function (x, y) { line.push([centre[0] + x * pitch, centre[1] + y * pitch]); };
+      for (var n = 1; ; n++) {
+        var k = n * (1 + q2), m = n * q2;
+        if (n > 1) at(-n, (n - 1) * q2 + n);
+        at(-n, n); at(-k, n); at(-m, 0); at(-k, -n); at(-n, -n); at(-n, -k); at(0, -m); at(n, -k); at(n, -n); at(k, -n); at(m, 0); at(k, n); at(n, n); at(n, k); at(0, m);
+        if (n * pitch > R + pitch) break;                                         /* the star's sides are past the region's furthest point */
+      }
+    } else for (var phi = 0; ;) {
+      var r = pitch * (1 + phi / (2 * Math.PI));
+      line.push([centre[0] + r * Math.cos(a0 + phi), centre[1] + r * Math.sin(a0 + phi)]);
+      if (r > R + pitch) break;
+      phi += Math.min(0.35, Math.sqrt(8 * SPIRAL_SAG_MM / r));
+    }
+    var tracks = polys.map(function () { return null; }), used = polys.map(function () { return []; });
+    var track = function (p) { return tracks[p] || (tracks[p] = outlineTrack(polys[p])); };
+    /* how far the outline is free from pos the way dir, up to want */
+    var freeFrom = function (p, pos, dir, want) {
+      var T = track(p), best = want;
+      used[p].forEach(function (iv) {
+        var d0 = (((dir > 0 ? iv[0] - pos : pos - iv[1]) % T.total) + T.total) % T.total;      /* to the stretch's near end */
+        var inside = ((((pos - iv[0]) % T.total) + T.total) % T.total) < iv[1] - iv[0] - 1e-9;
+        if (inside) best = 0; else if (d0 < best) best = d0;
+      });
+      return best;
+    };
+    var take = function (p, pos, dir, len) { used[p].push(dir > 0 ? [pos, pos + len] : [pos - len, pos]); };
+    var out = [], path = null, last = null;
+    clipLine(line, polys).forEach(function (pc) {
+      if (pathLength(pc.pts, false) < pitch / 8 && pc.a && pc.b) return;       /* a nick at a corner */
+      var joined = false;
+      if (path && last.b && pc.a && last.b.p === pc.a.p && (linkMm > 0 || hookMm > 0)) {
+        var p = pc.a.p, T = track(p), pf = T.pos(last.b), pt = T.pos(pc.a);
+        var fw = (((pt - pf) % T.total) + T.total) % T.total, dir = fw <= T.total - fw ? 1 : -1, len = dir > 0 ? fw : T.total - fw;
+        if (len <= linkMm && freeFrom(p, pf, dir, len) >= len - 1e-9) {
+          var way = T.walk(last.b, dir, len);
+          way.pop();                                                             /* the far end is the next piece's first point */
+          path.pts = path.pts.concat(way, pc.pts);
+          take(p, pf, dir, len);
+          joined = true;
+        } else if (hookMm > 0) {
+          var h1 = Math.min(freeFrom(p, pf, dir, hookMm), len / 2), h2 = Math.min(freeFrom(p, pt, -dir, hookMm), len / 2);
+          if (h1 > hookMm / 4) { path.pts = path.pts.concat(T.walk(last.b, dir, h1)); take(p, pf, dir, h1); }
+          if (h2 > hookMm / 4) { pc = { pts: T.walk(pc.a, -dir, h2).reverse().concat(pc.pts), a: pc.a, b: pc.b }; take(p, pt, -dir, h2); }
+        }
+      }
+      if (!joined) { path = { closed: false, pts: pc.pts }; out.push(path); }
+      last = pc;
+    });
+    return out;
+  }
+
+  // ===========================================================================
+  // Hilbert curve - one space-filling line, cut to the region
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (hilbertcurve_3dhoneycomb.gcode.3mf: the concentric plate's shapes, every surface and the solid
+     infill Hilbert curve; docs/SLICER.md "Hilbert curve"):
+       - the curve runs on a square grid one bead spacing apart (0.377 at 0.42 / 0.2), turned 135 degrees: every stroke lies at 45 or 135;
+       - it is the plain Hilbert curve of the smallest power of two that covers the region (128 across on every shape of the plate), its first
+         corner at the low corner of the region's box in that frame - Bambu's region, which lies 0.85 x half the difference of the wall's spacing
+         and the fill's outside this slicer's (0.013 mm at 0.45 / 0.42: the concentric rings' measure, found again in the grid's phase);
+       - the same on every layer; cut where it leaves the region. */
+  var HILBERT_FRAME_DEG = 135;
+
+  /** The d-th point of the Hilbert curve on an n x n grid (n a power of two): from (0, 0) to (n - 1, 0). */
+  function hilbertPoint(n, d) {
+    var x = 0, y = 0, t = d;
+    for (var sN = 1; sN < n; sN *= 2) {
+      var rx = 1 & (t / 2), ry = 1 & (t ^ rx);
+      if (ry === 0) {
+        if (rx === 1) { x = sN - 1 - x; y = sN - 1 - y; }
+        var tmp = x; x = y; y = tmp;
+      }
+      x += sN * rx; y += sN * ry;
+      t = Math.floor(t / 4);
+    }
+    return [x, y];
+  }
+
+  /**
+   * A region filled with the Hilbert curve -> [{ closed: false, pts }], in the curve's order.
+   *   step     grid line to grid line
+   *   linkMm   cut ends are joined along the outline when that is no longer than this (0: never)
+   *   edgeMm   the first grid lines lie this far outside the region's box (above)
+   */
+  function hilbertFill(polys, step, linkMm, edgeMm) {
+    if (!polys.length || !(step > 0)) return [];
+    var a = HILBERT_FRAME_DEG * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a);
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (q) {
+      var X = q[0] * c + q[1] * sn, Y = -q[0] * sn + q[1] * c;
+      if (X < x0) x0 = X; if (X > x1) x1 = X; if (Y < y0) y0 = Y; if (Y > y1) y1 = Y;
+    }); });
+    var need = Math.ceil(Math.max(x1 - x0, y1 - y0) / step) + 1, n = 2;
+    while (n < need) n *= 2;
+    if (n > 4096) return [];                                   /* 16 million strokes: not a fill */
+    x0 -= edgeMm || 0; y0 -= edgeMm || 0;
+    var ox = x0, oy = y0;
+    /* the curve, straight runs as one stroke; only the part of it that can reach the box is made */
+    var cols = Math.ceil((x1 - x0) / step) + 1, rows = Math.ceil((y1 - y0) / step) + 1;
+    var pieces = [], line = null, prev = null;
+    var visit = function (X, Y, size, d0) {
+      /* a quadrant wholly off the box is skipped: the line breaks there */
+      if (X >= cols || Y >= rows) { line = null; return; }
+      if (size === 1) {
+        var pt = hilbertPoint(n, d0);
+        if (!line) { line = [pt]; pieces.push(line); }
+        else if (line.length >= 2 && (line[line.length - 2][0] === pt[0] && prev[0] === pt[0] || line[line.length - 2][1] === pt[1] && prev[1] === pt[1])) line[line.length - 1] = pt;
+        else line.push(pt);
+        prev = pt;
+        return;
+      }
+      var h = size / 2, q = h * h;
+      for (var k = 0; k < 4; k++) { var cnr = hilbertPoint(n, d0 + k * q); visit(Math.floor(cnr[0] / h) * h, Math.floor(cnr[1] / h) * h, h, d0 + k * q); }
+    };
+    visit(0, 0, n, 0);
+    var out = [], path = null, last = null, tracks = polys.map(function () { return null; });
+    pieces.forEach(function (ln) {
+      if (ln.length < 2) return;
+      var world = ln.map(function (g2) { var X = ox + g2[0] * step, Y = oy + g2[1] * step; return [X * c - Y * sn, X * sn + Y * c]; });
+      clipLine(world, polys).forEach(function (pc) {
+        var joined = false;
+        if (path && linkMm > 0 && last.b && pc.a && last.b.p === pc.a.p) {
+          var T = tracks[pc.a.p] || (tracks[pc.a.p] = outlineTrack(polys[pc.a.p])), pf = T.pos(last.b), pt2 = T.pos(pc.a);
+          var fw = (((pt2 - pf) % T.total) + T.total) % T.total, dir = fw <= T.total - fw ? 1 : -1, len = dir > 0 ? fw : T.total - fw;
+          if (len <= linkMm) { var way = T.walk(last.b, dir, len); way.pop(); path.pts = path.pts.concat(way, pc.pts); joined = true; }
+        }
+        if (!joined) { path = { closed: false, pts: pc.pts }; out.push(path); }
+        last = pc;
+      });
+    });
+    return out;
+  }
+
+  // ===========================================================================
+  // 3D honeycomb - wavy lines whose waves and direction change with height
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (hilbertcurve_3dhoneycomb.gcode.3mf: sparse infill 3D honeycomb, 15 %, 0.45 wide, 0.2 layers,
+     over 210 layers; docs/SLICER.md "3D honeycomb"). In the frame turned 45 degrees (the infill direction), about the middle of the object's box:
+       - a layer is one family of lines D = 3.579 apart, the middle one through the centre; each line is a square wave with slanted flanks:
+         flats D - 2|a| long, a to one side of the line then a to the other, joined by flanks at 45 degrees to the line (so along X or Y on
+         the plate); the wave is 2 D long, and next-door lines are mirror images, so they close in on each other and part again: the cells;
+       - a, the flats' distance from the line, goes from + D/4 to - D/4 in 10 layers and back in the next 10, a twentieth of D a layer (0.179):
+         the lines are straight every 10th layer; going down the lines run along the frame's first axis, coming back up along its second;
+       - + D/4 falls on layer 5 (z 1.0), 25, 45...: a quarter of the 20 layers up from the plate.
+     D = (1 + sqrt(3)/2) / sqrt(2) x the spacing over the density is fitted to this slice and stated, not known (3.5802 against the measured
+     3.5788).
+     THE WAVE'S HEIGHT IS A LENGTH, NOT A COUNT OF LAYERS (2026-11-19). The lines are straight every H mm, H = 0.5585 x D (2.000 mm here): a
+     second real slice, the owner's anti-vibration feet (bambu_arachne.gcode.3mf: Studio 02.09, 3D honeycomb 10 %, 0.45 / 0.2, no walls, no
+     shells), has D 5.369 and its lines straight at z 3.0, 6.0, 9.0 ... - every 15 layers, H = 0.5588 x D again. The rule this replaced, a
+     quarter of whole layers rounded up (D / 4h: 4.47 -> 5 here), gave 7 there, straight every 14 layers, and drifted a layer every wave.
+     So the wave runs on the print height itself: a quarter is H / 2h layers, 5 here and 7.5 there. */
+  var HONEYCOMB3D_SCALE = (1 + Math.sqrt(3) / 2) / Math.SQRT2;
+  /* H against the spacing over the density: 2.000 mm at 0.45 / 0.2, 15 % (the first slice) - and so exactly 3.000 at 10 % (the second) */
+  var HONEYCOMB3D_HALF = 2 * 0.15 / (0.45 - 0.2 * (1 - Math.PI / 4));
+
+  /** The 3D honeycomb's numbers for a layer: { D, a, family, quarter } - line spacing, the flats' signed distance from their line, 0 (lines along the
+   *  frame's first axis) or 1, and the quarter wave in layers. */
+  function honeycomb3dAt(spacing, density, layerH, printZ) {
+    var D = HONEYCOMB3D_SCALE * spacing / density, H = HONEYCOMB3D_HALF * spacing / density, Q = H / (2 * layerH);
+    /* v counts quarter waves from + D/4 (half a straight-to-straight up from the plate): 0 - 2 the frame's first family, 2 - 4 its second */
+    var v = (((2 * printZ / H - 1) % 4) + 4) % 4;
+    if (Math.abs(v - Math.round(v)) < 1e-6) v = Math.round(v) % 4;      /* a layer on a turning point is on it, not a hair either side */
+    return v < 2 ? { D: D, a: D / 4 * (1 - v), family: 0, quarter: Q } : { D: D, a: D / 4 * (-1 + (v - 2)), family: 1, quarter: Q };
+  }
+
+  /**
+   * A region filled with one layer of the 3D honeycomb -> [{ closed: false, pts }].
+   *   centre   the lattice's middle (the object's box's)
+   *   angle    the frame (rad): the infill direction
+   *   cell     honeycomb3dAt()'s { D, a, family }
+   *   linkMm   a line's end is joined to the next line's along the outline when that is no longer than this
+   */
+  function honeycomb3dFill(polys, centre, angle, cell, linkMm) {
+    if (!polys.length || !(cell.D > 0)) return [];
+    var c = Math.cos(angle), sn = Math.sin(angle), D = cell.D, T = 2 * D, a = cell.a, A = Math.abs(a), fam = cell.family;
+    /* the frame: p along the lines, q across them, from the centre */
+    var toPQ = function (pt) { var u = (pt[0] - centre[0]) * c + (pt[1] - centre[1]) * sn, v = -(pt[0] - centre[0]) * sn + (pt[1] - centre[1]) * c; return fam ? [v, u] : [u, v]; };
+    var toXY = function (pp, qq) { var u = fam ? qq : pp, v = fam ? pp : qq; return [centre[0] + u * c - v * sn, centre[1] + u * sn + v * c]; };
+    var p0 = Infinity, p1 = -Infinity, q0 = Infinity, q1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (pt) { var r = toPQ(pt); if (r[0] < p0) p0 = r[0]; if (r[0] > p1) p1 = r[0]; if (r[1] < q0) q0 = r[1]; if (r[1] > q1) q1 = r[1]; }); });
+    var pieces = [];
+    for (var k = Math.ceil((q0 - A) / D); k <= Math.floor((q1 + A) / D); k++) {
+      var sg = (k % 2 === 0 ? 1 : -1) * a, line = [];
+      if (A < 1e-9) line = [toXY(p0 - 1, k * D), toXY(p1 + 1, k * D)];
+      else {
+        for (var m = Math.floor((p0 - 1) / T); m <= Math.ceil((p1 + 1) / T); m++) {
+          var b = m * T;
+          line.push(toXY(b - T / 2 + A, k * D + sg), toXY(b - A, k * D + sg), toXY(b + A, k * D - sg), toXY(b + T / 2 - A, k * D - sg));
+        }
+      }
+      var cut = clipLine(line, polys);
+      if ((k % 2 + 2) % 2 === 1) cut = cut.reverse().map(function (pc) { return { pts: pc.pts.slice().reverse(), a: pc.b, b: pc.a }; });   /* there and back */
+      pieces = pieces.concat(cut);
+    }
+    return chainAlongOutline(polys, pieces, linkMm);
+  }
+
+  // ===========================================================================
+  // Gyroid - the layer's cut through the gyroid surface
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (OctogramSpiral_Gyroid.gcode.3mf: sparse infill gyroid, 15 %, 0.45 wide, 0.2 layers, 210 layers;
+     docs/SLICER.md "Gyroid"). The lines of every layer lie on the gyroid
+         cos X sin Y + cos Y sin Z + cos Z sin X = 0,    X, Y, Z = 2 pi / wavelength x (x, y, z)
+     with x and y measured from the middle of the object's own box and z the layer's top from the plate: 145 000 points of four shapes over all
+     210 layers lie on it within 0.03 mm, at one wavelength for all three axes, 6.988. That is 2 pi / 2.44 x the spacing over the density
+     (6.9881 at 0.407 / 15 %): the factor is fitted to this one slice.
+     A layer is cut as y(x) where |sin Z| >= |cos Z| - wavy lines along X, half a wavelength apart - and as x(y) elsewhere: the lines turn from
+     one axis to the other every eighth of a wavelength up. */
+  var GYROID_SCALE = 2 * Math.PI / 2.44;
+  var GYROID_STEPS = 48;              // points a wavelength along a line (0.15 mm at 15 %)
+
+  /**
+   * A region filled with one layer of the gyroid -> [{ closed: false, pts }].
+   *   centre   the surface's origin in the plane (the middle of the object's box)
+   *   lam      the wavelength
+   *   z        the layer's height
+   *   linkMm   a line's end is joined to the next line's along the outline when that is no longer than this
+   */
+  function gyroidFill(polys, centre, lam, z, linkMm) {
+    if (!polys.length || !(lam > 0)) return [];
+    var k = 2 * Math.PI / lam, sz = Math.sin(k * z), cz = Math.cos(k * z), alongX = Math.abs(sz) >= Math.abs(cz);
+    /* p runs along the lines, q across them, both in radians from the centre; the surface in (p, q): A(p) sin q' form below */
+    var p0 = Infinity, p1 = -Infinity, q0 = Infinity, q1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (pt) {
+      var X = k * (pt[0] - centre[0]), Y = k * (pt[1] - centre[1]), pp = alongX ? X : Y, qq = alongX ? Y : X;
+      if (pp < p0) p0 = pp; if (pp > p1) p1 = pp; if (qq < q0) q0 = qq; if (qq > q1) q1 = qq;
+    }); });
+    var dp = 2 * Math.PI / GYROID_STEPS, n = Math.ceil((p1 - p0) / dp) + 2, base = [[], []], prevAng = null, turns = 0;
+    for (var i = 0; i <= n; i++) {
+      var pv = p0 - dp + i * dp, R, ang, rhs;
+      if (alongX) { R = Math.hypot(Math.cos(pv), sz); ang = Math.atan2(sz, Math.cos(pv)); rhs = -cz * Math.sin(pv); }     /* cos X sin Y + sin Z cos Y = - cos Z sin X */
+      else { R = Math.hypot(cz, Math.sin(pv)); ang = Math.atan2(Math.sin(pv), cz); rhs = -sz * Math.cos(pv); }            /* cos Z sin X + sin Y cos X = - sin Z cos Y */
+      /* the angle followed along the line, without its jumps of a whole turn */
+      if (prevAng !== null) { if (ang + turns - prevAng > Math.PI) turns -= 2 * Math.PI; else if (ang + turns - prevAng < -Math.PI) turns += 2 * Math.PI; }
+      prevAng = ang + turns;
+      var as = Math.asin(Math.max(-1, Math.min(1, rhs / R)));
+      base[0].push([pv, as - prevAng]);
+      base[1].push([pv, Math.PI - as - prevAng]);
+    }
+    var toXY = function (pv2, qv) { return alongX ? [centre[0] + pv2 / k, centre[1] + qv / k] : [centre[0] + qv / k, centre[1] + pv2 / k]; };
+    /* every line that can reach the region: each of the two, a whole wavelength apart, in the order they lie */
+    var lines = [];
+    base.forEach(function (b) {
+      var lo = Infinity, hi = -Infinity;
+      b.forEach(function (pt) { if (pt[1] < lo) lo = pt[1]; if (pt[1] > hi) hi = pt[1]; });
+      for (var m = Math.ceil((q0 - hi) / (2 * Math.PI)); m <= Math.floor((q1 - lo) / (2 * Math.PI)); m++) lines.push({ mid: (lo + hi) / 2 + m * 2 * Math.PI, shift: m * 2 * Math.PI, b: b });
+    });
+    lines.sort(function (l1, l2) { return l1.mid - l2.mid; });
+    var pieces = [];
+    lines.forEach(function (ln, li) {
+      var cut = clipLine(ln.b.map(function (pt) { return toXY(pt[0], pt[1] + ln.shift); }), polys);
+      if (li % 2 === 1) cut = cut.reverse().map(function (pc) { return { pts: pc.pts.slice().reverse(), a: pc.b, b: pc.a }; });   /* there and back */
+      pieces = pieces.concat(cut);
+    });
+    return chainAlongOutline(polys, pieces, linkMm);
+  }
+
+  // ===========================================================================
+  // Cubic, adaptive cubic and honeycomb - straight lines
+  // ===========================================================================
+
+  /* CUBIC and ADAPTIVE CUBIC, measured on real Bambu Studio 02.09 slices (cubic_sparse.gcode.3mf, Adaptivecubic_sparse.gcode.3mf: 15 %, 0.45
+     wide, 0.2 layers; docs/SLICER.md "Cubic", "Adaptive cubic"). A layer is three families of straight lines 60 degrees apart; each family
+     slides sideways by the layer height over sqrt 2 a layer, the first and third one way, the second the other: the lines are the cut through
+     three sets of planes at right angles to each other - cubes standing on a corner.
+       - cubic: the families at 45, 105 and 165 degrees (the infill direction and on), 3 spacings over the density apart (8.141), all three
+         through the middle of the object's box at the plate (z 0);
+       - adaptive cubic: the families at 0, 60 and 120 degrees, 11.023 apart - cubes 9.000 on edge, which is 3 x the line's WIDTH over the density
+         (0.45 / 15 %; fitted to this one slice) - all three through the middle of the object's box in the cubes' own frame, in all three
+         directions (a prism's: its middle in plan, at half its height). Bambu's cubes grow coarser deep inside a large part; none of the
+         reference's parts (24 - 39 mm) is large enough to show it, so that is not measured and not done: every cell is the finest. */
+  var CUBIC_SIGNS = [-1, 1, -1];
+
+  /**
+   * A region filled with one layer of three line families -> [{ closed: false, pts }].
+   *   angle0   the first family's direction (rad); the others 60 and 120 degrees on
+   *   pitch    line to line in a family
+   *   at       [d0, d1, d2]: where one line of each family lies - its signed distance from the origin along the family's normal (-sin, cos)
+   *   linkMm   a line's end is joined to the next line's along the outline when that is no longer than this
+   */
+  function linesFill(polys, angle0, pitch, at, linkMm) {
+    if (!polys.length || !(pitch > 0)) return [];
+    var pieces = [];
+    for (var f = 0; f < 3; f++) {
+      var an = angle0 + f * Math.PI / 3, dx = Math.cos(an), dy = Math.sin(an), nx = -dy, ny = dx;
+      var t0 = Infinity, t1 = -Infinity, d0 = Infinity, d1 = -Infinity;
+      polys.forEach(function (P) { P.forEach(function (q) { var t = q[0] * dx + q[1] * dy, d = q[0] * nx + q[1] * ny; if (t < t0) t0 = t; if (t > t1) t1 = t; if (d < d0) d0 = d; if (d > d1) d1 = d; }); });
+      var row = 0;
+      for (var m = Math.ceil((d0 - at[f]) / pitch); m <= Math.floor((d1 - at[f]) / pitch); m++, row++) {
+        var d = at[f] + m * pitch;
+        var cut = clipLine([[(t0 - 1) * dx + d * nx, (t0 - 1) * dy + d * ny], [(t1 + 1) * dx + d * nx, (t1 + 1) * dy + d * ny]], polys);
+        if (row % 2 === 1) cut = cut.reverse().map(function (pc) { return { pts: pc.pts.slice().reverse(), a: pc.b, b: pc.a }; });
+        pieces = pieces.concat(cut);
+      }
+    }
+    return chainAlongOutline(polys, pieces, linkMm);
+  }
+
+  /** Where the cubic's three families lie on the layer at z, about `centre` (the middle of the object's box, at the plate). */
+  function cubicAt(centre, angle0, z) {
+    return CUBIC_SIGNS.map(function (sg, f) { var an = angle0 + f * Math.PI / 3; return -centre[0] * Math.sin(an) + centre[1] * Math.cos(an) + sg * z / Math.SQRT2; });
+  }
+
+  /**
+   * The adaptive cubic's lattice for an object: { pitch, at(z) }. The cubes' three axes are the planes' normals; the lattice has a corner at
+   * the middle of the object's box along each of them. pts: the object's points as flat x, y, z (z as printed).
+   */
+  function adaptiveCubicLattice(pts, edge) {
+    var k = Math.sqrt(1.5), mids = CUBIC_SIGNS.map(function (sg, f) {
+      var an = f * Math.PI / 3, ax = -Math.sin(an) / k, ay = Math.cos(an) / k, az = -sg / Math.SQRT2 / k, lo = Infinity, hi = -Infinity;
+      for (var i = 0; i + 2 < pts.length; i += 3) { var t = pts[i] * ax + pts[i + 1] * ay + pts[i + 2] * az; if (t < lo) lo = t; if (t > hi) hi = t; }
+      return (lo + hi) / 2;
+    });
+    return { pitch: edge * k, at: function (z) { return CUBIC_SIGNS.map(function (sg, f) { return k * mids[f] + sg * z / Math.SQRT2; }); } };
+  }
+
+  /* HONEYCOMB, measured on a real Bambu Studio 02.09 slice (honeycomb_sparse.gcode.3mf: 15 %, 0.45 wide; docs/SLICER.md "Honeycomb"). One
+     lattice of regular hexagons for the whole object: two spacings over the density across the flats (5.427), a pair of edges along 135
+     degrees (the infill direction and a quarter turn), the others at 75 and 15. A layer draws it as zigzag lines along one of the three edge
+     directions - 135 on the first sparse layer of the reference (layer 4), 75 on the next, 15 on the third, and round again: where two
+     zigzags meet they run side by side a spacing apart (the doubled walls), each half a spacing off the hexagons' true edge. A hexagon's
+     middle lies (W, a) from the middle of the object's box, W the spacing over the density and a the hexagon's side (2 W / sqrt 3): read off
+     ten shapes, the same on each - but one density, so that it scales with W is stated, not measured. */
+  /**
+   * A region filled with one layer of the honeycomb -> [{ closed: false, pts }].
+   *   centre   the middle of the object's box
+   *   angle    the infill direction (rad)
+   *   turn     0, 1 or 2: which of the three edge directions this layer's zigzags follow (the layer's index modulo 3)
+   *   W        the spacing over the density;  spacing  the bead's
+   */
+  function honeycombFill(polys, centre, angle, turn, W, spacing, linkMm) {
+    if (!polys.length || !(W > 0)) return [];
+    var a = 2 * W / Math.sqrt(3), fa = angle - turn * Math.PI / 3, c = Math.cos(fa), sn = Math.sin(fa);
+    /* the layer's frame: q across the zigzags, p along them, from a hexagon's middle */
+    var hx = centre[0] + W, hy = centre[1] + a;
+    var toQP = function (pt) { return [(pt[0] - hx) * c + (pt[1] - hy) * sn, -(pt[0] - hx) * sn + (pt[1] - hy) * c]; };
+    var toXY = function (q, pp) { return [hx + q * c - pp * sn, hy + q * sn + pp * c]; };
+    var q0 = Infinity, q1 = -Infinity, p0 = Infinity, p1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (pt) { var r = toQP(pt); if (r[0] < q0) q0 = r[0]; if (r[0] > q1) q1 = r[0]; if (r[1] < p0) p0 = r[1]; if (r[1] > p1) p1 = r[1]; }); });
+    var half = a / 2 + spacing / (2 * Math.sqrt(3)), pieces = [], row = 0;
+    /* column m: the hexagons' edges along p at q = m W, centred 3 a apart - at the middle's own height on odd columns, 1.5 a off on even ones */
+    for (var m = Math.floor(q0 / W) - 1; m <= Math.ceil(q1 / W); m++, row++) {
+      var cm = (((m % 2) + 2) % 2 === 1) ? 0 : 1.5 * a, line = [];
+      for (var k = Math.floor((p0 - cm) / (3 * a)) - 1; k <= Math.ceil((p1 - cm) / (3 * a)) + 1; k++) {
+        var cc = cm + 3 * a * k;
+        line.push(toXY(m * W + spacing / 2, cc - half), toXY(m * W + spacing / 2, cc + half), toXY((m + 1) * W - spacing / 2, cc + 1.5 * a - half), toXY((m + 1) * W - spacing / 2, cc + 1.5 * a + half));
+      }
+      var cut = clipLine(line, polys);
+      if (row % 2 === 1) cut = cut.reverse().map(function (pc) { return { pts: pc.pts.slice().reverse(), a: pc.b, b: pc.a }; });
+      pieces = pieces.concat(cut);
+    }
+    return chainAlongOutline(polys, pieces, linkMm);
+  }
+
+  // ===========================================================================
+  // Lightning - only what holds the roofs up
+  // ===========================================================================
+
+  /* LIGHTNING, on a real Bambu Studio 02.09 slice (Lightning_sparse.gcode.3mf: the plate's ten shapes, 35.8 - 43.6 mm tall, 15 %, 0.45 wide;
+     docs/SLICER.md "Lightning"). Bambu grows trees: the sparse layers are empty from the bottom shell up to 39 - 89 layers under the top shell,
+     then branches rooted on the walls reach further in with every layer, until on the last layer under the top they lie about sqrt 2 spacings
+     over the density apart (the length laid over the area inside the walls is 0.247 - 0.268 on all ten shapes; 0.261 = 1 / (sqrt 2 x 2.713)).
+     The trees themselves are grown by a procedure this slicer does not have, and a black-box reading cannot recover it. What is laid here is
+     what the trees are for, by their own measures:
+       - a roof - sparse infill with none over it - is carried by straight lines sqrt 2 spacings over the density apart, along the infill
+         direction, each running from wall to wall;
+       - a layer down, every line is two stubs, one from each wall, each ending one layer height short of where the stub above ended (45
+         degrees: the reference's square, 23 mm inside its walls, has its last branch 57 layers under the top - 11.4 mm for 11.5 mm of half
+         width); a stub is printed while it is longer than a line is wide;
+       - the lines keep to the same places on every layer (they are laid about the middle of the object's box), so each lies on the one below.
+     So the plastic is where Bambu's is and about as much (tools/nso_slicer_test.js), in combs where Bambu draws trees. */
+  var LIGHTNING_SPREAD = Math.SQRT2;  // the roof lines' spacing, in spacings over the density
+  function dirOf(o) { return o.infillDirectionDeg * Math.PI / 180; }
+
+  /**
+   * Lightning for one object: adds each layer's 'Sparse infill' paths to layers[i].paths.
+   *   sparseAt   the layers' sparse regions (CrossSections; undefined where a layer has none)
+   *   PL         the layers' planes ({ h })
+   *   centre     the middle of the object's box: one scan line passes through it
+   */
+  function lightningFill(g, layers, sparseAt, PL, centre, angle, o) {
+    var c = Math.cos(angle), sn = Math.sin(angle), need = new Map();   /* scan line -> [[u0, u1]...] the layer above needs held, already drawn in */
+    var uOf = function (pt) { return pt[0] * c + pt[1] * sn; };
+    for (var i = layers.length - 1; i >= 0; i--) {
+      var sp = sparseAt[i];
+      if (!sp || g.isEmpty(sp)) { need = new Map(); continue; }
+      var h = PL[i].h, w = o.infillWidthMm, pitch = LIGHTNING_SPREAD * spacingOf(w, h) / Math.min(1, o.sparseDensity);
+      var phase = (-centre[0] * sn + centre[1] * c) % pitch;
+      /* the roof: this layer's sparse infill with no sparse infill over it */
+      var above = sparseAt[i + 1], roof = above && !g.isEmpty(above) ? g.diff(sp, above) : sp, roofBy = new Map();
+      if (!g.isEmpty(roof)) scanFill(g.polys(roof), angle, pitch, phase).forEach(function (sg) {
+        var l = roofBy.get(sg.line); if (!l) roofBy.set(sg.line, l = []);
+        l.push([Math.min(uOf(sg.a), uOf(sg.b)), Math.max(uOf(sg.a), uOf(sg.b))]);
+      });
+      var next = new Map(), L = layers[i];
+      scanFill(g.polys(sp), angle, pitch, phase).forEach(function (sg) {
+        var ua = uOf(sg.a), ub = uOf(sg.b), A = ua <= ub ? sg.a : sg.b, B = ua <= ub ? sg.b : sg.a, a = Math.min(ua, ub), b = Math.max(ua, ub), m = (a + b) / 2;
+        /* how far in the stub from each wall has to reach: the furthest thing to hold on its half of the line */
+        var xL = -Infinity, xR = Infinity;
+        (need.get(sg.line) || []).concat(roofBy.get(sg.line) || []).forEach(function (iv) {
+          var lo = Math.max(iv[0], a), hi = Math.min(iv[1], b);
+          if (hi <= lo) return;
+          if (lo < m) xL = Math.max(xL, Math.min(hi, m));
+          if (hi > m) xR = Math.min(xR, Math.max(lo, m));
+        });
+        var at = function (u) { var t = (u - a) / (b - a); return [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t]; };
+        var keep = next.get(sg.line); if (!keep) next.set(sg.line, keep = []);
+        if (xL >= m - 1e-9 && xR <= m + 1e-9) L.paths.push({ feature: 'Sparse infill', width: w, closed: false, pts: [A, B] });
+        else {
+          if (xL - a > w) L.paths.push({ feature: 'Sparse infill', width: w, closed: false, pts: [A, at(xL)] });
+          if (b - xR > w) L.paths.push({ feature: 'Sparse infill', width: w, closed: false, pts: [at(xR), B] });
+        }
+        /* what the layer below holds: each stub, a layer height shorter */
+        if (xL - h - a > w) keep.push([a, xL - h]);
+        if (b - xR - h > w) keep.push([xR + h, b]);
+      });
+      need = next;
+    }
+  }
+
+  /**
+   * Pieces of clipLine's, in order, as paths: one piece's end joined to the next one's start along the outline, the shorter way round, when
+   * both lie on the same polygon, that way is no longer than linkMm and no earlier join already runs along any of it (a stretch of wall is
+   * traced once).
+   */
+  function chainAlongOutline(polys, pieces, linkMm) {
+    var out = [], path = null, last = null, tracks = polys.map(function () { return null; }), used = polys.map(function () { return []; });
+    pieces.forEach(function (pc) {
+      var joined = false;
+      if (path && linkMm > 0 && last.b && pc.a && last.b.p === pc.a.p) {
+        var pi = pc.a.p, Tr = tracks[pi] || (tracks[pi] = outlineTrack(polys[pi])), pf = Tr.pos(last.b), pt2 = Tr.pos(pc.a);
+        var fw = (((pt2 - pf) % Tr.total) + Tr.total) % Tr.total, dir = fw <= Tr.total - fw ? 1 : -1, len = dir > 0 ? fw : Tr.total - fw;
+        var from = dir > 0 ? pf : pt2;                                         /* the stretch, as [from, from + len) going with the vertices */
+        var free = len <= linkMm && !used[pi].some(function (iv) {
+          var gap = (((iv[0] - from) % Tr.total) + Tr.total) % Tr.total;        /* from this stretch's start on to the other's */
+          return gap < len - 1e-9 || gap + iv[1] > Tr.total + 1e-9;             /* it starts inside this one, or wraps round onto it */
+        });
+        if (free) { var way = Tr.walk(last.b, dir, len); way.pop(); path.pts = path.pts.concat(way, pc.pts); used[pi].push([from, len]); joined = true; }
+      }
+      if (!joined) { path = { closed: false, pts: pc.pts }; out.push(path); }
+      last = pc;
+    });
+    return out;
   }
 
   // ===========================================================================
@@ -783,6 +1797,9 @@
    * (Bambu's top_one_wall_type) - the measured fit is described inside.
    */
   function perimeters(g, region, h, o, above) {
+    /* NO WALLS (wall_loops = 0): the infill runs out to half its own line from the outline - measured 0.225 at the 0.45 sparse line on the owner's
+       anti-vibration feet (bambu_arachne.gcode.3mf: 3D honeycomb, no wall, no shell) */
+    if (!(o.wallLoops >= 1)) return { loops: [], wallCount: 0, infillRegion: g.offset(region, -o.infillWidthMm / 2) };
     var we = o.outerWallWidthMm, wi = o.innerWallWidthMm;
     var se = spacingOf(we, h), si = spacingOf(wi, h);
     var keepIn = 1 - o.infillWallOverlap;
@@ -809,11 +1826,20 @@
           from = keep;
         }
       }
-      var next = g.offset(from, -(se / 2 + si / 2));
+      /* GAP FILL (o.gapFill, Studio's Classic): an inner loop is laid only where its two sides stand apart - its centres' region opened by
+         GAP_LOOP_MIN of a spacing; where they would lie on each other the loop is dropped and the strip is gap infill (the walls tester: a
+         1.4 mm tube's inner loop, 0.196 between its sides, dropped for a 0.62 gap line; a 1.6 mm tube's, 0.396, kept) */
+      /* (an opening that takes nothing away keeps the loop as it was: its outline, and so its seam, unmoved) */
+      var openLoop = function (x) {
+        if (!o.gapFill || g.isEmpty(x)) return x;
+        var y = g.offset(g.offset(x, -GAP_LOOP_MIN * si / 2), GAP_LOOP_MIN * si / 2);
+        return Math.abs(g.area(y) - g.area(x)) < 1e-6 ? x : y;
+      };
+      var next = openLoop(g.offset(from, -(se / 2 + si / 2)));
       for (var k = 1; k < o.wallLoops && !g.isEmpty(next); k++) {
         loops.push({ depth: k, cs: next });
         cur = next; lastSpacing = si; count = k + 1;
-        next = g.offset(cur, -si);
+        next = openLoop(g.offset(cur, -si));
       }
     }
     // Infill boundary (bead CENTRES): the innermost loop moved in by the
@@ -826,7 +1852,44 @@
       var outerOnly = g.diff(g.offset(loops[0].cs, -se * keepIn), g.offset(keep, -si * (1 - keepIn)));
       innerEdge = count > 1 ? g.union(innerEdge, outerOnly) : outerOnly;
     }
-    return { loops: loops, wallCount: count, infillRegion: innerEdge };
+    /* GAP INFILL: the infill goes only where its region is at least one infill line across (opened by half a line: the walls tester's 2.4 mm L
+       keeps its 0.50 core sparse, the 1.4 mm tube's 0.34 core is a gap line); what no loop and no infill covers is gap infill - one line down
+       each strip's middle, as wide as the room plus the bead overlap (drawn by the caller, gapPaths) */
+    var gaps = null;
+    /* (a piece too thin for any loop is all gap: the same whether or not another island on the layer has loops) */
+    if (o.gapFill && !keep) {
+      var okFill = g.offset(g.offset(innerEdge, -o.infillWidthMm / 2), o.infillWidthMm / 2);
+      if (Math.abs(g.area(okFill) - g.area(innerEdge)) < 1e-6) okFill = innerEdge;       /* nothing too narrow: the region as it was */
+      innerEdge = okFill;
+      var bands = loops.map(function (lp, i) { var sp = i === 0 ? se : si; return g.diff(g.offset(lp.cs, sp / 2), g.offset(lp.cs, -sp / 2)); });
+      var covered = g.unionAll(bands.concat([g.offset(okFill, lastSpacing * keepIn)]));
+      var minGap = ofNozzle(o, o.minFeatureSize, 0.25);
+      gaps = g.diff(g.offset(region, -(we - se) / 2), covered);
+      gaps = g.offset(g.offset(gaps, -minGap / 2), minGap / 2);
+      if (g.isEmpty(gaps)) gaps = null;
+    }
+    return { loops: loops, wallCount: count, infillRegion: innerEdge, gaps: gaps };
+  }
+
+  /* An inner loop is kept where its centres' region is at least this share of a spacing across - FITTED between the walls tester's tubes:
+     0.196 between an inner loop's sides is dropped, 0.396 kept (0.48 .. 0.97 of the 0.407 spacing); the middle of that bracket. */
+  var GAP_LOOP_MIN = 0.72;
+
+  /**
+   * Gap infill for a layer: one centreline down each strip of `gaps`, as wide as the room there plus the bead overlap (Studio's: a 1.0 mm tube's
+   * strip 0.22, a 1.2 mm L's 0.42, a 2.0 mm L's middle 0.42), never narrower than the minimum feature size -> [{ feature, width, closed, pts }].
+   */
+  function gapPaths(g, gaps, region, h, o) {
+    if (!gaps || g.isEmpty(gaps)) return [];
+    var fat = o.innerWallWidthMm - spacingOf(o.innerWallWidthMm, h), out = [], piece = g.polys(region), minGap = ofNozzle(o, o.minFeatureSize, 0.25);
+    g.parts(gaps).forEach(function (gp) {
+      var polys = g.polys(gp), med = medialPaths(polys, o.innerWallWidthMm, []);
+      if (!med) return;
+      med.forEach(function (pa) {
+        variableRuns(pa, polys, piece, fat, o, false, minGap).forEach(function (r) { out.push({ feature: 'Gap infill', width: r.width, closed: false, pts: r.pts, gap: true }); });
+      });
+    });
+    return out;
   }
 
   // ===========================================================================
@@ -1378,6 +2441,240 @@
     if (ends[1]) P[n - 1] = ends[1];
   }
 
+  // ===========================================================================
+  // Arachne - variable-width walls (wallGenerator: 'arachne')
+  // ===========================================================================
+  //
+  // Bambu Studio's other wall generator. Classic lays every wall at one fixed
+  // width, offset by one spacing, so a part whose thickness is not a whole
+  // number of beads gets a gap down its middle (or nothing at all under one
+  // bead). Arachne fits the walls to the thickness: it varies the beads' count
+  // and width so a thin feature is filled wall to wall.
+  //
+  // This is NSO's own construction, written here from the behaviour and the
+  // six settings Studio shows - not a port of CuraEngine's or Studio's Arachne
+  // (both AGPL; see section 1 of docs/SLICER.md). docs/SLICER.md "Arachne".
+  //
+  //   THICK AND THIN. The region opened by the depth N classic walls and a
+  //   spacing of fill need (N x spacing + spacing / 2: the half-thickness) is
+  //   the thick part; it gets exactly the classic walls and fill. What the
+  //   opening takes off (ribs, fins, necks, a thin part whole) is thin, and is
+  //   all walls.
+  //   A THIN PIECE. Its thickness T is twice its deepest inset. The beads
+  //   across it: n = round((T - fat) / spacing), at least one. The outermost
+  //   ones keep the nominal width; the innermost wallDistributionCount a side
+  //   (and a middle bead when n is odd) share what is left equally: their
+  //   width is (T - fat - fixed spacings) / their count + fat. They are laid as
+  //   insets of the piece, edge to edge.
+  //   THE MIDDLE. What those loops leave of the piece - a middle bead's room,
+  //   and the taper where a piece narrows under its deepest - is drawn down
+  //   its centreline (medialPaths), each stretch as wide as the room there:
+  //     - narrower than minFeatureSize: not printed;
+  //     - narrower than minBeadWidth: printed at minBeadWidth;
+  //     - the width follows the room averaged over wallTransitionLength, and
+  //       changes only when it moves by more than wallTransitionFilterMargin;
+  //     - between loops (a middle bead), a stretch where the room opens wider
+  //       than a wedge of wallTransitionAngleDeg is left out: no centre bead
+  //       fills a wedge's widening gap.
+  //   A support or a brim keeps the classic generator: its export says
+  //   wall_generator = classic. Detect thin wall has no work under Arachne.
+
+  var ARACHNE_STEP_MM = 0.1;          // a variable bead's width is read along its centreline at this step
+  /* Studio's thresholds for a middle wall, x the inner wall's line - FITTED to the walls tester (Erik's benchmark, Studio 02.09 at 0.42 / 0.45),
+     bracketed, not known: a middle of 0.70 mm stays one wall and 0.79 splits (0.70 / 0.45 = 1.56 .. 1.76); 0.25 is no middle and 0.45 is one
+     (0.55 .. 0.99). The middle of each bracket. */
+  var ARACHNE_SPLIT = 1.65, ARACHNE_ADD = 0.75;
+
+  /**
+   * The room across a piece at a point near its centreline: to the nearest edge, plus on through the point to the edge across. Not twice the
+   * nearest: the raster centreline (medialPaths) can sit half a pixel off the middle.
+   */
+  function roomAt(edges, q) {
+    var best = Infinity, nx = 0, ny = 0;
+    for (var e = 0; e < edges.length; e += 2) {
+      var A = edges[e], B = edges[e + 1], dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy;
+      var t = L2 > 0 ? Math.max(0, Math.min(1, ((q[0] - A[0]) * dx + (q[1] - A[1]) * dy) / L2)) : 0;
+      var px = A[0] + t * dx, py = A[1] + t * dy, d = Math.hypot(q[0] - px, q[1] - py);
+      if (d < best) { best = d; nx = px; ny = py; }
+    }
+    if (!(best > 1e-9) || !isFinite(best)) return 0;
+    var across = rayToEdges(q, [(q[0] - nx) / best, (q[1] - ny) / best], edges);
+    return isFinite(across) ? best + Math.min(across, 3 * best + 1) : 2 * best;
+  }
+
+  /** The fraction lever (of the nozzle) as mm. */
+  function ofNozzle(o, v, d) { return (v != null && isFinite(v) ? v : d) * o.nozzleMm; }
+
+  /**
+   * A centreline as runs of one width each: [{ pts, width, outer }]. polys the room it runs down, piece the outline of the thin piece it is
+   * in, fat the bead's overlap: a step whose room is bounded by beads takes it on (a bead between beads), one bounded by the piece's own
+   * outline does not, and is that stretch's outer wall. centreFill: the piece has loops (the angle rule applies between them).
+   */
+  function variableRuns(pa, polys, piece, fat, o, centreFill, floorMm) {
+    var pts = pa.closed ? pa.pts.concat([pa.pts[0]]) : pa.pts;
+    /* Minimum wall width is a share of the inner wall's line, not the nozzle: Studio widens the walls tester's 0.20 mm tube to 0.38 = 85 % of
+       its 0.45 inner wall (of the 0.4 nozzle it would be 0.34). The minimum feature size stays the nozzle's, as Studio states it. */
+    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25), minBead = floorMm != null ? floorMm : (o.minBeadWidth != null && isFinite(o.minBeadWidth) ? o.minBeadWidth : 0.85) * o.innerWallWidthMm;
+    var margin = ofNozzle(o, o.wallTransitionFilterMargin, 0.25), tLen = ofNozzle(o, o.wallTransitionLength, 1);
+    var wMax = 2 * o.innerWallWidthMm, angle = o.wallTransitionAngleDeg != null ? o.wallTransitionAngleDeg : 10;
+    /* the path cut into short steps, the room at each step's middle */
+    var edges = [];
+    polys.forEach(function (P) { for (var e = 0; e < P.length; e++) edges.push(P[e], P[(e + 1) % P.length]); });
+    var pEdges = [];
+    piece.forEach(function (P) { for (var e = 0; e < P.length; e++) pEdges.push(P[e], P[(e + 1) % P.length]); });
+    var seg = [];
+    for (var i = 0; i + 1 < pts.length; i++) {
+      var a = pts[i], b = pts[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(L / ARACHNE_STEP_MM));
+      for (var k = 0; k < n; k++) {
+        var p0 = [a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n], p1 = [a[0] + (b[0] - a[0]) * (k + 1) / n, a[1] + (b[1] - a[1]) * (k + 1) / n];
+        var mid = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2], room = roomAt(edges, mid);
+        seg.push({ a: p0, b: p1, len: L / n, room: room, outer: distToEdges(mid, pEdges) <= room / 2 + 0.02 });
+      }
+    }
+    if (!seg.length) return [];
+    var at = [], acc = 0;
+    seg.forEach(function (s) { at.push(acc + s.len / 2); acc += s.len; });
+    var total = acc;
+    /* the room averaged over the transition length (a closed path wraps round) */
+    var smooth = seg.map(function (s, i) {
+      var sum = 0, wsum = 0;
+      for (var j = 0; j < seg.length; j++) {
+        var dd = Math.abs(at[j] - at[i]);
+        if (pa.closed) dd = Math.min(dd, total - dd);
+        if (dd <= tLen / 2) { sum += seg[j].room * seg[j].len; wsum += seg[j].len; }
+      }
+      return wsum > 0 ? sum / wsum : s.room;
+    });
+    /* the width each step asks for; the bead starts at their median (not at an end, where the room tapers) */
+    var want = seg.map(function (s, i) {
+      var r = smooth[i], wv = 0;
+      if (s.room >= minFeat && r >= minFeat) {
+        wv = Math.max(minBead, Math.min(wMax, r + (s.outer ? 0 : fat)));
+        /* a wedge between loops: the room opening faster than the angle allows (read over the transition length, away from an open end) */
+        if (centreFill && !s.outer && angle > 0) {
+          var i0 = i, i1 = i;
+          while (i0 > 0 && at[i] - at[i0 - 1] <= tLen / 2) i0--;
+          while (i1 + 1 < seg.length && at[i1 + 1] - at[i] <= tLen / 2) i1++;
+          var span = at[i1] - at[i0], nearEnd = !pa.closed && (at[i] < ARACHNE_STEP_MM || total - at[i] < ARACHNE_STEP_MM);
+          if (span > 0 && !nearEnd) {
+            var opening = 2 * Math.atan(Math.abs(seg[i1].room - seg[i0].room) / span / 2) * 180 / Math.PI;
+            if (opening > angle) wv = 0;
+          }
+        }
+      }
+      return wv;
+    });
+    var live = want.filter(function (v) { return v > 0; }).sort(function (x, y) { return x - y; });
+    var cur = live.length ? Math.round(live[live.length >> 1] * 1000) / 1000 : null, runs = [], run = null;
+    seg.forEach(function (s, i) {
+      var wv = want[i];
+      if (wv > 0) {
+        if (Math.abs(wv - cur) > margin) cur = Math.round(wv * 1000) / 1000;
+        wv = cur;
+      }
+      if (run && run.width === wv && run.outer === s.outer) run.pts.push(s.b);
+      else { run = { width: wv, outer: s.outer, pts: [s.a, s.b] }; runs.push(run); }
+    });
+    return runs.filter(function (r) { return r.width > 0 && pathLength(r.pts, false) >= minFeat; });
+  }
+
+  /**
+   * Arachne walls for one layer region, in perimeters()' shape - { loops: [{ depth, cs, width }], wallCount, infillRegion } - and `extra`, the
+   * variable middle beads ([{ feature, width, closed, pts }]). The thick part's loops and infill region are perimeters()' own.
+   */
+  function arachneWalls(g, region, h, o, above) {
+    var we = o.outerWallWidthMm, wi = o.innerWallWidthMm, s = spacingOf(wi, h), fat = wi - s;
+    if (!(o.wallLoops >= 1)) { var none = perimeters(g, region, h, o, above); none.extra = []; none.thinPieces = 0; none.variableBeads = 0; return none; }   /* no walls: nothing to fit */
+    var N = Math.round(o.wallLoops), d = Math.max(1, Math.min(N, Math.round(o.wallDistributionCount || 1)));
+    var minFeat = ofNozzle(o, o.minFeatureSize, 0.25), minBead = (o.minBeadWidth != null && isFinite(o.minBeadWidth) ? o.minBeadWidth : 0.85) * wi;   /* as variableRuns: of the inner wall's line */
+    var rho = N * s + s / 2;
+    var thickCore = g.offset(region, -rho);
+    var thick = g.isEmpty(thickCore) ? g.empty() : g.inter(region, g.offset(thickCore, rho));
+    var thin = g.diff(region, thick);
+    thin = g.offset(g.offset(thin, -minFeat / 2), minFeat / 2);
+    /* nothing thin: the classic walls of the region itself, byte for byte */
+    if (g.isEmpty(thin)) thick = region;
+    var per = perimeters(g, thick, h, o, above);
+    per.loops.forEach(function (lp) { lp.width = lp.depth === 0 ? we : wi; });
+    var extra = [], pieces = 0, beads = 0;
+    g.parts(thin).forEach(function (pc) {
+      if (!(pc.area() >= minFeat * minFeat)) return;
+      var Tdeep = 2 * insetDepth(g, pc, rho + s);
+      if (Tdeep < minFeat) return;
+      pieces++;
+      /* MEASURED ON A REAL ARACHNE SLICE (2026-11-20: Erik's wall-thickness benchmark, the owner's walls-tester_arachne.gcode.3mf, Studio
+         02.09, 2 walls 0.42 / 0.45; docs/SLICER.md "Arachne"):
+           - the piece's thickness is its typical one, twice its area over its outline (exact for a tube or a strip), not its deepest point:
+             an L's corner is deeper than its legs, and set a count its legs do not have (a 0.8 mm L came out as two 0.50 beads, Studio's 0.42);
+           - the beads across: its thickness less one overlap, over the inner wall's spacing, rounded - never more than two a wall loop
+             (a 2 mm L at 2 walls: four; 1.55 mm: four; 1.17: three; 0.79: two; 0.59: one - every count of the 13 thin samples Studio's);
+           - Wall distribution count 1: only the middle varies - the middle bead of an odd count, the innermost pair of an even one; every
+             bead outside them keeps its own width (a 1.39 mm tube: 0.42, 0.64, 0.42 - Studio's to the hundredth);
+           - the beads overlap as any wall's do: two across a 0.79 mm tube are (0.79 + overlap) / 2 = 0.42 each, Studio's */
+      /* the thickness: a piece with no hole has the area and outline of a rectangle of its thickness and length (exactly so for a strip or an
+         L), one with holes those of a ring (2 x area / outline: a tube's exactly) - never more than its deepest point */
+      var perim = 0, rings = g.polys(pc);
+      rings.forEach(function (q) { perim += pathLength(q, true); });
+      var Ar = pc.area(), Tm = rings.length === 1 ? (perim - Math.sqrt(Math.max(0, perim * perim - 16 * Ar))) / 4 : 2 * Ar / perim;
+      var T = perim > 0 && Tm > 0 ? Math.min(Tdeep, Tm) : Tdeep;
+      /* THE COUNT, as Studio's (the walls tester's 0.2 - 1.6 mm tubes and 0.4 - 2.0 mm L legs, its digits' 0.7 mm strokes): nominal walls a side
+         from the outside in, as many as leave a middle wall of at least ARACHNE_ADD x the inner wall's line (1.0 mm: two walls, no middle -
+         1.2 mm: three); that middle is one wall up to ARACHNE_SPLIT x the line, then a pair (a 0.7 mm stroke: one; a 0.8 mm tube: two; 1.4: three
+         with a 0.64 middle; 1.6: four). Never more than two a wall loop. */
+      var spAt = function (k) { return k === 0 ? we - fat : wi - fat; };
+      var pairs = 0, used = 0;
+      while (2 * (pairs + 1) + 1 <= 2 * N && T - 2 * (used + spAt(pairs)) >= ARACHNE_ADD * wi) { used += spAt(pairs); pairs++; }
+      var middle = T - 2 * used;
+      var n = Math.max(1, Math.min(2 * N, middle > ARACHNE_SPLIT * wi ? 2 * pairs + 2 : 2 * pairs + 1)), side = Math.floor(n / 2);
+      var V = Math.min(n, 2 * d - (n % 2)), fixed = (n - V) / 2, fixedSum = 0;
+      for (var kf = 0; kf < fixed; kf++) fixedSum += spAt(kf);
+      var sp = (T - fat - 2 * fixedSum) / V;
+      var c = fat / 2, prev = 0, bands = [];
+      for (var k = 0; k < side; k++) {
+        var spk = k < fixed ? spAt(k) : sp;
+        c += (prev + spk) / 2; prev = spk;
+        /* a loop only where its two sides stand apart: where the piece narrows they would lie on each other (a sliver drawn out and back);
+           there the middle bead takes the room instead - the count drops by one, the width follows */
+        var cs = g.offset(g.offset(g.offset(pc, -c), -spk / 4), spk / 4);
+        if (g.isEmpty(cs)) break;
+        var width = k < fixed ? (k === 0 ? we : wi) : spk + fat;
+        per.loops.push({ depth: k, cs: cs, width: width, variable: k >= fixed });
+        bands.push(g.diff(g.offset(cs, spk / 2), g.offset(cs, -spk / 2)));
+        beads++;
+      }
+      if (bands.length > per.wallCount) per.wallCount = bands.length;
+      /* the middle: what the loops leave of the piece, down its centreline at the room's width */
+      var rest = bands.length ? g.diff(pc, g.unionAll(bands)) : pc, piecePolys = g.polys(pc);
+      rest = g.offset(g.offset(rest, -minFeat / 2), minFeat / 2);
+      g.parts(rest).forEach(function (rp) {
+        var polys = g.polys(rp);
+        var med = medialPaths(polys, wi, []);
+        if (!med) {
+          /* NO CENTRELINE A BEAD LONG (a dot: the walls tester's 0.8 mm decimal points): one short bead across its long way, Studio's 0.42 */
+          if (bands.length || !(rp.area() >= minBead * minBead)) return;
+          var bx = rp.bounds(), lx = bx.max[0] - bx.min[0], ly = bx.max[1] - bx.min[1], cx = (bx.min[0] + bx.max[0]) / 2, cy = (bx.min[1] + bx.max[1]) / 2;
+          var half = Math.max(0.05, (Math.max(lx, ly) - we) / 2), dw = Math.max(minBead, Math.min(we, Math.min(lx, ly)));
+          extra.push({ feature: 'Outer wall', width: dw, closed: false, pts: lx >= ly ? [[cx - half, cy], [cx + half, cy]] : [[cx, cy - half], [cx, cy + half]], variable: true });
+          beads++;
+          return;
+        }
+        med.forEach(function (pa) {
+          variableRuns(pa, polys, piecePolys, fat, o, bands.length > 0).forEach(function (r) {
+            extra.push({ feature: r.outer ? 'Outer wall' : 'Inner wall', width: r.width, closed: false, pts: r.pts, variable: true });
+            beads++;
+          });
+        });
+      });
+      if (!per.wallCount) per.wallCount = 1;
+    });
+    /* the loops inner first is the caller's (by depth, deepest first) */
+    per.loops.sort(function (a, b) { return a.depth - b.depth; });
+    per.extra = extra;
+    per.thinPieces = pieces;
+    per.variableBeads = beads;
+    return per;
+  }
+
   function sliceObjects(objects, opts, wasm) {
     var o = defaultsFor(opts && opts.nozzleMm, opts);
     var t0 = Date.now();
@@ -1392,16 +2689,22 @@
         if (ob.soup[i] > zMax) zMax = ob.soup[i];
       }
     });
-    var shiftZ = o.dropToPlate ? -zMin : 0;
-    var planes = slicePlanes(zMin, zMax, o).map(function (p) {
+    /* A RAFT (o.raftLayers; Bambu's raft_layers) lifts the whole plate: the parts and supports stand on its top, raftContactMm over it, and
+       their first layer is an ordinary one (Bambu: 2.9 + 0.1 + 0.2 with 10 raft layers, 2.3 + 0.1 + 0.16 with 8) */
+    var rp = raftPlan(o);
+    if (rp) objs = objs.filter(function (ob) { return ob.role !== 'brim'; });        /* a raft is the plate's hold: no brim with it */
+    var shiftZ = (o.dropToPlate ? -zMin : 0) + (rp ? rp.lift : 0);
+    var planes = slicePlanes(zMin, zMax, rp ? Object.assign({}, o, { firstLayerMm: o.layerMm }) : o).map(function (p) {
       return { index: p.index, printZ: p.printZ + shiftZ, sliceZ: p.sliceZ, h: p.h };
     });
     if (!planes.length) return { ok: false, reason: 'the part is thinner than one layer' };
 
     var g = geometry(wasm);
     try {
-      var T = Math.max(o.topShellLayers, Math.ceil((o.topShellThicknessMm || 0) / o.layerMm - 1e-9));
-      var B = Math.max(o.bottomShellLayers, Math.ceil((o.bottomShellThicknessMm || 0) / o.layerMm - 1e-9));
+      /* a shell thickness adds layers to a count of one or more, never to none: Studio's 0 top layers with top_shell_thickness 1 prints no top
+         (the owner's anti-vibration feet, bambu_arachne.gcode.3mf: every line of every layer Sparse infill) */
+      var T = o.topShellLayers > 0 ? Math.max(o.topShellLayers, Math.ceil((o.topShellThicknessMm || 0) / o.layerMm - 1e-9)) : 0;
+      var B = o.bottomShellLayers > 0 ? Math.max(o.bottomShellLayers, Math.ceil((o.bottomShellThicknessMm || 0) / o.layerMm - 1e-9)) : 0;
       var closeR = o.sliceClosingRadiusMm > 0 ? o.sliceClosingRadiusMm : 0;
       var th = o.supportThresholdDeg * Math.PI / 180;
       var minOver = o.overhangMinAreaMm2 != null ? o.overhangMinAreaMm2 : o.outerWallWidthMm * o.outerWallWidthMm;
@@ -1423,7 +2726,9 @@
         // Per-object override: a piece the user flagged non-solid is sliced
         // with gapCloseMm 0 - its open edges are the design, not a hole to
         // chord shut (the caller reads the flag; this module never infers it).
-        var sm = sliceMesh(ob.soup, pl, ob.gapCloseMm != null ? { weldMm: o.weldMm, gapCloseMm: ob.gapCloseMm } : o);
+        var smOpts = ob.gapCloseMm != null ? { weldMm: o.weldMm, gapCloseMm: ob.gapCloseMm } : o;
+        var pre = ob.soup && ob.soup.length ? prepSoup(ob.soup, smOpts && smOpts.weldMm > 0 ? smOpts.weldMm : 1e-4) : null;   /* welded once: the layers and every exact cut read it */
+        var sm = sliceMesh(ob.soup, pl, smOpts, pre);
         var flipped = false;
         var total = 0;
         sm.sections.forEach(function (sec) { sec.loops.forEach(function (l) { total += signedArea(l); }); });
@@ -1442,16 +2747,23 @@
         });
         /* the part cut at heights of its own choosing (soup frame, ascending sliceZ): the same section, orientation and closing as its layers - for the
            support typing's exact reach (typeSupports, byDepth) */
+        /* kept by the height itself (the same float, so the same bytes): every support on this part asks it for the same layer heights */
+        var exMemo = new Map();
         var exactAt = function (zsl) {
-          var sm2 = sliceMesh(ob.soup, zsl.map(function (z) { return { sliceZ: z }; }), ob.gapCloseMm != null ? { weldMm: o.weldMm, gapCloseMm: ob.gapCloseMm } : o);
-          return sm2.sections.map(function (sec) {
-            if (flipped) sec.loops.forEach(function (l) { l.reverse(); });
-            var cs = g.of(sec.loops, 'Positive');
-            if (closeR > 0 && !g.isEmpty(cs)) cs = g.offset(g.offset(cs, closeR, 'Miter'), -closeR, 'Miter');
-            return g.simplify(cs, o.resolutionMm);
-          });
+          var miss = [], asked = new Set();
+          zsl.forEach(function (z) { if (!exMemo.has(z) && !asked.has(z)) { asked.add(z); miss.push(z); } });
+          if (miss.length) {
+            var sm2 = sliceMesh(ob.soup, miss.map(function (z) { return { sliceZ: z }; }), smOpts, pre);
+            sm2.sections.forEach(function (sec, i) {
+              if (flipped) sec.loops.forEach(function (l) { l.reverse(); });
+              var cs = g.of(sec.loops, 'Positive');
+              if (closeR > 0 && !g.isEmpty(cs)) cs = g.offset(g.offset(cs, closeR, 'Miter'), -closeR, 'Miter');
+              exMemo.set(miss[i], g.simplify(cs, o.resolutionMm));
+            });
+          }
+          return zsl.map(function (z) { return exMemo.get(z); });
         };
-        return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped, exactAt: exactAt, soupOk: !!(ob.soup && ob.soup.length),
+        return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped, exactAt: exactAt, soupOk: !!(ob.soup && ob.soup.length), soup: ob.soup && ob.soup.length ? ob.soup : null,
                  nonSolid: ob.gapCloseMm === 0,
                  role: ob.role === 'support' ? 'support' : ob.role === 'brim' ? 'brim' : 'part', key: ob.key, hostKey: ob.hostKey,
                  thin: ob.detectThinWall != null ? !!ob.detectThinWall
@@ -1459,15 +2771,38 @@
                  layers: [], planes: pl === planes ? null : pl };
       }
       var perObject = objs.map(function (ob, oi) { return makeP(ob, oi, planes); });
+      /* COLOURS ON ONE LAYER (docs/MULTICOLOR.md; nso_paint_segment.js): a painted piece is split, layer by layer, into one region a
+         filament, as Studio splits it, and each region is sliced as a part of its own - its own walls round it, its own fill - while what is
+         a top or a bottom is still the whole piece's (P.Sfull). The regions come back together as one object, each path with its slot. */
+      var PSEG = root && root.NSO_PaintSegment, PNT = root && root.NSO_Paint;
+      if (PSEG && PNT) {
+        var split = [];
+        perObject.forEach(function (P, oi) {
+          var ob = objs[oi];
+          if (P.role !== 'part' || !ob.paint || !PNT.fits(ob.paint, ob.soup.length)) { split.push(P); return; }
+          var seg = PSEG.segment(g, ob.soup, ob.paint, PNT.decode, planes, P.S, {
+            topLayers: o.topColorPenetrationLayers != null ? o.topColorPenetrationLayers : T,
+            bottomLayers: o.bottomColorPenetrationLayers != null ? o.bottomColorPenetrationLayers : B,
+            wallWidthMm: o.outerWallWidthMm, layerMm: o.layerMm, ownFilament: ob.paint.ext && ob.paint.ext[0] || 1 });
+          var slots = {};
+          seg.forEach(function (byS) { Object.keys(byS).forEach(function (k) { slots[k] = 1; }); });
+          Object.keys(slots).map(Number).sort(function (a, b) { return a - b; }).forEach(function (sl) {
+            split.push(Object.assign({}, P, { S: seg.map(function (byS) { return byS[sl] || g.empty(); }), Sfull: P.S, slot: sl, colourOf: P, layers: [] }));
+          });
+        });
+        perObject = split;
+      }
 
       // Layers, object by object.
       var buildLayers = function (P) {
         var PL = P.planes || planes;
         var S = P.S, n = PL.length;
         var sparsePrev = g.empty();
+        var lightningAt = null;                                   /* lightning: each layer's sparse region, by layer */
         /* A SUPPORT IS HOLLOW, as its export says (SHEET.slicerSettings: wall_loops 1, sparse_infill_density 0%) and as Bambu's own tree is: one wall
            round the trunk and no filler inside it. The shells (the first layers, the top under a sheet) stay the profile's. */
-        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity, narrowSparseMm: 0, minSparseAreaMm2: 0 }) : o;
+        /* ...and no gap infill: a support's slice was fitted on Bambu's support slices as it was (its sheets are thin walls, its trunks one loop) */
+        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: o.supportWallLoops >= 1 ? Math.round(o.supportWallLoops) : CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity, narrowSparseMm: 0, minSparseAreaMm2: 0, gapFill: false }) : o;
         var TT = P.role === 'support' ? CONSTANTS.supportWalls.topShellLayers : T, BB = P.role === 'support' ? CONSTANTS.supportWalls.bottomShellLayers : B;
         if (P.role === 'brim') {
           /* a brim built with the supports (brimFor): one layer, its section printed as the brim's own loops, nothing else */
@@ -1485,12 +2820,23 @@
           P.layers.push(L);
           if (g.isEmpty(region)) { L.wallCount = 0; sparsePrev = g.empty(); continue; }
 
-          var above = i + 1 < n ? S[i + 1] : g.empty();
-          var below = i > 0 ? S[i - 1] : null;
+          var SF = P.Sfull || S;                       /* a colour's region: what is above and below it is the whole piece */
+          var above = i + 1 < n ? SF[i + 1] : g.empty();
+          var below = i > 0 ? SF[i - 1] : null;
           // Detect thin wall: the thin islands come out of the region and
           // print as their centre passes; with none, the region is as it was
-          var thin = P.thin ? thinWalls(g, region, o) : null;
-          var per = perimeters(g, thin ? thin.rest : region, h, oS, oS.onlyOneWallTop ? above : null);
+          /* Arachne (o.wallGenerator): a part's walls fit to its thickness, thin features included - no Detect thin wall pass. A support and a
+             brim keep the classic generator their export names. */
+          var arachne = o.wallGenerator === 'arachne' && P.role === 'part';
+          var thin = P.thin && !arachne ? thinWalls(g, region, o) : null;
+          /* a support has one loop and no top shell: the one-wall-on-top rule has no loop to drop there, and left to run it kept the fill out from under
+             whatever stands on the layer - a pad with a pocket between its trunks printed hollow under every trunk, their second layer over air */
+          var per = arachne ? arachneWalls(g, region, h, oS, oS.onlyOneWallTop ? above : null)
+            : perimeters(g, thin ? thin.rest : region, h, oS, oS.onlyOneWallTop && P.role !== 'support' ? above : null);
+          if (arachne) {
+            L.variableBeads = per.variableBeads;
+            per.extra.forEach(function (pa) { L.paths.push(pa); });     /* the middle beads first: inner walls first, outer last */
+          }
           L.wallCount = per.wallCount;
           L.wallLoopsByDepth = per.loops.map(function (lp) { return g.polys(lp.cs).length; });
 
@@ -1501,19 +2847,66 @@
           over = g.dropSmall(over, minOver);
           L.overhangCs = over;
           L.overhangMm2 = g.area(over);
-          var belowPolys = below ? g.polys(below) : null;
+          var belowPolys = below ? g.polys(below) : null, belowIn = belowPolys ? insideIndex(belowPolys) : null;
 
+          /* ALIGNED SEAMS (o.seamAligned, Studio's seam_position aligned): each loop starts at its most hidden corner, in line with the seams below */
+          var seamOn = o.seamAligned !== false && P.role === 'part', seamsPrev = P._seamsPrev || [], seamsNow = [];
           per.loops.slice().reverse().forEach(function (lp) {     // inner walls first, outer last
             var feat = lp.depth === 0 ? 'Outer wall' : 'Inner wall';
-            var w = lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm;
+            var w = lp.width || (lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm);
+            var lpPolys = seamOn ? g.polys(lp.cs) : null;
             loopsOf(g, lp.cs).forEach(function (path) {
-              splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm).forEach(function (piece) {
-                L.paths.push({ feature: piece.over ? 'Overhang wall' : feat, width: w,
-                               closed: piece.closed, pts: piece.pts });
+              if (seamOn) { path.pts = placeSeam(path.pts, lpPolys, seamsPrev, w); seamsNow.push(path.pts[0]); }
+              var seq = [];
+              splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm, belowIn).forEach(function (piece) {
+                if (!piece.over) { seq.push({ feature: feat, width: w, closed: piece.closed, pts: piece.pts }); return; }
+                /* a hanging wall that is a line width or more from the layer below on both sides is a bridge of its own (path.span) */
+                spanPieces(piece, belowIn, w, o.overhangSpanMinMm).forEach(function (sp) {
+                  var pa = { feature: 'Overhang wall', width: w, closed: sp.closed, pts: sp.pts };
+                  if (sp.span) pa.span = true;
+                  seq.push(pa);
+                });
               });
+              /* A LOOP STARTS WHERE IT IS HELD (o.seamOffOverhang): a loop cut into pieces is the same loop, so it may begin at any of them.
+                 Begun at a piece that hangs - the seam fell on a corner of the gap - its first line is laid into the air from a start that
+                 rests on nothing, and pulled along: the owner's CR-TPU roof threw its back walls off the back edge, both loops starting at the
+                 gap's corner with a 15.7 mm hanging run (2026-11-15), where the front walls, entered from the block beside the gap, held. */
+              /* Only a run that hangs from end to end (span) moves the start - a wall that only partly hangs is laid on its own edge, and
+                 moving its start put a CR-TPU prime and wipe on the slanting lip face (the owner's next print). And the loop is not begun at
+                 the far end of the held pieces but a short lead-in before the run: the held piece before it is cut LEAD_IN_MM from its end
+                 and the loop begins there, so the nozzle starts on the layer below, close to where the old start was, and comes into the
+                 run already laying - not across the roof to a prime at the gap's far corner. */
+              if (o.seamOffOverhang !== false && seq.length > 1 && seq[0].span) {
+                var lastP = seq[seq.length - 1];
+                if (lastP.feature !== 'Overhang wall' && lastP.pts.length > 1) {
+                  var cut = cutFromEnd(lastP.pts, SEAM_LEAD_IN_MM);
+                  var lead = Object.assign({}, lastP, { pts: cut.tail }), rest = Object.assign({}, lastP, { pts: cut.head });
+                  seq = [lead].concat(seq.slice(0, seq.length - 1), cut.head.length > 1 ? [rest] : []);
+                } else {
+                  var k0 = -1;
+                  for (var sk = 1; sk < seq.length; sk++) if (seq[sk].feature !== 'Overhang wall') { k0 = sk; break; }
+                  if (k0 > 0) seq = seq.slice(k0).concat(seq.slice(0, k0));
+                }
+              }
+              seq.forEach(function (pa) { L.paths.push(pa); });
             });
           });
 
+          if (seamOn) P._seamsPrev = seamsNow;
+          /* gap infill after the walls, as Studio prints it */
+          if (per.gaps) {
+            var gp = gapPaths(g, per.gaps, region, h, o);
+            /* a gap line that runs right round (its ends a line apart) is a loop too: it begins at the walls' seam, not where it fell (the Gulf
+               logo's rim: a gap ring between its two walls began and ended half way down the smooth side, a break and a fleck there) */
+            if (seamOn) gp.forEach(function (pa) {
+              var q = pa.pts, m = q.length;
+              if (m < 4 || Math.hypot(q[0][0] - q[m - 1][0], q[0][1] - q[m - 1][1]) > 1.5 * pa.width) return;
+              var ring = q.slice(), nearPrev = seamsNow.concat(seamsPrev);
+              var rot = placeSeam(ring, [ring], nearPrev, pa.width);
+              if (rot !== ring) pa.pts = rot;
+            });
+            gp.forEach(function (pa) { L.paths.push(pa); }); L.gapPaths = gp.length;
+          }
           if (thin) {
             thin.paths.forEach(function (pa) {
               L.paths.push({ feature: 'Outer wall', width: o.outerWallWidthMm, closed: pa.closed, pts: pa.pts, thinWall: true });
@@ -1526,11 +2919,11 @@
           var inner = per.infillRegion;
           var cover = null;
           for (var k = 1; k <= TT; k++) {
-            var up = i + k < n ? S[i + k] : g.empty();
+            var up = i + k < n ? SF[i + k] : g.empty();
             cover = cover ? g.inter(cover, up) : up;
           }
           for (var kb = 1; kb <= BB; kb++) {
-            var dn = i - kb >= 0 ? S[i - kb] : g.empty();
+            var dn = i - kb >= 0 ? SF[i - kb] : g.empty();
             cover = cover ? g.inter(cover, dn) : dn;
           }
           if (!cover) cover = region;
@@ -1545,7 +2938,15 @@
           if (narrowR > 0 && !g.isEmpty(sparse)) {
             var opened = g.offset(g.offset(sparse, -narrowR), narrowR);
             var narrow = g.diff(sparse, opened);
-            if (g.area(narrow) > 1e-6) { solid = g.union(solid, narrow); sparse = g.inter(sparse, opened); }
+            /* ...only where it borders solid infill (2026-11-20). The strips this rule was fitted on lie between solid regions (under the ribs,
+               between top surfaces); a strip between WALLS - the core of a thin-walled part - stays sparse in Studio down to 0.515 mm between
+               the infill lines' centres (Erik's wall-thickness benchmark, the owner's walls-tester slices: three L legs, 1.31 / 0.91 / 0.52
+               mm strips, all sparse, Arachne and Classic alike) */
+            if (g.area(narrow) > 1e-6 && !g.isEmpty(solid)) {
+              var touch = g.inter(narrow, g.offset(solid, spacingOf(o.infillWidthMm, h)));
+              narrow = g.unionAll(g.parts(narrow).filter(function (pc) { return !g.isEmpty(g.inter(pc, touch)); }));
+            } else narrow = g.empty();
+            if (g.area(narrow) > 1e-6) { solid = g.union(solid, narrow); sparse = g.diff(sparse, narrow); }
           }
           // a sparse island too small to hold infill is printed solid
           if (oS.minSparseAreaMm2 > 0) {
@@ -1571,6 +2972,27 @@
             var intNarrow = g.diff(internal, g.offset(g.offset(internal, -narrowR), narrowR));
             if (g.area(intNarrow) > 1e-6) { topOnly = g.union(topOnly, intNarrow); internal = g.diff(internal, intNarrow); }
           }
+          /* A BRIDGE REACHES ONTO WHAT HOLDS IT (the owner's TPU tower, 2026-11-15: the roof's lines dropped into the window). The open-air region
+             is the layer's solid minus the layer below, so its lines stopped at the gap's edge - 12 of the roof's 40 line ends on nothing at all,
+             the rest on no more than 0.05 mm. Bambu Studio carries a bridge on into the solid fill beside the gap: on the owner's Studio slice of
+             the same tower every roof line end lies 0.55 to 2.2 mm over the layer below (fixtures/print-planner/a1mini-0.4/
+             studio-generic-tpu-tower.gcode.3mf, z 9.354 / 19.304 / 29.453 / 39.403). So each open-air piece wide enough to be a bridge (two lines
+             across: the slivers along a sloping wall are not) grows o.bridgeAnchorMm into this layer's fill that is not top surface - solid or
+             sparse, as Studio's does - and that ground is laid as part of the bridge, in its direction, not as solid or sparse infill. The direction is still chosen on the gap itself. */
+          var bridgePieces = null;
+          if (i > 0 && below && o.bridgeAnchorMm > 0 && !g.isEmpty(bottomOpen)) {
+            var room = g.diff(g.union(solid, sparse), top), claimed = g.empty(), rawParts = g.parts(bottomOpen);
+            bridgePieces = rawParts.map(function (pc, k) {
+              var core = g.offset(g.offset(pc, -wInfB), wInfB);
+              if (g.isEmpty(core)) return { raw: pc, fill: pc };
+              var others = g.unionAll(rawParts.filter(function (q, j) { return j !== k; }));
+              var grown = g.diff(g.diff(g.inter(g.offset(pc, o.bridgeAnchorMm), g.union(room, pc)), others), claimed);
+              claimed = g.union(claimed, g.diff(grown, pc));
+              return { raw: pc, fill: grown };
+            });
+            if (!g.isEmpty(claimed)) { internal = g.diff(internal, claimed); bridgeInner = g.diff(bridgeInner, claimed); sparse = g.diff(sparse, claimed); }
+            else bridgePieces = null;
+          }
           L.areas = {
             solid: g.area(solid), sparse: g.area(sparse), top: g.area(topOnly),
             bottom: g.area(bottomOpen), bridge: g.area(bridgeInner), internal: g.area(internal)
@@ -1581,19 +3003,204 @@
           var solidAngle = (i % 2 === 0) ? dirA : dirA + Math.PI / 2;
           var hull = g.polys(g.offset(inner, wInf / 2 + 1e-4));
           var solidJoin = o.solidPattern === 'lines' ? 0 : 3 * sInf;
-          function solidFill(cs, feat) {
+          /* A concentric fill's room. The fill region bounds bead CENTRES (perimeters: 0.85 x the wall's spacing in from the last loop); the rings
+             are laid from the beads' outer edge, and the reference's outermost ring lies 0.85 x the mean of the wall's spacing and its own from the
+             last loop (0.333 at 0.45 / 0.42, 0.388 at the first layer's 0.5 / 0.5). So the region grows by the difference plus half a spacing -
+             along the walls only: where a piece borders another fill of the same layer it keeps its edge. */
+          function ringRoom(cs, onTop) {
+            /* a top surface under one wall (onlyOneWallTop) lies along the outer wall, everything else along the last inner one */
+            var wWall = oS.wallLoops > 1 && !(onTop && oS.onlyOneWallTop) ? o.innerWallWidthMm : o.outerWallWidthMm;
+            var grow = sInf / 2 + (1 - o.infillWallOverlap) * (spacingOf(wWall, h) - sInf) / 2;
+            return g.union(cs, g.inter(g.offset(cs, grow), g.diff(g.offset(inner, grow), inner)));
+          }
+          function solidFill(cs, feat, pattern) {
             if (g.isEmpty(cs)) return;
+            if (pattern === 'hilbertcurve') {
+              g.parts(cs).forEach(function (pc) {
+                hilbertFill(g.polys(pc), sInf, solidJoin, (1 - o.infillWallOverlap) * (spacingOf(oS.wallLoops > 1 && !(feat === 'Top surface' && oS.onlyOneWallTop) ? o.innerWallWidthMm : o.outerWallWidthMm, h) - sInf) / 2).forEach(function (pth) {
+                  L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
+                });
+              });
+              return;
+            }
+            if (pattern === 'archimedeanchords' || pattern === 'octagramspiral') {
+              /* one spiral a piece, about the middle of its box in the infill direction's frame */
+              g.parts(cs).forEach(function (pc) {
+                var pp = g.polys(pc);
+                spiralFill(pp, turnedBoxCentre(pp, dirA), sInf, solidJoin, 0, pattern === 'octagramspiral').forEach(function (pth) {
+                  L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
+                });
+              });
+              return;
+            }
+            if (pattern === 'concentric') {
+              var lastP = L.paths.length ? L.paths[L.paths.length - 1] : null;
+              concentricFill(g, ringRoom(cs, feat === 'Top surface'), wInf, h, sInf, true, lastP ? (lastP.closed ? lastP.pts[0] : lastP.pts[lastP.pts.length - 1]) : null).forEach(function (pth) {
+                L.paths.push({ feature: feat, width: pth.width, closed: pth.closed, pts: pth.pts });
+              });
+              return;
+            }
             var polys = g.polys(cs);
-            connect(scanFill(polys, solidAngle, sInf, 0), solidJoin, hull).forEach(function (pth) {
+            /* AN OPEN-AIR BRIDGE FILLS ITS GAP WALL TO WALL (the owner's TPU tower, 2026-11-15: a line missing along the roof's front wall).
+               The lines sit on a global grid, so across an 8.1 mm gap the first fell 0.35 mm in from the region's edge and a strip 0.25 mm wide
+               was left open along the wall. Bambu evens out a solid fill's spacing to the width it fills (adjust_solid_spacing): on its slice
+               of the same tower the roof is 22 lines, 85.9 to 94.1, the outer two on the walls. So a bridge piece gets its own spacing - the
+               width across the lines over the nearest whole number of spacings - and a line on each edge. */
+            if (feat === 'Bridge' && fitBridge) {
+              var ca = Math.cos(solidAngle), sa = Math.sin(solidAngle), EPS_FIT = 0.01;
+              g.parts(cs).forEach(function (pc) {
+                var pp = g.polys(pc), lo = Infinity, hi = -Infinity;
+                /* a sliver along a sloping wall (narrower than two lines: bridgePieces' test) keeps the grid, as it always has */
+                if (g.isEmpty(g.offset(g.offset(pc, -wInf), wInf))) {
+                  connect(scanFill(pp, solidAngle, sInf, 0), solidJoin, hull).forEach(function (pth) { L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts }); });
+                  return;
+                }
+                pp.forEach(function (pl) { pl.forEach(function (q) { var yr = -q[0] * sa + q[1] * ca; if (yr < lo) lo = yr; if (yr > hi) hi = yr; }); });
+                var wd = hi - lo - 2 * EPS_FIT;
+                if (!(wd > 0)) return;
+                var nGap = Math.max(1, Math.round(wd / sInf)), sp = wd / nGap;
+                connect(scanFill(pp, solidAngle, sp, lo + EPS_FIT), solidJoin, hull).forEach(function (pth) {
+                  L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
+                });
+              });
+              return;
+            }
+            /* a support's first layer at its own density (Bambu's Initial layer density): the lines that much further apart */
+            var sFill = P.role === 'support' && i === 0 && o.supportFirstLayerDensity > 0 && o.supportFirstLayerDensity < 1 ? sInf / Math.max(0.2, o.supportFirstLayerDensity) : sInf;
+            if (feat === 'Top surface') { topRuns(g, cs, solidAngle, sFill, solidJoin, hull, L).forEach(function (pth) { var pa = { feature: feat, width: wInf, closed: false, pts: pth.pts }; if (pth.glide) pa.glide = true; L.paths.push(pa); }); return; }
+            connect(scanFill(polys, solidAngle, sFill, 0), sFill > sInf ? 3 * sFill : solidJoin, hull).forEach(function (pth) {
               L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
             });
           }
-          solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge');
+          /* a bridge's angle: the profile's bridge_angle (Bambu lays every bridge at it); else, under the column rule's 3.6 angles (Studio 02.09,
+             bridge_angle 0), a part's bridge over its supports at 3.6, the supports' top square to it */
+          var bridgeAt = null;
+          if (o.bridgeAngleDeg) bridgeAt = o.bridgeAngleDeg * Math.PI / 180;
+          else if ((o.supportInterfaceAngle === 'studio36' || o.supportInterfaceAngle === 'profile') && o.supportInterfaceRule === 'column' && P.role === 'part' && objs.some(function (ob) { return ob.role === 'support'; })) bridgeAt = STUDIO36_DEG * Math.PI / 180;
+          var sa0 = solidAngle;
+          /* A FREE BRIDGE IS LAID ACROSS ITS GAP (docs/SLICER.md "A free bridge's direction"). A bridge line holds only if both its ends
+             rest on the layer below; laid at the solid infill's 45 / 135 over a slot open on its long sides, most lines begin and end in the
+             air and hang in loops (the owner's CR-TPU tower level, 2026-11-14: a 30 x 8 mm roof between two pillars, NSO's lines 8 - 11 mm
+             long at 45 degrees where Studio's run 31 mm from pillar to pillar). So each piece of bridge is laid at the direction that holds
+             the most of it: every 5 degrees is tried, a line counted when a point a little past each end is over the layer below, and of
+             the directions that hold as much as the best (within 2 %), the one with the shortest lines. A piece the layer's own angle holds
+             whole is left at it; one nothing holds (a cantilever) too. o.bridgeAngleAuto === false: the layer's angle, always. */
+          function freeBridgeAngle(pc) {
+            if (!belowIn || o.bridgeAngleAuto === false) return null;
+            var pp = g.polys(pc);
+            if (!pp.length) return null;
+            var held = function (p, ux, uy) {
+              for (var q = 0; q < BRIDGE_REACH_MM.length; q++) if (belowIn(p[0] + ux * BRIDGE_REACH_MM[q], p[1] + uy * BRIDGE_REACH_MM[q])) return true;
+              return false;
+            };
+            var score = function (ang) {
+              var both = 0, all = 0, n = 0;
+              scanFill(pp, ang, sInf, 0).forEach(function (sg) {
+                var dx = sg.b[0] - sg.a[0], dy = sg.b[1] - sg.a[1], len = Math.hypot(dx, dy);
+                if (!(len > 1e-6)) return;
+                all += len;
+                if (held(sg.a, -dx / len, -dy / len) && held(sg.b, dx / len, dy / len)) { both += len; n++; }
+              });
+              return { both: both, all: all, mean: n ? both / n : Infinity };
+            };
+            var base = score(solidAngle);
+            if (!(base.all > 0) || base.both >= 0.98 * base.all) return null;
+            /* by the share of the lines held, not their length: the same area is the same length of line at any angle, give or take a line
+               of the scan's phase - which, compared in millimetres, favoured a slant (the test's slot: 49.6 mm at 175 degrees, 48.0 at 0, all of
+               both held) */
+            var frac = function (sc) { return sc.all > 0 ? sc.both / sc.all : 0; };
+            var tries = [], most = 0;
+            for (var deg = 0; deg < 180; deg += 5) { var sc = score(deg * Math.PI / 180); sc.ang = deg * Math.PI / 180; tries.push(sc); if (frac(sc) > most) most = frac(sc); }
+            if (!(most > 0) || most <= frac(base) * 1.05) return null;
+            /* among the angles that hold (nearly) the most, the one that crosses the gap the short way: the piece's extent along the lines.
+               It was the mean length of the scan's lines, which the scan's phase moves by a line more or less: on the owner's TPU tower the
+               2.4 x 9.6 mm slot over the cone went at 10 degrees (mean 2.6 against 0 degrees' 2.6, a line apart) - every line slanted across
+               the slot, and the first and last starting and ending in mid-air (2026-11-15). The extent is the geometry's own: 2.4 at 0
+               degrees, 4.0 at 10. */
+            var extentAt = function (ang) {
+              var c = Math.cos(ang), s2 = Math.sin(ang), lo = Infinity, hi = -Infinity;
+              pp.forEach(function (pl) { pl.forEach(function (q) { var u = q[0] * c + q[1] * s2; if (u < lo) lo = u; if (u > hi) hi = u; }); });
+              return hi - lo;
+            };
+            var pick = null;
+            tries.forEach(function (sc) {
+              if (!(frac(sc) >= most - 0.02)) return;
+              sc.extent = extentAt(sc.ang);
+              if (!pick || sc.extent < pick.extent - 1e-6) pick = sc;
+            });
+            return pick ? pick.ang : null;
+          }
+          var freeFrom = L.paths.length, fitBridge = o.bridgeFitSpacing !== false;
+          var bridgeAll = bridgePieces ? g.unionAll(bridgePieces.map(function (bp) { return bp.fill; })) : bottomOpen;
+          if (i > 0 && bridgeAt != null) { solidAngle = bridgeAt; solidFill(bridgeAll, 'Bridge'); solidAngle = sa0; }
+          else if (i > 0 && !g.isEmpty(bottomOpen)) {
+            var bParts = bridgePieces ? bridgePieces.map(function (bp) { return bp.raw; }) : g.parts(bottomOpen), bAngles = bParts.map(freeBridgeAngle);
+            if (!bAngles.some(function (a) { return a != null; })) solidFill(bridgeAll, 'Bridge');   /* every piece at the layer's angle: one fill, as it always was */
+            else {
+              bParts.forEach(function (pc, bi) {
+                if (bAngles[bi] != null) { solidAngle = bAngles[bi]; L.bridgeAngles = (L.bridgeAngles || []).concat([Math.round(bAngles[bi] * 180 / Math.PI)]); }
+                solidFill(bridgePieces ? bridgePieces[bi].fill : pc, 'Bridge');   /* a bridge is straight lines, whatever the pattern */
+                solidAngle = sa0;
+              });
+            }
+          }
+          else solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge', i === 0 ? (o.bottomPattern || o.solidPattern) : null);   /* a bridge is straight lines, whatever the pattern */
+          /* these are the bridges over open air (path.free): the ones over sparse infill, next, are held every few millimetres */
+          if (i > 0) for (var fp = freeFrom; fp < L.paths.length; fp++) if (L.paths[fp].feature === 'Bridge') L.paths[fp].free = true;
+          fitBridge = false;                                   /* the bridges over sparse infill (next) and the rest keep the global grid */
+          if (o.bridgeAngleDeg) solidAngle = bridgeAt;
           solidFill(bridgeInner, 'Bridge');
-          solidFill(topOnly, 'Top surface');
-          solidFill(internal, 'Internal solid infill');
+          solidAngle = sa0;
+          solidFill(topOnly, 'Top surface', o.topPattern || o.solidPattern);
+          solidFill(internal, 'Internal solid infill', o.solidPattern);
 
-          if (!g.isEmpty(sparse) && oS.sparseDensity > 0) {
+          /* a spiral and a 3D honeycomb are laid about the middle of the object's own box on every layer, so each layer's lines lie on the last one's */
+          if (!P.boxCentre && !g.isEmpty(sparse) && ({ archimedeanchords: 1, '3dhoneycomb': 1, gyroid: 1, cubic: 1, adaptivecubic: 1, honeycomb: 1 })[o.sparsePattern]) {
+            var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+            S.forEach(function (sec) { if (g.isEmpty(sec)) return; var bb = sec.bounds(); bx0 = Math.min(bx0, bb.min[0]); by0 = Math.min(by0, bb.min[1]); bx1 = Math.max(bx1, bb.max[0]); by1 = Math.max(by1, bb.max[1]); });
+            P.boxCentre = [(bx0 + bx1) / 2, (by0 + by1) / 2];
+          }
+          var dens = Math.min(1, oS.sparseDensity);
+          var lineFill = null;
+          if (!g.isEmpty(sparse) && dens > 0) {
+            if (o.sparsePattern === 'cubic') lineFill = linesFill(g.polys(sparse), dirA, 3 * sInf / dens, cubicAt(P.boxCentre, dirA, PL[i].printZ), o.sparseAnchorMaxMm);
+            else if (o.sparsePattern === 'adaptivecubic') {
+              if (!P.cubes) {
+                /* the object's points as printed: its triangles' corners, or - a section with no mesh behind it - its layers' outlines */
+                var pts3 = [];
+                if (P.soup) for (var q3 = 0; q3 + 2 < P.soup.length; q3 += 3) pts3.push(P.soup[q3], P.soup[q3 + 1], P.soup[q3 + 2] + shiftZ);
+                else S.forEach(function (sec, li) { g.polys(sec).forEach(function (pl) { pl.forEach(function (pt) { pts3.push(pt[0], pt[1], PL[li].printZ - PL[li].h, pt[0], pt[1], PL[li].printZ); }); }); });
+                P.cubes = adaptiveCubicLattice(pts3, 3 * wInf / dens);
+              }
+              lineFill = linesFill(g.polys(sparse), 0, P.cubes.pitch, P.cubes.at(PL[i].printZ), o.sparseAnchorMaxMm);
+            } else if (o.sparsePattern === 'lightning') {
+              /* laid when the whole object's layers are known, from the top down (lightningFill) */
+              if (!P.boxCentre) { var lb = region.bounds(); P.boxCentre = [(lb.min[0] + lb.max[0]) / 2, (lb.min[1] + lb.max[1]) / 2]; }
+              (lightningAt || (lightningAt = []))[i] = sparse;
+              lineFill = [];
+            } else if (o.sparsePattern === 'honeycomb') lineFill = honeycombFill(g.polys(sparse), P.boxCentre, dirA, i % 3, sInf / dens, sInf, o.sparseAnchorMaxMm);
+          }
+          if (lineFill) {
+            lineFill.forEach(function (pth) { L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts }); });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'gyroid') {
+            gyroidFill(g.polys(sparse), P.boxCentre, GYROID_SCALE * sInf / Math.min(1, oS.sparseDensity), PL[i].printZ, o.sparseAnchorMaxMm).forEach(function (pth) {
+              L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts });
+            });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === '3dhoneycomb') {
+            honeycomb3dFill(g.polys(sparse), P.boxCentre, dirA, honeycomb3dAt(sInf, Math.min(1, oS.sparseDensity), o.layerMm, PL[i].printZ), o.sparseAnchorMaxMm).forEach(function (pth) {
+              L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts });
+            });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'archimedeanchords') {
+            spiralFill(g.polys(sparse), P.boxCentre, sInf / Math.min(1, oS.sparseDensity), o.sparseAnchorMaxMm, 4 * sInf).forEach(function (pth) {
+              L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts });
+            });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'concentric') {
+            /* sparse rings: the first along the walls, the rest a spacing over the density apart (stated: the reference has no sparse layer) */
+            var lastS = L.paths.length ? L.paths[L.paths.length - 1] : null;
+            concentricFill(g, ringRoom(sparse), wInf, h, sInf / Math.min(1, oS.sparseDensity), false, lastS ? (lastS.closed ? lastS.pts[0] : lastS.pts[lastS.pts.length - 1]) : null).forEach(function (pth) {
+              L.paths.push({ feature: 'Sparse infill', width: pth.width, closed: pth.closed, pts: pth.pts });
+            });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0) {
             var sp = g.polys(sparse);
             var fams, lineSp;
             if (o.sparsePattern === 'grid') {
@@ -1611,9 +3218,46 @@
             });
           }
           sparsePrev = sparse;
+          L.sparseCs = sparse;                                     /* where a travel need not retract (the planner: Studio's reduce_infill_retraction) */
         }
+        if (lightningAt) lightningFill(g, P.layers, lightningAt, PL, P.boxCentre, dirOf(o), o);
+        /* NO CRUMBS (o.shortFillMm; a filament's choice, CR-TPU's 1 mm - Studio keeps every piece): an open fill piece shorter than this is dropped. Each piece is its own travel, prime and retraction,
+           and a 0.03 mm corner of solid infill got the whole 1.5 mm prime, then a retraction, at the tip of a CR-TPU roof - the owner saw whole
+           lines hang off that tip (2026-11-15). A piece that short fills nothing a neighbour does not. Walls and closed loops always stay. */
+        if (P.role === 'part' && o.shortFillMm > 0) P.layers.forEach(function (L) {
+          L.paths = L.paths.filter(function (p) {
+            if (p.closed || !FILL_FEATURES[p.feature]) return true;
+            for (var k = 1, len = 0; k < p.pts.length; k++) { len += Math.hypot(p.pts[k][0] - p.pts[k - 1][0], p.pts[k][1] - p.pts[k - 1][1]); if (len >= o.shortFillMm) return true; }
+            return false;
+          });
+        });
+        /* BRIDGES BEFORE THE WALLS (o.bridgeFirst; a filament's choice, docs/FILAMENTS.md): on a layer with an open-air bridge, its lines are laid
+           first and the walls after them. Walls first, the bridge's first line runs alongside a wall that hangs over the gap, and the nozzle's
+           face rides over it: the owner watched it bend a CR-TPU lip down and the bridge weld it there (2026-11-15). Laid first, the bridge is
+           anchored on what holds it and touches nothing; the hanging wall is then laid against a sheet that does not give. Only the open-air
+           bridges move (path.free), and only on a part. */
+        if (P.role === 'part' && o.bridgeFirst) P.layers.forEach(function (L) {
+          if (!L.paths.some(function (p) { return p.feature === 'Bridge' && p.free; })) return;
+          L.paths = L.paths.filter(function (p) { return p.feature === 'Bridge' && p.free; }).concat(L.paths.filter(function (p) { return !(p.feature === 'Bridge' && p.free); }));
+        });
+        if (P.role === 'part' && o.islandOrder) { var endAt = null; P.layers.forEach(function (L, li) { endAt = islandOrder(g, L, S[li], endAt); }); }
       };
-      perObject.forEach(buildLayers);
+      var colRule = function (P) { if (P.role === 'support' && o.supportInterfaceRule === 'column') columnRule(g, P, perObject, planes, o); };
+      /* claims (columnRule: one stack, one owner) in the pass whose sections print: the shared grid's when the supports keep it, else the own grids'
+         below - the shared pass then finds each support's tops with the whole stack over it, so every support's grid runs up to the stack (with the
+         claims there, the second support's grid stopped under its tips and the stack laid on another grid: 140 layers more, a gap under the sheet) */
+      var ownPass = o.supportLayerMaxMm > 0 && perObject.some(function (P) { return P.role === 'support'; });
+      perObject._colClaim = ownPass ? null : [];
+      /* a support's first layer stands its first-layer gap off the part's (Bambu's Support/object first layer gap) - on the shared grid and on a
+         support's own (below) */
+      var firstGap = function (P) {
+        if (!(o.supportFirstLayerGapMm != null && o.supportFirstLayerGapMm >= 0) || P.role !== 'support' || !P.S[0] || g.isEmpty(P.S[0])) return;
+        var first = [];
+        perObject.forEach(function (Q) { if (Q.role === 'part' && (P.hostKey == null || Q.key === P.hostKey) && Q.S[0] && !g.isEmpty(Q.S[0])) first.push(Q.S[0]); });
+        if (first.length) P.S[0] = g.diff(P.S[0], g.offset(g.unionAll(first), o.supportFirstLayerGapMm));
+      };
+      perObject.forEach(firstGap);
+      perObject.forEach(function (P) { colRule(P); buildLayers(P); });
 
       /* THE SUPPORT'S OWN LAYERS (o.supportLayerMaxMm; Bambu's independent_support_layer_height). A support is not cut on the part's 0.2 grid: its layers run
          from the first layer up to each top of its sheets (where it meets the part) in the fewest equal steps of at most supportLayerMaxMm - 0.2755 mm on a
@@ -1622,19 +3266,48 @@
       var ownGrids = false;
       if (o.supportLayerMaxMm > 0 && perObject.some(function (P) { return P.role === 'support'; })) {
         typeSupports(g, perObject, planes, o, minOver);
+        perObject._colClaim = [];
         perObject.forEach(function (P, k) {
           if (P.role !== 'support') return;
           var own = supportGrid(P, planes, o.supportLayerMaxMm, shiftZ);
           if (!own) return;
           var P2 = makeP(objs[k], k, own);
+          firstGap(P2);
+          var claims = perObject._colClaim;
           perObject[k] = P2;
+          perObject._colClaim = claims;
+          colRule(P2);
           buildLayers(P2);
           ownGrids = true;
         });
       }
 
 
-      addBrims(g, perObject, planes, o);
+      /* THE SUPPORT AS IT PRINTS (o.columnStackOnly): each support's sections on its own grid after the column rule (S: the whole of it, I / T: its
+         interface and transition), as hole-free pieces in the soup's frame - the supports card draws the support from them, so the generator shows
+         what the slice prints (the rule lays the interface only when slicing: the generator showed a bare tree) */
+      /* ...and with the whole slice (o.columnStacks): the supports card's Generate slices the plate once, draws its supports from this and keeps
+         the slice itself for Preview - one slice, not one to draw and another to print */
+      var stacks = null;
+      if (o.columnStackOnly || o.columnStacks) {
+        stacks = perObject.filter(function (P) { return P.role === 'support' && P.col; }).map(function (P) {
+          var SPp = P.planes || planes, layers = [];
+          SPp.forEach(function (pl, i) {
+            var I = P.col.I[i], Tt = P.col.T[i], Sx = P.S[i];
+            var hasI = I && !g.isEmpty(I), hasT = Tt && !g.isEmpty(Tt), hasS = Sx && !g.isEmpty(Sx);
+            if (!hasI && !hasT && !hasS) return;
+            /* S: the layer's whole support as it prints (the tree cut where it is blocked, the stack, the cups), I / T its interface and transition */
+            /* printed: the layer has lines (a piece too small for one is cut but not printed) */
+            var Lp = P.layers && P.layers[i], printed = !!(Lp && Lp.paths && Lp.paths.length);
+            layers.push({ z0: pl.printZ - pl.h - shiftZ, z1: pl.printZ - shiftZ, printed: printed, I: hasI ? holeFree(g, I) : [], T: hasT ? holeFree(g, Tt) : [], S: hasS ? holeFree(g, Sx) : [] });
+          });
+          return { key: P.key, name: P.name, layers: layers };
+        });
+        if (o.columnStackOnly) return { ok: true, shiftZ: shiftZ, stacks: stacks };
+      }
+
+      if (!rp) addBrims(g, perObject, planes, o);
+      var raftOb = rp ? addRaft(g, perObject, o, rp) : null;
 
       // --- overhang regions in 3D, per object: layer islands linked upward
       // --- conflicts: two objects printing into the same place on one layer.
@@ -1647,6 +3320,7 @@
         for (var a = 0; a < perObject.length; a++) {
           for (var b = a + 1; b < perObject.length; b++) {
             if (perObject[a].planes || perObject[b].planes) continue;         // on different grids: below
+            if (perObject[a].colourOf && perObject[a].colourOf === perObject[b].colourOf) continue;   /* two colours of one piece meet, never overlap */
             var Sa = perObject[a].S[ci], Sb = perObject[b].S[ci];
             if (g.isEmpty(Sa) || g.isEmpty(Sb)) continue;
             var ov = g.inter(Sa, Sb);
@@ -1700,6 +3374,7 @@
           });
           return {
             id: P.id, name: P.name, flipped: P.flipped, nonSolid: P.nonSolid, role: P.role, planes: P.planes || null,
+            key: P.key, hostKey: P.hostKey,       /* the caller's own: G-scope groups a support with the head it holds */
             support: P.sheet || null,
             triangles: P.mesh.triangles, degenerate: P.mesh.degenerate,
             sectionStats: st,
@@ -1707,10 +3382,11 @@
             layers: P.layers.map(function (L) {
               return {
                 index: L.index, printZ: L.printZ, h: L.h, areaMm2: L.areaMm2,
-                wallCount: L.wallCount || 0, wallLoopsByDepth: L.wallLoopsByDepth || [], thinWalls: L.thinWalls || 0,
+                wallCount: L.wallCount || 0, wallLoopsByDepth: L.wallLoopsByDepth || [], thinWalls: L.thinWalls || 0, variableBeads: L.variableBeads || 0,
                 areas: L.areas || null, overhangMm2: L.overhangMm2 || 0,
                 overhangPolys: L.overhangCs ? g.polys(L.overhangCs) : [],
                 sectionPolys: g.polys(P.S[L.index]),
+                sparsePolys: P.role === 'part' ? (L.sparseCs && !g.isEmpty(L.sparseCs) ? g.polys(L.sparseCs) : []) : undefined,
                 paths: L.paths
               };
             }),
@@ -1719,6 +3395,35 @@
         }),
         ms: 0
       };
+      /* a painted piece's colour regions are one object again: each layer's paths, colour after colour, each with its slot */
+      if (perObject.some(function (P) { return P.colourOf; })) {
+        var merged = [], byParent = new Map();
+        result.objects.forEach(function (ro, k) {
+          var P = perObject[k];
+          if (!P.colourOf) { merged.push(ro); return; }
+          ro.layers.forEach(function (L) { L.paths.forEach(function (pa) { pa.slot = P.slot; }); L.slots = L.paths.length ? [P.slot] : []; });
+          var M = byParent.get(P.colourOf);
+          if (!M) {
+            M = Object.assign({}, ro, { segmented: true, slots: [P.slot] });
+            M.layers = ro.layers.map(function (L, li) { return Object.assign({}, L, { sectionPolys: g.polys(P.Sfull[L.index]) }); });
+            byParent.set(P.colourOf, M); merged.push(M);
+            return;
+          }
+          M.slots.push(P.slot);
+          ro.layers.forEach(function (L, li) {
+            var T0 = M.layers[li];
+            T0.paths = T0.paths.concat(L.paths);
+            T0.areaMm2 += L.areaMm2;
+            T0.wallCount = Math.max(T0.wallCount, L.wallCount);
+            if (L.paths.length) T0.slots = T0.slots.concat([P.slot]);
+            T0.overhangPolys = T0.overhangPolys.concat(L.overhangPolys);
+            if (T0.sparsePolys && L.sparsePolys) T0.sparsePolys = T0.sparsePolys.concat(L.sparsePolys);
+          });
+        });
+        result.objects = merged;
+      }
+      if (stacks) result.stacks = stacks;
+      if (raftOb) { result.objects.push(raftOb); result.raft = { layers: rp.N, base: rp.nB, interface: rp.nI, topMm: rp.top, liftMm: rp.lift }; }
       result.ms = Date.now() - t0;
       result.report = describe(result);
       if (o.emitGcode) result.gcode = toGcode(result);
@@ -1821,6 +3526,78 @@
    * join; a run shorter than a millimetre is dropped. Printed before everything
    * else on the first layer, as feature 'Brim'.
    */
+  /* THE RAFT (Bambu's raft, read off its own slices: fixtures/supports/supp_ref_raft.gcode.3mf, 10 layers under the six heads' trees, and
+     raft_circle.gcode.3mf, 8 under a 50 mm disc with no support). Its own system between the plate and the first layer of everything on it,
+     whatever that is - a part, a support or both. N layers: the top half (rounded up) interface, the rest base, Prusa's split (1: one interface,
+     2: 1 + 1, 3: 1 + 2, 10: 5 + 5). The first at the first layer's height, the rest 0.75 x the nozzle (0.3 at 0.4: z 0.2, 0.5, 0.8 ...). Features
+     as Bambu writes them: base Support, interface Support interface. The region: the first layer of everything, grown raft_expansion (1.5) under
+     the top layer and 0.5 more under the others (the circle: 1.5 and 2.0 past the disc), the first layer RAFT.firstExtraMm more again (the circle's
+     solid first layer, 2.9 - 3.4). Lines: the first layer solid along Y, the base along X at support_base_pattern_spacing (2.5 -> 2.86 apart),
+     the interface at support_interface_spacing (0.1 -> 0.45 apart along Y under a tree; 0.5 -> 0.89 apart, 45 / 135 in turn, under a part alone),
+     each layer one zig-zag joined along its edge. A support's first layer has a layer of its own under it on the raft's top, raftContactMm thick
+     (Bambu's 0.1 layer at 3.0 under each trunk). */
+  var RAFT = { layerOfNozzle: 0.75, baseExtraMm: 0.5, firstExtraMm: 1.0 };
+  function raftPlan(o) {
+    var N = Math.max(0, Math.min(50, Math.round(+o.raftLayers || 0)));
+    if (!N) return null;
+    var nI = Math.ceil(N / 2), nB = N - nI, h1 = Math.max(o.layerMm, RAFT.layerOfNozzle * o.nozzleMm), z = 0, layers = [];
+    for (var k = 0; k < N; k++) {
+      var h = k === 0 ? o.firstLayerMm : h1;
+      z = Math.round((z + h) * 1e6) / 1e6;
+      layers.push({ printZ: z, h: h, kind: k < nB ? 'base' : 'interface', iface: k - nB });
+    }
+    var gap = o.raftContactMm != null && o.raftContactMm >= 0 ? +o.raftContactMm : 0.1;
+    return { N: N, nB: nB, nI: nI, layers: layers, top: z, gap: gap, lift: Math.round((z + gap) * 1e6) / 1e6 };
+  }
+  function addRaft(g, perObject, o, rp) {
+    var feet = [], supFeet = [];
+    perObject.forEach(function (P) {
+      var S0 = P.S && P.S[0];
+      if (!S0 || g.isEmpty(S0)) return;
+      feet.push(S0);
+      if (P.role === 'support') supFeet.push(S0);
+    });
+    if (!feet.length) return null;
+    var F = g.unionAll(feet), w = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm;
+    var exp = o.raftExpansionMm != null ? +o.raftExpansionMm : 1.5, withSup = supFeet.length > 0;
+    var baseSp = o.raftBaseSpacingMm != null ? +o.raftBaseSpacingMm : 2.5, ifSp = o.raftInterfaceSpacingMm != null ? +o.raftInterfaceSpacingMm : 0.5;
+    var planesR = [], layers = [];
+    function fill(region, ang, pitch, feature, h, out) {
+      var inner = g.offset(region, -w / 2);
+      if (g.isEmpty(inner)) return;
+      var segs = scanFill(g.polys(inner), ang, pitch, 0);
+      if (segs.length) connect(segs, pitch + 2 * w + 1, g.polys(g.offset(region, 1e-3))).forEach(function (pth) {
+        out.push({ feature: feature, width: w, closed: false, pts: pth.pts, raft: true, overhangMm: 0, overhangRuns: [] });
+      });
+    }
+    rp.layers.forEach(function (rl, k) {
+      var top = k === rp.N - 1, grow = exp + (rp.N > 1 && !top ? RAFT.baseExtraMm : 0) + (rp.N > 1 && k === 0 ? RAFT.firstExtraMm : 0);
+      var R = g.offset(F, grow, 'Round'), out = [], sp = spacingOf(w, rl.h);
+      if (rl.kind === 'base') {
+        if (k === 0) fill(R, Math.PI / 2, w, 'Support', rl.h, out);
+        else fill(R, 0, baseSp + sp, 'Support', rl.h, out);
+      } else {
+        var ang = withSup ? Math.PI / 2 : (rl.iface % 2 ? 3 : 1) * Math.PI / 4;
+        fill(R, ang, ifSp + sp, 'Support interface', rl.h, out);
+      }
+      planesR.push({ index: k, printZ: rp.layers[k].printZ, sliceZ: null, h: rl.h });
+      layers.push({ index: k, printZ: rl.printZ, h: rl.h, areaMm2: g.area(R), wallCount: 0, wallLoopsByDepth: [], thinWalls: 0, areas: null, overhangMm2: 0,
+                    overhangPolys: [], sectionPolys: g.polys(R), paths: out });
+    });
+    if (withSup && rp.gap > 1e-6) {
+      /* under each support's first layer, a layer that closes the contact gap (it stands on the raft, as Bambu's trunk does) */
+      var Sg = g.unionAll(supFeet), out2 = [];
+      g.polys(Sg).forEach(function (pl) { if (pl.length > 2) out2.push({ feature: 'Support', width: w, closed: true, pts: pl.map(function (q) { return q; }), raft: true, overhangMm: 0, overhangRuns: [] }); });
+      var inS = g.offset(Sg, -w / 2);
+      if (!g.isEmpty(inS)) fill(inS, Math.PI / 2, 2 * w, 'Support', rp.gap, out2);
+      planesR.push({ index: rp.N, printZ: rp.lift, sliceZ: null, h: rp.gap });
+      layers.push({ index: rp.N, printZ: rp.lift, h: rp.gap, areaMm2: g.area(Sg), wallCount: 0, wallLoopsByDepth: [], thinWalls: 0, areas: null, overhangMm2: 0,
+                    overhangPolys: [], sectionPolys: g.polys(Sg), paths: out2 });
+    }
+    return { id: 'raft', name: 'Raft', flipped: false, nonSolid: false, role: 'raft', planes: planesR, support: null, triangles: 0, degenerate: 0,
+             sectionStats: { openChains: 0, stitched: 0, closedByGap: 0, droppedChains: 0 }, wallCountHistogram: {}, layers: layers, overhang: [] };
+  }
+
   function addBrims(g, perObject, planes, o) {
     if (!o.brimType || o.brimType === 'none' || !(o.brimWidthMm > 0)) return;
     var w = o.brimLineWidthMm > 0 ? o.brimLineWidthMm : o.nozzleMm * 1.25, gap = Math.max(0, o.brimObjectGapMm || 0);
@@ -1828,7 +3605,9 @@
     if (N < 1) return;
     perObject.forEach(function (P) {
       if (P.role !== 'part' || !P.layers.length) return;
-      if (perObject.some(function (Q) { return Q.role === 'brim' && Q.hostKey != null && Q.hostKey === P.key; })) return;   // its brim is built, with its supports
+      /* a part on supports: its brim is the supports card's (Brim round the foot, a brim object of its own) or none - never the auto brim
+         round its trunks' feet (the owner: Brim round the foot off is no brim) */
+      if (perObject.some(function (Q) { return (Q.role === 'brim' || Q.role === 'support') && Q.hostKey != null && Q.hostKey === P.key; })) return;
       var S0 = P.S[0];
       if (!S0 || g.isEmpty(S0)) return;
       var outers = g.polys(S0).filter(function (p) { return signedArea(p) > 0; });
@@ -1875,7 +3654,81 @@
    * is over air when its edges' midpoints fall outside the layer below's
    * section. The first layer is never an overhang.
    */
-  function splitOverhang(path, belowPolys, layerIndex, width, frac, subMm) {
+  /**
+   * A HANGING WALL THAT SPANS (docs/SLICER.md "A wall over a gap"). An Overhang wall is a wall whose whole width hangs. Bambu prints it two
+   * ways (the owner's Studio slice of the CR-TPU tower, measured move by move against the layer below): one that hugs the layer below - its
+   * centre 0.42 to 0.5 mm from the nearest line of that layer - at overhang_4_4_speed (10 mm/s), and one further out than that - the walls
+   * of a roof between two pillars, 29 mm in one move - at the bridge's speed. NSO printed both at 10 mm/s, and over a gap a soft filament
+   * laid that slowly hangs (the first line of the owner's roof). So a hanging piece is cut where it leaves the layer below by a line width
+   * on both sides: those runs carry span: true, with their points on a straight line dropped (one move, not one every overhangSubMm), and
+   * the planner prints them as a bridge. A run under `minMm` is not worth a change of speed. Nothing spans: the piece comes back as it was.
+   */
+  /* the lead-in a loop is begun with before a run that hangs over a gap (seamOffOverhang), mm along the held wall before it */
+  var SEAM_LEAD_IN_MM = 3;
+  /* the longest move from one top run to the next inside the same piece that is made without a stop (topRuns: path.glide) */
+  var TOP_GLIDE_MM = 15;
+  var FILL_FEATURES = { 'Sparse infill': 1, 'Internal solid infill': 1, 'Solid infill': 1, 'Top surface': 1, 'Bottom surface': 1, 'Bridge': 1 };
+  /** A polyline cut `mm` from its end: { head, tail }, sharing the cut point (the whole line is the tail when it is shorter). */
+  function cutFromEnd(pts, mm) {
+    var acc = 0;
+    for (var i = pts.length - 1; i > 0; i--) {
+      var a = pts[i - 1], b = pts[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (acc + l >= mm) {
+        var t = (mm - acc) / l, c = [b[0] + (a[0] - b[0]) * t, b[1] + (a[1] - b[1]) * t];
+        return { head: pts.slice(0, i).concat([c]), tail: [c].concat(pts.slice(i)) };
+      }
+      acc += l;
+    }
+    return { head: [pts[0]], tail: pts.slice() };
+  }
+
+  function spanPieces(piece, belowIn, width, minMm) {
+    if (!belowIn || !(minMm > 0) || !(width > 0)) return [piece];
+    var pts = piece.pts, n = pts.length, m = piece.closed ? n : n - 1;
+    if (m < 1) return [piece];
+    var far = [], len = [], anyFar = false, allFar = true, i;
+    for (i = 0; i < m; i++) {
+      var p = pts[i], q = pts[(i + 1) % n], ex = q[0] - p[0], ey = q[1] - p[1], el = Math.hypot(ex, ey), f = false;
+      if (el > 0) {
+        var nx = ey / el * width, ny = -ex / el * width, mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+        f = !belowIn(mx + nx, my + ny) && !belowIn(mx - nx, my - ny);
+      }
+      far.push(f); len.push(el);
+      if (f) anyFar = true; else allFar = false;
+    }
+    if (!anyFar) return [piece];
+    /* runs of edges with one flag, from a change of flag on (a closed piece is opened there) */
+    var start = 0;
+    if (piece.closed && !allFar) { for (i = 0; i < m; i++) if (far[i] !== far[(i + m - 1) % m]) { start = i; break; } }
+    var runs = [], cur = null;
+    for (var k = 0; k < m; k++) {
+      var e = (start + k) % m;
+      if (!cur || cur.far !== far[e]) { cur = { far: far[e], len: 0, pts: [pts[e]] }; runs.push(cur); }
+      cur.len += len[e]; cur.pts.push(pts[(e + 1) % n]);
+    }
+    /* a short far run is no span; then neighbours with one flag are one run */
+    runs.forEach(function (r) { if (r.far && r.len < minMm) r.far = false; });
+    var merged = [];
+    runs.forEach(function (r) {
+      var last = merged[merged.length - 1];
+      if (last && last.far === r.far) { last.len += r.len; last.pts = last.pts.concat(r.pts.slice(1)); } else merged.push(r);
+    });
+    if (!merged.some(function (r) { return r.far; })) return [piece];
+    var straight = function (ps) {
+      var out = [ps[0]];
+      for (var j = 1; j + 1 < ps.length; j++) {
+        var a = out[out.length - 1], b = ps[j], c = ps[j + 1];
+        var cr = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]), dt = (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]);
+        if (Math.abs(cr) > 1e-7 * (1 + Math.hypot(c[0] - a[0], c[1] - a[1])) || dt < 0) out.push(b);
+      }
+      out.push(ps[ps.length - 1]);
+      return out;
+    };
+    if (merged.length === 1 && piece.closed) return [{ over: true, closed: true, pts: pts, span: true }];        /* a ring wholly out in the air */
+    return merged.map(function (r) { return { over: true, closed: false, pts: r.far ? straight(r.pts) : r.pts, span: r.far }; });
+  }
+
+  function splitOverhang(path, belowPolys, layerIndex, width, frac, subMm, belowIn) {
     var pts = path.pts;
     if (layerIndex === 0 || !belowPolys) return [{ over: false, closed: true, pts: pts }];
     var n = pts.length;
@@ -1886,7 +3739,7 @@
     /* the point judged is the line's centre moved (frac - 0.5) widths toward the material - frac 1: its inner edge - along the normal to the right of the
        travel (material is on the left of a loop's travel). A line whose inner edge is over air hangs whole. */
     var reach = (frac != null && width > 0) ? (0.5 - frac) * width : 0, rnx = 0, rny = 0;
-    function over(x, y) { return !inside(belowPolys, x + rnx * reach, y + rny * reach); }
+    function over(x, y) { return !(belowIn ? belowIn(x + rnx * reach, y + rny * reach) : inside(belowPolys, x + rnx * reach, y + rny * reach)); }
     for (var i = 0; i < n; i++) {
       var p = pts[i], q = pts[(i + 1) % n];
       var ex = q[0] - p[0], ey = q[1] - p[1], el = Math.hypot(ex, ey);
@@ -1953,7 +3806,9 @@
       if (d < 1e-6) return;
       /* a stretch after the first stands off the sheet top below it by one part layer, and the sheet above it by one more (Bambu's, measured on the Negative Sphere and the Sphere:
          10.4, then 10.6, then 12 equal steps to 13.8, then 14.0 and 14.2 - not 14 steps from 10.4 to 14.0). The last stretch ends on the support's own last layer: no sheet above it. */
-      var hp = planes[0].h, offS = prev > z0 + 1e-6 && d > 4 * hp - 1e-6 ? hp : 0, offE = offS && a < zEnd - 1e-6 ? hp : 0;
+      /* (under the column rule the anchors are the contacts themselves - a dome's lowest, then each one over it - and Bambu's stretch runs in equal steps right up to one: 10.6 to 13.8 in 12, no layer stood off under it) */
+      var colGrid = P.sheet && P.sheet.rule === 'column';
+      var hp = planes[0].h, offS = prev > z0 + 1e-6 && d > 4 * hp - 1e-6 ? hp : 0, offE = offS && !colGrid && a < zEnd - 1e-6 ? hp : 0;
       if (offS) { zs.push(prev + offS); prev += offS; d = a - prev; }
       var n = Math.max(1, Math.ceil((d - offE) / maxH - 1e-9));
       for (var q = 1; q <= n; q++) zs.push(prev + (d - offE) * q / n);
@@ -2053,6 +3908,580 @@
    * P.sheet (the readout's numbers).
    */
   var OVER_STEP_MM = 0.1;
+
+  /* ===========================================================================
+     THE COLUMN RULE (o.supportInterfaceRule 'column'; docs/SUPPORT-GATE.md). One owner for the interface, and no constant
+     per head: the stack under the part is read off the part's own layers, column by column, as Bambu lays it.
+
+       blocked(i)   the part at support layer i's own height, grown by the xy distance (supportXyMm), and the part whose
+                    underside lies less than the gap (supportGapMm) over the layer's top: no support there, ever
+       contact(i)   where the next layer up would be blocked: the part's underside within gap + that layer over layer i
+       footprint    where the support stands under the part within reach (the generator's sheet, its caps and the tops of its
+                    tips): the stack is laid there whole, on every layer it is not blocked
+       rank         a column's layers counted down from its contact through the layers it is not blocked on: rank 0 - NI-1
+                    interface, NI - NI+NT-1 transition, deeper the tree (the support's own section, Support)
+
+     columnRule() cuts every layer of the support to it (the section less blocked, plus the stack) before its paths are built;
+     columnType() then lays the stack: each region one loop and a zig-zag, the tree outside it Support.
+     =========================================================================== */
+  var COLUMN_REACH_MM = 0.4;     /* the footprint: the support within gap + (NI + NT) layers + this under the part */
+  var COLUMN_FILL_IN_MM = 0.3;   /* a region's zig-zag ends this far in from its loop's line (the regional plate's IFILL_IN_MM) */
+  var COLUMN_MIN_MM2 = 0.05;
+  var COLUMN_SPILL_MM2 = 0.005;  /* a thin ring's bead may reach this much under or into the part (none to speak of: several rings at 0.05 touched 0.6 mm2) */
+  var COLUMN_EDGE_OUT_MM = 0.38;  /* the overhang grown this much is the footprint: Bambu's loop centre 0.17 past the face's edge, and half a line */
+  var COLUMN_CUP_REACH_MM = 0;     /* THE CUP, OFF (the owner, the 2x Oblique on the A1 mini: "Remove that bar and all of the patches" - on a slope the cup was a rail of Support under the stair's edge, and patches on the branches under the stack; Bambu has neither). 0.25 built it: */
+  var COLUMN_CUP_REACH_MM_WAS = 0.25;  /* THE CUP: a stack's lowest layer further than this past what is under it is cantilevered (its edge loop's bead
+                                      would stand on less than half its width) */
+  var COLUMN_TWIG_MM2 = 0.6;       /* a piece of the support's section smaller than this is a twig (a 0.85 mm thin column is 0.57) */
+  var COLUMN_RISER_XY_MM = 0.2;   /* a support layer keeps this off the part's layers in the gap over it (a stair's riser): Bambu's 2x Oblique, none closer than 0.18 */
+  var COLUMN_TWIG_XY_MM = 0.2;     /* ...and keeps this off the part sideways, not the tree's xy distance */
+  var COLUMN_CUP_BRIDGE_MM = 2;     /* a stack bridges a gap up to twice this between tips: no cup under the bridge */
+  var COLUMN_CUP_HOLD_MM = 0.3;    /* a cup's ring stands within this of the ring or tree under it (a line's width less a margin) */
+  var COLUMN_CUP_FIRST_MM = 0.1;   /* the cup's first ring: this far in from the stack's edge, under its edge loop */
+  var COLUMN_CUP_MIN_MM2 = 2;      /* ...over at least this much of it (a sliver of half a mm2 walled a whole dome's stack: Circular's collar) */
+  var COLUMN_CUP_RING_MM = 0.9;    /* the cup's wall: two lines */
+  var COLUMN_CUP_DEG = 45;
+  var COLUMN_CUP_HOLE_MM2 = 3;      /* ...not under a plate with a hole bigger than this (a rim round a cavity) */         /* ...stepping in this steeply going down */
+  var COLUMN_LAND_MM = 0;        /* under the stack a column may run on down as Support (the base) until it stands on the support's own material, at most this far.
+                                    0: no base - the transition spans between the tree's tips, as Bambu's does (a base of 3 mm printed as a block under every plate) */
+  var COLUMN_TUBE_FILL_BELOW_MM = 1;     /* the tree's rings are crossed with base lines from this far under the part's lowest stack up (Bambu's) */
+  var COLUMN_TUBE_MID_SNAP_MM = 0.4, COLUMN_TUBE_MID_MIN_MM = 0.5;   /* ...and a ring no line of the grid crosses takes one across its middle */
+  var COLUMN_TUBE_FILL_MAX_MM = 2.6;     /* ...a line across a RING (a branch near its top), no longer: branches joined into one body are hollow, and a line across that lies over air */
+  var COLUMN_TUBE_RING_MAX_MM2 = 6;      /* ...and only a piece this small is a ring (a 2 mm tip is 3.1 mm2, 2.6 across 5.3) */
+  var COLUMN_Z_OVER_XY_MM = 0.2;         /* Z overrides X/Y: the least a support keeps from a wall beside it under an overhang */
+  var COLUMN_TUBE_FILL_PITCH_MM = 2.5;   /* ...that far apart: Bambu's support_base_pattern_spacing */
+  var COLUMN_BASE_PITCH_MM = 2;  /* the base's lines (Support), as far apart as this: the transition over it spans no more */
+  /* the loops a stack's piece is laid with: one half a line in from its edge; a piece narrower than a line (a dome's or a cone's ring of contact,
+     a few tenths wide) one loop down its middle (its outer edge in by half its mean width, 2 x area / perimeter), as Bambu lays such a ring - and
+     that only where its bead stays out of the part and from under it (a line's width spilled under the part welds; into the xy clearance it does not). No loop: the piece is not laid. */
+  /* a region as hole-free outlines (for a prism each): a piece with a hole is cut into strips STACK_STRIP_MM wide, then narrower, until none has one */
+  var STACK_STRIP_MM = 1;
+  function holeFree(g, cs) {
+    var out = [];
+    var hasHole = function (pc) { return g.polys(pc).some(function (Q) { var a2 = 0; for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; } return a2 < 0; }); };
+    var take = function (pc, w, depth) {
+      if (!hasHole(pc) || depth > 3) { g.polys(pc).forEach(function (Q) { var a2 = 0; for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; } if (a2 > 0) out.push(Q.map(function (pt) { return [pt[0], pt[1]]; })); }); return; }
+      var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      g.polys(pc).forEach(function (Q) { Q.forEach(function (pt) { x0 = Math.min(x0, pt[0]); x1 = Math.max(x1, pt[0]); y0 = Math.min(y0, pt[1]); y1 = Math.max(y1, pt[1]); }); });
+      for (var x = x0; x < x1; x += w) {
+        var band = g.inter(pc, g.of([[[x, y0 - 1], [x + w, y0 - 1], [x + w, y1 + 1], [x, y1 + 1]]], 'Positive'));
+        if (!g.isEmpty(band)) g.parts(band).forEach(function (bp) { take(bp, w / 4, depth + 1); });
+      }
+    };
+    g.parts(cs).forEach(function (pc) { take(pc, STACK_STRIP_MM, 0); });
+    return out;
+  }
+  function columnLoops(g, pc, wI, Bj) {
+    var loops = g.polys(g.offset(pc, -wI / 2));
+    if (loops.length) return loops;
+    var per = 0; g.polys(pc).forEach(function (Q) { for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; per += Math.hypot(v[0] - u[0], v[1] - u[1]); } });
+    var tw = per > 0 ? 2 * g.area(pc) / per : 0;
+    if (!(tw > 0.02)) return [];
+    return g.polys(g.offset(pc, -0.45 * tw)).filter(function (Q) {
+      var a2 = 0; for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; }
+      if (!(a2 > 0)) return false;
+      if (!Bj || g.isEmpty(Bj)) return true;
+      var rp = g.of([Q], 'Positive'), bead = g.diff(g.offset(rp, wI / 2), g.offset(rp, -wI / 2));
+      return g.area(g.inter(bead, Bj)) <= COLUMN_SPILL_MM2;
+    });
+  }
+  function columnRule(g, P, perObject, planes, o) {
+    var C = CONSTANTS.supportSheet;
+    var NI = o.supportInterfaceLayers != null ? o.supportInterfaceLayers : C.interfaceLayers, NT = C.transitionLayers;
+    var gap = o.supportGapMm, xy = o.supportXyMm != null ? o.supportXyMm : 0.35, SP = P.planes || planes, n = SP.length;
+    var botGap = o.supportBottomGapMm > 0 ? o.supportBottomGapMm : 0, zOver = !!o.supportZOverridesXy, edgeOut = Math.max(0, COLUMN_EDGE_OUT_MM + (+o.supportExpansionMm || 0));
+    var hMax = 0; SP.forEach(function (p) { if (p.h > hMax) hMax = p.h; });
+    var reach = gap + (NI + NT) * hMax + COLUMN_REACH_MM;
+    var parts = perObject.filter(function (Q) { return Q.role === 'part'; });
+    var host = P.hostKey != null ? parts.find(function (Q) { return Q.key != null && Q.key === P.hostKey; }) || null : null;
+    var hosts = host ? [host] : parts;
+    var U = function (list) { return list.length ? g.unionAll(list) : null; };
+    /* the part's overhang at each of its layers, at the threshold angle (supportThresholdDeg): the layer's section past the one under it by more than
+       a layer / tan(angle) */
+    /* a piece of the part's section smaller than a bead (a line squared: a dome's pole a hair under the slice plane) is not printed: it makes no
+       contact and no overhang (it made a contact of its own a layer under the dome's, and the support's grid was anchored there, off Bambu's) */
+    var specMm2 = o.outerWallWidthMm * o.outerWallWidthMm;
+    var th = (o.supportThresholdDeg || 30) * Math.PI / 180, ovByK = [], zLo = SP[0].printZ, zHi = SP[n - 1].printZ + reach;
+    for (var k3 = 1; k3 < planes.length; k3++) {
+      if (planes[k3].printZ < zLo || planes[k3].printZ - planes[k3].h > zHi) continue;
+      var ovk = [];
+      hosts.forEach(function (Q) {
+        if (g.isEmpty(Q.S[k3])) return;
+        var ov = g.isEmpty(Q.S[k3 - 1]) ? Q.S[k3] : g.diff(Q.S[k3], g.offset(Q.S[k3 - 1], planes[k3].h / Math.tan(th)));
+        if (!g.isEmpty(ov)) ov = g.dropSmall(ov, specMm2);
+        if (!g.isEmpty(ov)) ovk.push(ov);
+      });
+      if (ovk.length) ovByK[k3] = U(ovk);
+    }
+    /* Z overrides X/Y: what of the part stands anywhere over each plane (its shadow), worked down from the top once */
+    var shadow = null;
+    if (zOver) {
+      shadow = []; var acc = null;
+      for (var ks = planes.length - 1; ks >= 0; ks--) {
+        hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[ks])) acc = acc ? g.union(acc, Q.S[ks]) : Q.S[ks]; });
+        shadow[ks] = acc;
+      }
+    }
+    var blocked = [], blockedHard = [], blockedTree = [], blockedTwig = [], contact = [], near = [];
+    for (var i = 0; i < n; i++) {
+      var zt = SP[i].printZ, zb = zt - SP[i].h, hn = i + 1 < n ? SP[i + 1].h : planes[0].h;
+      var lat = [], ver = [], up = [], nr = [], upOv = [], bot = [];
+      for (var k = 0; k < planes.length; k++) {
+        var pz = planes[k].printZ, b = pz - planes[k].h;
+        if (b > zt + reach) break;
+        /* the part's top face a bottom distance or less under this layer (supportBottomGapMm): the layer does not stand on it */
+        if (botGap > 0 && pz <= zb + 1e-6 && zb - pz < botGap - 1e-6) hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) bot.push(Q.S[k]); });
+        if (pz <= zb + 1e-6) continue;
+        var cs = [], csUp = [];
+        hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) { cs.push(Q.S[k]); var big = g.dropSmall(Q.S[k], specMm2); if (!g.isEmpty(big)) csUp.push(big); } });
+        if (!cs.length) continue;
+        var d = b - zt;
+        if (d < -1e-6) Array.prototype.push.apply(lat, cs);
+        else if (d < gap - 1e-6) Array.prototype.push.apply(ver, cs);
+        else if (d < gap + hn - 1e-6) { Array.prototype.push.apply(up, csUp); if (ovByK[k]) upOv.push(ovByK[k]); }
+        if (d >= -1e-6) Array.prototype.push.apply(nr, cs);
+      }
+      var bl = [], L0 = U(lat), V0 = U(ver), hard = [], B0 = U(bot);
+      var NR = null;
+      if (zOver) { for (var kz = 0; kz < planes.length; kz++) if (planes[kz].printZ - planes[kz].h >= zt - 1e-6) { NR = shadow[kz]; break; } }
+      /* the part beside a layer, grown by the xy distance - or, with Z overrides X/Y, by COLUMN_Z_OVER_XY_MM where the part stands over the layer */
+      var sideOf = function (X) { return NR && xy > COLUMN_Z_OVER_XY_MM ? g.union(g.diff(g.offset(X, xy), g.diff(NR, X)), g.offset(X, COLUMN_Z_OVER_XY_MM)) : g.offset(X, xy); };
+      if (L0) {
+        /* Z OVERRIDES X/Y: under the part (where it stands within reach over this layer) the support keeps the top distance and comes in to
+           COLUMN_Z_OVER_XY_MM of the wall beside it; elsewhere the xy distance, as ever */
+        bl.push(sideOf(L0));
+        hard.push(L0);
+      }
+      if (B0) { bl.push(B0); hard.push(B0); }
+      /* ...and the part a gap or less over it (a slope's next layer, its riser) kept the gap's own distance sideways (COLUMN_RISER_XY_MM): a stair's
+         tread stood to the riser's edge, a bead's corner under every overhang wall up the slope (the owner's 2x Oblique welded: 8 % of its
+         support beads within 0.1 mm of the part, Bambu's 02.09 none under 0.15) - the treads now end short of it, a slope parallel to the part's */
+      if (V0) { bl.push(g.offset(V0, COLUMN_RISER_XY_MM)); hard.push(V0); }
+      /* a contact reaches past the edge of an overhang as the footprint does (not past a wall: the part's section beside it is no underside) */
+      var UP = U(up), UO = U(upOv);
+      blocked.push(U(bl)); blockedHard.push(U(hard)); contact.push(UP && UO ? g.union(UP, g.offset(UO, edgeOut)) : UP); near.push(U(nr));
+      /* the tree (the support's own section, not the stack) keeps the xy distance from the part just over it too: a branch climbing past an
+         overhang's edge (into a cavity, by the rim's hole) stood a bead's width under the rim's first layer */
+      blockedTree.push(V0 ? U([U(bl), sideOf(V0)]) : U(bl));
+      /* a twig (a horn's tip, a thin column: a piece of the support's section under COLUMN_TWIG_MM2) keeps COLUMN_TWIG_XY_MM: Bambu's horn
+         stands its ring a hair off the wall under the shoulder it catches */
+      var blT = []; if (L0) blT.push(g.offset(L0, COLUMN_TWIG_XY_MM)); if (V0) blT.push(g.offset(V0, COLUMN_TWIG_XY_MM));
+      blockedTwig.push(U(blT));
+    }
+    /* the footprint, in plan: the support's sections where the part stands within reach over them, closed by half a line */
+    var fp = [];
+    for (var i2 = 0; i2 < n; i2++) if (near[i2] && !g.isEmpty(P.S[i2])) { var x = g.inter(P.S[i2], near[i2]); if (!g.isEmpty(x)) fp.push(x); }
+    var F = U(fp);
+    if (!F || g.isEmpty(F)) { P.col = null; return; }
+    var r0 = o.outerWallWidthMm / 2;
+    F = g.offset(g.offset(F, r0), -r0);
+    /* THE FOOTPRINT IS THE OVERHANG: the part's underside where it is an overhang at the threshold angle (supportThresholdDeg) - a layer's
+       section past the one under it by more than a layer / tan(angle) - grown COLUMN_EDGE_OUT_MM (Bambu's interface loop runs 0.17 mm past the
+       face's edge: the region's edge is that and half a line). Each overhang region is taken whole where the generator's support serves it
+       (meets its footprint above); a dome's steep flank is not an overhang, and is the tree's to hold (Bambu's tips). */
+    var ovs = ovByK.filter(function (x) { return x && !g.isEmpty(x); });
+    var FT = U(ovs);
+    if (FT && !g.isEmpty(FT)) {
+      var served = g.parts(g.offset(FT, edgeOut)).filter(function (pc) { return g.area(g.inter(pc, F)) > COLUMN_MIN_MM2; });
+      if (served.length) F = g.unionAll(served);
+    }
+    if (typeof process !== 'undefined' && process.env && process.env.NSO_COLUMN_DEBUG) console.log('column footprint: overhang ' + (FT ? g.area(FT).toFixed(1) : '-') + ' mm2 in ' + ovs.length + ' pieces, footprint now ' + g.area(F).toFixed(1));
+    var avail = [], I = [], T = [], R0 = [], rank = [];
+    for (var i3 = 0; i3 < n; i3++) avail.push(blocked[i3] ? g.diff(F, blocked[i3]) : F);
+    /* ranks, top down: rank r at layer i is the column available here whose rank r - 1 is on the layer above */
+    for (var i4 = n - 1; i4 >= 0; i4--) {
+      var rk = [];
+      /* past an overhang's edge the band is a contact on neighbouring layers: both start a stack, and the column holds 4 interface layers -
+         as Bambu's own do on a slope or a dome (13 - 24 % of their columns); following the topmost contact alone cut the plates' match */
+      rk.push(contact[i4] ? g.inter(avail[i4], contact[i4]) : null);
+      for (var r = 1; r < NI + NT; r++) {
+        var above = i4 + 1 < n ? rank[i4 + 1][r - 1] : null;
+        rk.push(above && !g.isEmpty(above) ? g.inter(avail[i4], above) : null);
+      }
+      rank[i4] = rk.map(function (cs) { return cs && !g.isEmpty(cs) ? g.dropSmall(cs, COLUMN_MIN_MM2) : null; });
+    }
+    /* THE BASE: under the stack's last rank a column runs on down through the layers it is not blocked on, as Support, until the support's own
+       section is there to stand on (it stops on it), at most COLUMN_LAND_MM - a column that lands nowhere goes, with what stood on it (below) */
+    var hMin = Infinity; SP.forEach(function (p) { if (p.h < hMin) hMin = p.h; });
+    var K = COLUMN_LAND_MM > 0 ? Math.max(1, Math.ceil(COLUMN_LAND_MM / hMin)) : 0, deepK = [], deep = [];
+    for (var i7 = n - 1; i7 >= 0; i7--) {
+      var dk = [];
+      for (var k2 = 0; k2 < K; k2++) {
+        var src = k2 === 0 ? (i7 + 1 < n ? rank[i7 + 1][NI + NT - 1] : null) : (i7 + 1 < n ? deepK[i7 + 1][k2 - 1] : null);
+        if (!src || g.isEmpty(src)) { dk.push(null); continue; }
+        var dd = g.inter(avail[i7], src);
+        if (!g.isEmpty(P.S[i7])) dd = g.diff(dd, P.S[i7]);
+        dk.push(g.isEmpty(dd) ? null : g.dropSmall(dd, COLUMN_MIN_MM2));
+      }
+      deepK[i7] = dk;
+      var dl = dk.filter(function (cs) { return cs && !g.isEmpty(cs); });
+      deep[i7] = dl.length ? g.unionAll(dl) : null;
+    }
+    var D = [];
+    for (var i5 = 0; i5 < n; i5++) {
+      var iL = rank[i5].slice(0, NI).filter(function (cs) { return cs && !g.isEmpty(cs); });
+      var tL = rank[i5].slice(NI).filter(function (cs) { return cs && !g.isEmpty(cs); });
+      var Ii = U(iL), Ti = U(tL);
+      if (Ii && Ti) Ti = g.diff(Ti, Ii);
+      Ii = Ii && !g.isEmpty(Ii) ? Ii : null; Ti = Ti && !g.isEmpty(Ti) ? Ti : null;
+      /* the support's section on this layer: never where it is blocked, and the stack laid whole - each piece of the stack only where it
+         stands on something (the layer below as it is now built): a piece the grown footprint laid over air goes, and what stood on it */
+      var S = P.S[i5], base = null;
+      if (!g.isEmpty(S)) {
+        var twigs = [], boughs = [];
+        g.parts(S).forEach(function (pc) { (g.area(pc) < COLUMN_TWIG_MM2 ? twigs : boughs).push(pc); });
+        var cut = function (list, B) { if (!list.length) return null; var u = g.unionAll(list); return B ? g.diff(u, B) : u; };
+        var bb = [cut(boughs, blockedTree[i5]), cut(twigs, blockedTwig[i5])].filter(function (cs) { return cs && !g.isEmpty(cs); });
+        base = bb.length ? (bb.length > 1 ? g.union(bb[0], bb[1]) : bb[0]) : g.diff(S, S);   /* all of it cut: an empty section, not the uncut one */
+      }
+      var wI0 = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm;
+      var layable = function (cs) {
+        if (!cs) return null;
+        var keep = g.parts(cs).filter(function (pc) { return columnLoops(g, pc, wI0, blockedHard[i5]).length > 0; });
+        return keep.length ? g.unionAll(keep) : null;
+      };
+      Ii = layable(Ii); Ti = layable(Ti);
+      var Di = deep[i5] ? (Ii || Ti ? g.diff(deep[i5], Ii && Ti ? g.union(Ii, Ti) : Ii || Ti) : deep[i5]) : null;
+      if (Di && g.isEmpty(Di)) Di = null;
+      /* ONE STACK, ONE OWNER (the owner's mouse: 16 supports under one part each laid the whole interface and transition under it - 8.8 x Bambu's
+         lines on the same plates, 55 g of interface against 6; the 2x Oblique's two supports laid two stacks, one's transition over the other's
+         interface). A support lays only what no support before it in this slice has laid at a height its layer meets (perObject._colClaim), and its
+         own section stops under what another's stack holds: the stack is printed once, by the first support that lays it */
+      var claimZt = SP[i5].printZ, claimZb = claimZt - SP[i5].h, Cl = null;
+      if (perObject._colClaim && perObject._colClaim.length) {
+        var cl = perObject._colClaim.filter(function (c) { return Math.min(c.zt, claimZt) - Math.max(c.zb, claimZb) > 1e-6; }).map(function (c) { return c.region; });
+        Cl = cl.length ? (cl.length > 1 ? g.unionAll(cl) : cl[0]) : null;
+      }
+      if (Cl) {
+        var less = function (cs) { if (!cs) return null; var r = g.diff(cs, Cl); r = g.isEmpty(r) ? null : g.dropSmall(r, COLUMN_MIN_MM2); return r && !g.isEmpty(r) ? r : null; };
+        Ii = less(Ii); Ti = less(Ti); Di = less(Di);
+        if (base && !g.isEmpty(base)) base = g.diff(base, Cl);
+      }
+      if (i5 > 0 && Di) {
+        var keepD = g.parts(Di).filter(function (pc) { return !g.isEmpty(P.S[i5 - 1]) && g.area(g.inter(pc, P.S[i5 - 1])) > COLUMN_MIN_MM2; });
+        Di = keepD.length ? g.unionAll(keepD) : null;
+      }
+      D.push(Di);
+      if (i5 > 0 && (Ii || Ti)) {
+        var under = P.S[i5 - 1];
+        var held = function (cs) {
+          if (!cs) return null;
+          var keep = g.parts(cs).filter(function (pc) { return g.area(g.inter(pc, under)) > COLUMN_MIN_MM2 || (base && g.area(g.inter(pc, base)) > COLUMN_MIN_MM2); });
+          return keep.length ? g.unionAll(keep) : null;
+        };
+        if (g.isEmpty(under)) { Ii = null; Ti = null; } else { Ii = held(Ii); Ti = held(Ti); }
+        if (R0[i5 - 1] === undefined) { /* nothing */ }
+      }
+      I.push(Ii); T.push(Ti); R0.push(Ii && rank[i5][0] ? g.inter(rank[i5][0], Ii) : null);
+      var parts2 = [];
+      if (base) parts2.push(base);
+      if (Ii) parts2.push(Ii);
+      if (Ti) parts2.push(Ti);
+      if (Di) parts2.push(Di);
+      P.S[i5] = parts2.length ? g.unionAll(parts2) : (base || S);
+      if (perObject._colClaim) {
+        var mine = [Ii, Ti, Di].filter(function (cs) { return cs && !g.isEmpty(cs); });
+        if (mine.length) perObject._colClaim.push({ zb: claimZb, zt: claimZt, region: mine.length > 1 ? g.unionAll(mine) : mine[0] });
+      }
+    }
+    /* THE CUP (the owner's: "the interfaces supported from below, within bridge tolerances"; Bambu's dome supports flare up to the plate's edge).
+       Where a stack's lowest layer reaches further than COLUMN_CUP_REACH_MM past the tree under it, a ring wall (COLUMN_CUP_RING_MM wide) stands
+       under its edge and steps in a layer's height each layer down (45 deg: every step printable) until it lands on the tree or closes - one
+       wall, the branches inside it keep their own. */
+    if (COLUMN_CUP_REACH_MM > 0 && !(typeof process !== 'undefined' && process.env && process.env.NSO_NO_CUP)) {
+      var cupStep = Math.tan(COLUMN_CUP_DEG * Math.PI / 180);
+      for (var ic = n - 1; ic >= 1; ic--) {   /* top down: a cup built under a wider layer holds the narrower layers under it too */
+        var stk = I[ic] && T[ic] ? g.union(I[ic], T[ic]) : I[ic] || T[ic];
+        if (!stk) continue;
+        var stkB = I[ic - 1] && T[ic - 1] ? g.union(I[ic - 1], T[ic - 1]) : I[ic - 1] || T[ic - 1];
+        var bottom = stkB ? g.diff(stk, stkB) : stk;
+        if (g.isEmpty(bottom)) continue;
+        bottom = g.dropSmall(bottom, COLUMN_MIN_MM2);
+        g.parts(bottom).forEach(function (pc) {
+          /* a plate with a hole (a rim round a cavity) has nothing for a cup to close onto: its rings narrow into the air. Its branches hold it,
+             as Bambu's rims are held */
+          /* a stack widening up a dome: its lowest layer here is a ring round the stack below - the cup stands under the whole of it */
+          var C0 = pc;
+          if (stkB) { var cu = g.parts(g.union(pc, stkB)).filter(function (q) { return !g.isEmpty(g.inter(q, pc)); }); if (cu.length) C0 = g.unionAll(cu); }
+          var holeArea = 0;
+          g.polys(C0).forEach(function (Q) { var a2 = 0; for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; } if (a2 < 0) holeArea += -a2 / 2; });
+          if (holeArea > COLUMN_CUP_HOLE_MM2) return;
+          var tree = P.S[ic - 1];
+          /* the piece's cantilever: its part further than the reach from what stands under it. Between tips a plate BRIDGES (the tree closed over
+             gaps of COLUMN_CUP_BRIDGE_MM each side is what holds it); a dome's stack stepping out over the layer under it more than
+             COLUMN_CUP_REACH_MM past that is cantilevered (its ring is over nothing: its own lower layer is the edge it steps from) */
+          var stepOut = stkB && !g.isEmpty(g.inter(g.offset(pc, 0.05), stkB));
+          /* a plate's lowest layer (no stack under it) stands on its tips (the planner's spots fill every plate, nso_support_gridpack.js fillSpots): no
+             wall round its edge - that was a block round the branches (the owner's: "the branches turning into a block") */
+          if (!stepOut) return;
+          var held = g.isEmpty(tree) ? tree : g.offset(g.offset(tree, COLUMN_CUP_BRIDGE_MM), -COLUMN_CUP_BRIDGE_MM);
+          var far = g.isEmpty(tree) ? pc : g.diff(pc, g.offset(held, COLUMN_CUP_REACH_MM));
+          if (g.isEmpty(far) || g.area(far) < COLUMN_CUP_MIN_MM2) return;
+          var C = C0, rings = [], landed = false;
+          for (var jc = ic - 1; jc >= 0; jc--) {
+            /* the cup narrows a layer's height a layer (its first ring right under the stack's edge loop), but not off the tree: where it is over a
+               branch already it stops there (it closes onto the tree, not past it) */
+            var underJ = P.S[jc], Cn = g.offset(C, jc === ic - 1 ? -COLUMN_CUP_FIRST_MM : -SP[jc + 1].h * cupStep);
+            C = !g.isEmpty(underJ) ? g.union(Cn, g.inter(C, g.offset(underJ, -COLUMN_CUP_RING_MM / 2))) : Cn;
+            if (g.isEmpty(C)) break;
+            var ring = g.diff(C, g.offset(C, -COLUMN_CUP_RING_MM)), ring0 = g.area(ring);
+            /* a ring the part cuts (it would stand round the cut, its rings above in the air there) ends the cup, unlanded */
+            if (blockedTree[jc]) { ring = g.diff(ring, blockedTree[jc]); if (ring0 - g.area(ring) > COLUMN_MIN_MM2) break; }
+            ring = g.dropSmall(ring, COLUMN_MIN_MM2);
+            if (g.isEmpty(ring)) break;
+            rings.push({ j: jc, ring: ring });
+            /* landed: no part of the ring further than a line from the tree under it */
+            var under = jc > 0 ? P.S[jc - 1] : null;                   /* what the ring stands on: the layer under it */
+            if (jc === 0 || (!g.isEmpty(under) && g.area(g.diff(ring, g.offset(under, o.outerWallWidthMm))) < COLUMN_MIN_MM2)) { landed = true; break; }
+          }
+          /* a cup that closes before it reaches the tree would hang its last ring in the air: none is built (a rim's ring narrows from both
+             sides and closed over air) */
+          if (typeof process !== 'undefined' && process.env && process.env.NSO_CUP_DEBUG) { var bb = g.bbox ? g.bbox(C0) : null; console.log('cup ' + P.name + ' z ' + SP[ic].printZ.toFixed(3) + ' piece ' + g.area(pc).toFixed(2) + ' C0 ' + g.area(C0).toFixed(2) + ' far ' + g.area(far).toFixed(2) + ' rings ' + rings.length + (rings.length ? ' down to z ' + SP[rings[rings.length - 1].j].printZ.toFixed(3) : '') + (landed ? ' LANDED' : ' dropped') + ' ' + JSON.stringify(g.polys(C0).map(function (Q) { var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; Q.forEach(function (v) { x0 = Math.min(x0, v[0]); x1 = Math.max(x1, v[0]); y0 = Math.min(y0, v[1]); y1 = Math.max(y1, v[1]); }); return [+x0.toFixed(1), +x1.toFixed(1), +y0.toFixed(1), +y1.toFixed(1)]; }))); }
+          /* every ring stands on what is under it: from the landing up, a ring keeps only what is within COLUMN_CUP_HOLD_MM of the ring or the
+             tree under it - a band narrowing from both sides (a horseshoe of rim) closes over the air, and that much of it is not built */
+          if (landed) {
+            var kept = [];
+            for (var rr = rings.length - 1; rr >= 0; rr--) {
+              var rg = rings[rr], belowJ = rg.j > 0 ? P.S[rg.j - 1] : null;
+              if (rr < rings.length - 1) {
+                var prev = kept.length ? kept[kept.length - 1] : null;
+                var rest = prev && prev.j === rg.j - 1 ? (g.isEmpty(belowJ) ? prev.ring : g.union(belowJ, prev.ring)) : belowJ;
+                rg = { j: rg.j, ring: g.isEmpty(rest) ? null : g.dropSmall(g.inter(rg.ring, g.offset(rest, COLUMN_CUP_HOLD_MM)), COLUMN_MIN_MM2) };
+                if (!rg.ring || g.isEmpty(rg.ring)) break;
+              }
+              kept.push(rg);
+            }
+            /* ...and a cup whose rings stop short of the stack holds nothing: its kept rings were a slab a layer under the stack, the air between them
+               (the Negative Sphere2's horseshoe ends) - all or nothing */
+            if (kept.length === rings.length) kept.forEach(function (r) { P.S[r.j] = g.isEmpty(P.S[r.j]) ? r.ring : g.union(P.S[r.j], r.ring); });
+          }
+        });
+      }
+    }
+    if (typeof process !== 'undefined' && process.env && process.env.NSO_COLUMN_DEBUG) {
+      var A = function (cs) { return cs && !g.isEmpty(cs) ? g.area(cs).toFixed(2) : '-'; };
+      console.log('column rule ' + P.name + ' (' + (host ? host.name : 'all parts') + '): footprint ' + A(F) + ' mm2');
+      for (var i6 = 0; i6 < n; i6++) if (SP[i6].printZ > +process.env.NSO_COLUMN_DEBUG) console.log('  z ' + SP[i6].printZ.toFixed(3) + ' S ' + A(P.S[i6]) + ' blocked∩F ' + A(blocked[i6] ? g.inter(F, blocked[i6]) : null) + ' contact∩F ' + A(contact[i6] ? g.inter(F, contact[i6]) : null) + ' I ' + A(I[i6]) + ' T ' + A(T[i6]));
+    }
+    P.col = { I: I, T: T, D: D, R0: R0, NI: NI, NT: NT, footprint: F, blocked: blocked, blockedHard: blockedHard, rank: rank };
+  }
+
+  /* the stack laid: each of a layer's regions one loop round its edge (half a line in) and a zig-zag inside it at Bambu's interface
+     pitch (a line and 0.04), the first layer of a stack at 110 degrees; every path outside the stack is Support.
+     SQUARE TO THE BRIDGE (Bambu Studio 02.09, the owner's mouse1 slice: transition 90, then 93.6 / 3.6 / 93.6 under a bridge at 3.6; the
+     owner: "every interface is square from the bridge above - parallel lines weld easier"): above its first layer a stack takes the angle
+     of the part's layer that bridges its top - the top layer square to it, and so on down, one turn a layer. */
+  var STUDIO36_DEG = 3.6;   /* Studio 02.09's bridge over the owner's mouse1 supports, and the stack's turn under it (layers 210 - 219) */
+  function columnType(g, P, SP, o, host, planes, hostStacks) {
+    var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, pitch = wI + 0.04, aD = (o.infillDirectionDeg || 45) * Math.PI / 180;
+    var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, stackIdx = [], regs = [], sheets = [], up = [];
+    var NI = P.col.NI, NT = P.col.NT;
+    P.layers.forEach(function (L, j) {
+      var I = P.col.I[j], T = P.col.T[j];
+      var R = I && T ? g.union(I, T) : I || T;
+      regs[j] = R;
+      stackIdx[j] = R && j > 0 && regs[j - 1] && g.area(g.inter(R, regs[j - 1])) > 0.05 ? stackIdx[j - 1] + 1 : 0;
+    });
+    /* how many of the stack's layers lie over each one, and the angle of the part's layer on its top (the solid fill's: infillDirectionDeg, turned a
+       quarter on every other layer - its Bridge over the stack is laid at it) */
+    /* the lowest stack under the part - any of its supports' (a stack has one owner: the 2x Oblique's second tree owned none, and every one of its
+       rings stood hollow - the owner's "the tips are still not complete on the other tree") */
+    var tubeFillFrom = null, hostFillFrom = null;
+    (hostStacks || []).forEach(function (st) { var zf = st.zb - COLUMN_TUBE_FILL_BELOW_MM; if (tubeFillFrom == null || zf < tubeFillFrom) tubeFillFrom = zf; if (hostFillFrom == null || zf < hostFillFrom) hostFillFrom = zf; });
+    for (var jf = 0; jf < P.layers.length; jf++) if (regs[jf] && !g.isEmpty(regs[jf])) { var zf2 = SP[jf].printZ - SP[jf].h - COLUMN_TUBE_FILL_BELOW_MM; if (tubeFillFrom == null || zf2 < tubeFillFrom) tubeFillFrom = zf2; break; }
+    for (var ju = P.layers.length - 1; ju >= 0; ju--) up[ju] = regs[ju] && ju + 1 < P.layers.length && regs[ju + 1] && stackIdx[ju + 1] === stackIdx[ju] + 1 ? up[ju + 1] + 1 : 0;
+    var PLh = (host && host.planes) || planes, dirB = (o.infillDirectionDeg || 0) * Math.PI / 180;
+    /* the bridge over a stack's top: the lowest of the part's layers over it (within 1.5 mm) whose Bridge / Bottom surface lines cross the top's
+       region - their own direction (the longest run's), so a slope's or a dome's stack takes the layer that really rests on it, gap or none;
+       else the part's first layer a gap over the top, by the solid fill's turn */
+    var bridgeMemo = {};
+    function bridgeAngleOver(jt) {
+      if (bridgeMemo[jt] !== undefined) return bridgeMemo[jt];
+      var res = null, zt = SP[jt].printZ, Rt = regs[jt];
+      var HL = host && host.layers;
+      if (HL && Rt && PLh) {
+        var Rtp = g.polys(g.offset(Rt, 0.2));
+        for (var ih = 0; ih < PLh.length && res == null; ih++) {
+          if (!(PLh[ih].printZ > zt + 1e-6) || PLh[ih].printZ > zt + 1.5) continue;
+          var Lh = HL[ih], bestL = 0;
+          if (!Lh || !Lh.paths) continue;
+          Lh.paths.forEach(function (pth) {
+            if (pth.feature !== 'Bridge' && pth.feature !== 'Bottom surface') return;
+            for (var q = 1; q < pth.pts.length; q++) {
+              var a = pth.pts[q - 1], b = pth.pts[q], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+              if (l > bestL && inside(Rtp, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) { bestL = l; res = Math.atan2(b[1] - a[1], b[0] - a[0]); }
+            }
+          });
+          if (res != null && bestL < 0.6) res = null;                       /* a stub is no direction */
+        }
+      }
+      if (res == null && PLh && PLh.length) {
+        var zg = zt + (o.supportGapMm || 0);                                  /* the part's first layer over the stack is a gap over its top */
+        for (var ig = 0; ig < PLh.length; ig++) if (PLh[ig].printZ - PLh[ig].h >= zg - 1e-6) { res = ig % 2 === 0 ? dirB : dirB + Math.PI / 2; break; }
+      }
+      bridgeMemo[jt] = res;
+      return res;
+    }
+    P.layers.forEach(function (L, j) {
+      var I = P.col.I[j], T = P.col.T[j], R = regs[j];
+      if (P.col.R0[j]) sheets.push({ topLayer: j, zLo: SP[Math.max(0, j - NI - NT + 1)].printZ - SP[Math.max(0, j - NI - NT + 1)].h, zHi: SP[j].printZ, areaMm2: g.area(P.col.R0[j]), tips: 0 });
+      var out = [];
+      var Rp = R ? g.polys(g.offset(R, 1e-3)) : [];
+      L.paths.forEach(function (p) {
+        if (p.colPlate) { out.push(p); return; }
+        if (!Rp.length) { p.feature = 'Support'; out.push(p); return; }
+        /* the tree's paths outside the stack: a path is cut where it runs into a region (the region's own loop replaces the wall there) */
+        var pts = p.pts, np = pts.length, m = p.closed ? np : np - 1, dense = [];
+        for (var e = 0; e < m; e++) {
+          var a = pts[e], b = pts[(e + 1) % np], l = Math.hypot(b[0] - a[0], b[1] - a[1]), ns = Math.max(1, Math.ceil(l / 0.2));
+          for (var q = 0; q < ns; q++) dense.push([a[0] + (b[0] - a[0]) * q / ns, a[1] + (b[1] - a[1]) * q / ns]);
+        }
+        if (!p.closed && np) dense.push(pts[np - 1]);
+        var inn = dense.map(function (pt) { return inside(Rp, pt[0], pt[1]); });
+        if (!inn.some(Boolean)) { p.feature = 'Support'; out.push(p); return; }
+        var run = [];
+        /* ...and a run shorter than a millimetre is no line (a dab where a ring's cut ends meet the stack: the owner's "patches") */
+        var flush = function () { var lr = 0; for (var qq = 1; qq < run.length; qq++) lr += Math.hypot(run[qq][0] - run[qq - 1][0], run[qq][1] - run[qq - 1][1]); if (run.length >= 2 && lr >= 1) { var np2 = {}; Object.keys(p).forEach(function (kk) { np2[kk] = p[kk]; }); np2.pts = run; np2.closed = false; np2.feature = 'Support'; out.push(np2); } run = []; };
+        for (var q2 = 0; q2 < dense.length; q2++) { if (inn[q2]) flush(); else run.push(dense[q2]); }
+        if (p.closed && run.length && !inn[0]) { run.push(dense[0]); }
+        flush();
+      });
+      if (R) {
+        var mode = o.supportInterfaceAngle || 'bridge', ang;
+        if (mode === 'studio36') ang = stackIdx[j] === 0 ? Math.PI / 2 : (STUDIO36_DEG * Math.PI / 180) + Math.PI / 2 + (up[j] % 2) * Math.PI / 2;
+        else if (mode === 'profile') ang = stackIdx[j] === 0 ? ((o.supportAngleDeg || 0) + 90) * Math.PI / 180 : ((o.bridgeAngleDeg || STUDIO36_DEG) + 90 + (up[j] % 2) * 90) * Math.PI / 180;
+        else if (mode === 'crosshatch') ang = stackIdx[j] === 0 ? 110 * Math.PI / 180 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2);
+        else {
+          var bA = stackIdx[j] > 0 ? bridgeAngleOver(j + up[j]) : null;
+          ang = stackIdx[j] === 0 ? 110 * Math.PI / 180 : bA != null ? bA + Math.PI / 2 + (up[j] % 2) * Math.PI / 2 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2);
+        }
+        [[I, 'Support interface'], [T, 'Support transition']].forEach(function (rg) {
+          if (!rg[0]) return;
+          g.parts(rg[0]).forEach(function (pc) {
+            var loops = columnLoops(g, pc, wI, P.col.blockedHard[j]);
+            loops.forEach(function (ring) { if (ring.length > 2) out.push({ feature: rg[1], width: wI, closed: true, pts: ring, typed: true, colPlate: true }); });
+          });
+          var inner = g.offset(rg[0], -(wI / 2 + COLUMN_FILL_IN_MM));
+          if (g.isEmpty(inner)) return;
+          /* 'profile' (Bambu's rule): each point turns by its own depth under the contact over it (columnRule's ranks), not the region's -
+             a slope's stack is a top contact all the way up (Bambu's 2x Oblique: 135 on every 0.2 layer), the flat sheet under it one turn a
+             layer; a stack's lowest layer (its last rank) at support_angle + 90 */
+          var fills = [[inner, ang]];
+          if (mode === 'profile' && P.col.rank && P.col.rank[j]) {
+            fills = [];
+            var rem = inner, RK = P.col.rank[j];
+            for (var r = 0; r < RK.length && !g.isEmpty(rem); r++) {
+              if (!RK[r]) continue;
+              var pcR = g.inter(rem, RK[r]);
+              if (g.isEmpty(pcR)) continue;
+              rem = g.diff(rem, RK[r]);
+              g.parts(pcR).forEach(function (q) {
+                var first = r === RK.length - 1;
+                fills.push([q, first ? ((o.supportAngleDeg || 0) + 90) * Math.PI / 180 : ((o.bridgeAngleDeg || STUDIO36_DEG) + 90 + (r % 2) * 90) * Math.PI / 180]);
+              });
+            }
+            if (!g.isEmpty(rem)) fills.push([rem, ang]);
+          }
+          /* the profile's interface spacing (support_interface_spacing: the gap between lines) over a bead's spacing - 0.5 lays them 0.86 apart,
+             Bambu's own on the owner's P1S print that released clean; 0.1 the 0.46 of the dense sheet. Without one, the dense sheet's line + 0.04 */
+          var pj = o.supportInterfaceSpacingMm != null ? spacingOf(wI, SP[j].h || 0.2) + o.supportInterfaceSpacingMm : pitch;
+          var hullR = g.polys(g.offset(rg[0], 1e-3));
+          /* THE INTERFACE PATTERN (Bambu's Interface pattern; 'default' is the angle rule above): Rectilinear lays every layer of a stack one way
+             (the stack's first layer's), Rectilinear interlaced turns a quarter a layer, Grid lays both ways on every layer at twice the spacing,
+             Concentric rings in from the region's edge */
+          var ipat = o.supportInterfacePattern || 'default';
+          if (ipat !== 'default') {
+            var a0 = mode === 'profile' ? ((o.supportAngleDeg || 0) + 90) * Math.PI / 180 : mode === 'studio36' ? Math.PI / 2 : 110 * Math.PI / 180;
+            if (ipat === 'concentric') {
+              concentricFill(g, inner, wI, SP[j].h || 0.2, pj, false, null).forEach(function (pth) {
+                if (pth.pts.length > 1) out.push({ feature: rg[1], width: wI, closed: !!pth.closed, pts: pth.pts, sheetFill: true, colPlate: true });
+              });
+              return;
+            }
+            fills = ipat === 'grid' ? [[inner, a0, 2 * pj], [inner, a0 + Math.PI / 2, 2 * pj]]
+              : ipat === 'rectilinear_interlaced' ? [[inner, a0 + (stackIdx[j] % 2) * Math.PI / 2]] : [[inner, a0]];
+          }
+          fills.forEach(function (fl) {
+            if (fl[2]) { var sg2 = scanFill(g.polys(fl[0]), fl[1], fl[2], 0); if (sg2.length) connect(sg2, 3 * fl[2], hullR).forEach(function (pth) { out.push({ feature: rg[1], width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true }); }); return; }
+            var segs = scanFill(g.polys(fl[0]), fl[1], pj, 0);
+            if (segs.length) connect(segs, 3 * pj, hullR).forEach(function (pth) {
+              out.push({ feature: rg[1], width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true });
+            });
+          });
+        });
+      }
+      /* LINES INSIDE THE TUBE NEAR THE TOP (the owner's 2x Oblique against Bambu's: "both should have been within the tube"). Bambu's branch rings
+         carry its base pattern inside - rectilinear, a line or two across a ring - in half its rings from the stack's foot up and seldom lower; ours
+         were hollow, and the cup drew the lines outside the tube instead. From COLUMN_TUBE_FILL_BELOW_MM under the lowest stack of the part's
+         supports, each tree piece is crossed at COLUMN_TUBE_FILL_PITCH_MM at one angle (each layer's lines on the last's) */
+      /* THE BASE PATTERN (Bambu's Base pattern and its spacing): 'hollow' the walls alone; 'rectilinear' lines through every piece of the tree on
+         every layer, one way (Pattern angle), each layer's on the last's; 'rectilinear-grid' both ways; 'default' the ring lines below */
+      var bpat = o.supportBasePattern || 'default', bPitch = o.supportBaseSpacingMm > 0 ? o.supportBaseSpacingMm : COLUMN_TUBE_FILL_PITCH_MM;
+      if ((bpat === 'rectilinear' || bpat === 'rectilinear-grid') && !g.isEmpty(P.S[j])) {
+        var treeB = R ? g.diff(P.S[j], R) : P.S[j], inB = g.isEmpty(treeB) ? treeB : g.offset(treeB, -wI * 0.75), aB = (o.supportAngleDeg || 0) * Math.PI / 180;
+        if (!g.isEmpty(inB)) (bpat === 'rectilinear-grid' ? [aB, aB + Math.PI / 2] : [aB]).forEach(function (ab) {
+          scanFill(g.polys(inB), ab, bPitch, 0).forEach(function (sg) {
+            if (Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]) >= 1) out.push({ feature: 'Support', width: wI, closed: false, pts: [sg.a, sg.b], sheetFill: true, colPlate: true });
+          });
+        });
+      }
+      if (bpat === 'default' && tubeFillFrom != null && SP[j].printZ >= tubeFillFrom && !g.isEmpty(P.S[j])) {
+        var treeJ = R ? g.diff(P.S[j], R) : P.S[j];
+        if (!g.isEmpty(treeJ)) g.parts(treeJ).forEach(function (pc) {
+          var inC = g.offset(pc, -wI * 0.5);
+          if (g.isEmpty(inC)) return;
+          if (pc.area() > COLUMN_TUBE_RING_MAX_MM2) return;                     /* no ring: branches joined into one body, hollow */
+          /* ...and only a ring UNDER A STACK: one of this support's own stacks within COLUMN_TUBE_FILL_BELOW_MM over it (a support that holds a low
+             rim and a high plate started every ring's lines at the low rim's height - deep under the high plate, over hollow), or - a tree that owns
+             no stack - from the lowest of the part's other supports', as before */
+          var under = hostFillFrom != null && SP[j].printZ >= hostFillFrom;
+          for (var jj = j + 1; !under && jj < P.layers.length && SP[jj].printZ - SP[jj].h - SP[j].printZ <= COLUMN_TUBE_FILL_BELOW_MM + 1e-6; jj++)
+            if (regs[jj] && !g.isEmpty(regs[jj]) && g.area(g.inter(regs[jj], g.offset(pc, 0.5))) > 0.05) under = true;
+          if (!under) return;
+          var cs2 = scanFill(g.polys(inC), aD, bPitch, 0), got = 0;
+          cs2.forEach(function (sg) {
+            var a0 = sg.a, b0 = sg.b;
+            var lnF = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]);
+            if (lnF > COLUMN_TUBE_FILL_MAX_MM) { got++; return; }      /* no ring: a body of branches joined, hollow - a line across it would lie over air */
+            if (lnF >= 1) { out.push({ feature: 'Support', width: wI, closed: false, pts: [a0, b0], sheetFill: true, colPlate: true }); got++; }
+          });
+          /* A RING THE GRID MISSES (the owner: "the tips are still not complete" - a tip's ring is 1.5 - 2 mm across, the grid's lines 2.5 apart, and
+             most tips' rings stood hollow up to the stack): one line across its middle, on a COLUMN_TUBE_MID_SNAP_MM grid so a straight tip's lines
+             lie on one another, as Bambu lays a line in every lobe */
+          if (!got) {
+            var cA = Math.cos(aD), sA = Math.sin(aD), yLo = Infinity, yHi = -Infinity;
+            g.polys(inC).forEach(function (pl) { pl.forEach(function (q) { var yr = -q[0] * sA + q[1] * cA; if (yr < yLo) yLo = yr; if (yr > yHi) yHi = yr; }); });
+            var yMid = Math.round((yLo + yHi) / 2 / COLUMN_TUBE_MID_SNAP_MM) * COLUMN_TUBE_MID_SNAP_MM;
+            if (!(yMid > yLo && yMid < yHi)) yMid = (yLo + yHi) / 2;
+            scanFill(g.polys(inC), aD, 1e6, yMid).forEach(function (sg) {
+              var lnM = Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]);
+              if (lnM >= COLUMN_TUBE_MID_MIN_MM && lnM <= COLUMN_TUBE_FILL_MAX_MM) out.push({ feature: 'Support', width: wI, closed: false, pts: [sg.a, sg.b], sheetFill: true, colPlate: true });
+            });
+          }
+        });
+      }
+      var Dj = P.col.D && P.col.D[j];
+      if (Dj) {
+        var dIn = g.offset(Dj, -wI);
+        if (!g.isEmpty(dIn)) {
+          var dsegs = scanFill(g.polys(dIn), stackIdx[j] % 2 ? aD : aD + Math.PI / 2, COLUMN_BASE_PITCH_MM, 0);
+          if (dsegs.length) connect(dsegs, 1.5 * COLUMN_BASE_PITCH_MM, g.polys(g.offset(Dj, 1e-3))).forEach(function (pth) {
+            out.push({ feature: 'Support', width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true });
+          });
+        }
+      }
+      out.forEach(function (p) { p.overhangMm = p.overhangMm || 0; p.overhangRuns = p.overhangRuns || []; counts[p.feature] = (counts[p.feature] || 0) + 1; });
+      L.paths = out;
+    });
+    if (typeof process !== 'undefined' && process.env && process.env.NSO_COLUMN_DEBUG) console.log('column sheets ' + P.name + ' (' + (P.planes ? 'own grid' : 'shared grid') + '): tops at ' + sheets.map(function (sh) { return sh.zHi.toFixed(3) + ' (' + sh.areaMm2.toFixed(2) + ' mm2)'; }).join(', '));
+    P.sheet = {
+      hostName: host ? host.name : null, hostFound: !!host, sheets: sheets, tips: 0,
+      zLo: sheets.length ? Math.min.apply(null, sheets.map(function (s) { return s.zLo; })) : null,
+      zHi: sheets.length ? Math.max.apply(null, sheets.map(function (s) { return s.zHi; })) : null,
+      pathCounts: counts, overhangPaths: { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, overhangMm: { 'Support': 0, 'Support transition': 0, 'Support interface': 0 },
+      rule: 'column'
+    };
+  }
   function typeSupports(g, perObject, planes, o, minOver) {
     var C = CONSTANTS.supportSheet;
     var NI = o.supportInterfaceLayers != null ? o.supportInterfaceLayers : C.interfaceLayers, NT = C.transitionLayers, R = C.closeMm;   /* o.supportInterfaceLayers: a sheet built with more (sheet() opts.interfaceLayers) */
@@ -2063,6 +4492,13 @@
        further below it (C.stairLayers) */
     var stairHOf = function (SP) { return (C.stairLayers || 0) * (SP.length ? SP[SP.length - 1].h : 0.2); };
     var parts = perObject.filter(function (Q) { return Q.role === 'part'; });
+    /* the column rule's stacks of every support, by the part they hold (columnType's tube fill reads the part's lowest) */
+    var stacksBy = {};
+    perObject.forEach(function (Q) {
+      if (Q.role !== 'support' || !Q.col) return;
+      var SPq = Q.planes || planes, arr = stacksBy[Q.hostKey != null ? Q.hostKey : '*'] || (stacksBy[Q.hostKey != null ? Q.hostKey : '*'] = []);
+      for (var jq = 0; jq < Q.layers.length; jq++) if ((Q.col.I[jq] && !g.isEmpty(Q.col.I[jq])) || (Q.col.T[jq] && !g.isEmpty(Q.col.T[jq]))) { arr.push({ z: SPq[jq].printZ, zb: SPq[jq].printZ - SPq[jq].h }); break; }
+    });
     perObject.forEach(function (P) {
       if (P.role !== 'support') return;
       var SP = P.planes || planes;                                             // this support's own layers, and `planes` the part's
@@ -2076,6 +4512,7 @@
         if (!feet[i]) feet[i] = g.offset(g.offset(P.S[i], R), -R);
         return feet[i];
       };
+      if (P.col) { columnType(g, P, SP, o, host, planes, stacksBy[P.hostKey != null ? P.hostKey : '*']); return; }
       var tops = [], held = {};
       /* a footprint with its holes filled: what lies OUTSIDE a layer, not in
          a channel of it */
@@ -2088,14 +4525,24 @@
       }
       /* the part of layer i under the host's sections `over` - closed, less
          `cover` grown by half a line, opened by half a line */
+      /* the test before the islands, kept by layer and host union (both of a layer's exposedParts ask it) */
+      var reachMemo = new WeakMap();
+      function reaches(i, H) {
+        var m = reachMemo.get(H);
+        if (!m) { m = {}; reachMemo.set(H, m); }
+        if (!(i in m)) m[i] = g.area(g.inter(P.S[i], H)) > 1e-6;
+        return m[i];
+      }
+      /* `cover` may be a function: it is made only when the layer reaches under the host (most do not) */
       function topUnder(i, over, cover, grow, open) {
         if (open == null) open = w / 2;
         var H = g.unionAll(over.map(function (x) { return x.cs; }));
         // most layers reach under no host at all: one test, before the islands
-        if (!(g.area(g.inter(P.S[i], H)) > 1e-6)) return null;
+        if (!reaches(i, H)) return null;
         var isl = g.parts(P.S[i]).filter(function (p) { return g.area(g.inter(p, H)) > 1e-6; });
         if (!isl.length) return null;
         var t = g.offset(g.offset(g.unionAll(isl), R), -R);
+        if (typeof cover === 'function') cover = cover();
         t = g.diff(t, g.offset(cover, grow));
         t = g.dropSmall(g.offset(g.offset(t, -open), open), minOver);
         return g.isEmpty(t) ? null : t;
@@ -2109,7 +4556,7 @@
          a little up the slope, and closeMm of it hid the band's exposed
          edge) */
       function exposedParts(i, over) {
-        return { a: topUnder(i, over, P.footAt(i + 1), R), b: sloped(topUnder(i, over, filled(P.footAt(i + 1)), w / 4, w / 4), i) };
+        return { a: topUnder(i, over, function () { return P.footAt(i + 1); }, R), b: sloped(topUnder(i, over, function () { return filled(P.footAt(i + 1)); }, w / 4, w / 4), i) };
       }
       /* of a stair's tops (the two allowances: against a quarter line of the
          next layer and opened by a quarter line, as a band one line wide
@@ -2161,7 +4608,7 @@
         if (stairH > 0) {
           var deep = overAt(i, gap + stairH);
           if (deep.length > over.length) {
-            var t2 = sloped(topUnder(i, deep, filled(P.footAt(i + 1)), w / 4, w / 4), i);
+            var t2 = sloped(topUnder(i, deep, function () { return filled(P.footAt(i + 1)); }, w / 4, w / 4), i);
             if (t2) { t = t ? g.union(t, t2) : t2; tS = tS ? g.union(tS, t2) : t2; over = deep; }
           }
         }
@@ -2217,15 +4664,22 @@
          with the part further over it than that is the tree's; the walk's transition stays as it is). The walk down from a top finds a stack's ring only where it is wider than a line; a flank steps a few tenths
          of a mm a layer, so the walk typed its whole disc one way (Circular z 8.52: 69 mm of interface to Bambu's 39). The plate's fringe, where no part is over it at all,
          keeps the type the walk gave it. */
-      var ZONE_REACH_TRIM_MM = 0.1, ZONE_FAR_MM = 3;
+      var ZONE_REACH_TRIM_MM = 0.1, ZONE_FAR_MM = 3, ZONE_DOME_TRIM_MM = 0.2, DOME_PLATEAU_RATIO = 1.11;
       for (var jz = 0; jz < SP.length; jz++) {
         if (g.isEmpty(P.S[jz]) || !zones[jz] || !(zones[jz].i.length || zones[jz].t.length)) continue;
-        var hj = SP[jz].h, hostU = function (X) {
+        var hj = SP[jz].h, hostUat = function (jj, X) {
           var parts = [];
-          layersOverX(SP, jz, planes, X).forEach(function (k) { hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) parts.push(Q.S[k]); }); });
+          layersOverX(SP, jj, planes, X).forEach(function (k) { hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) parts.push(Q.S[k]); }); });
           return parts.length ? g.unionAll(parts) : g.empty();
-        };
-        var UI = hostU(gap + (NI - 1) * hj - ZONE_REACH_TRIM_MM), UT = hostU(gap + (NI + NT - 1) * hj - ZONE_REACH_TRIM_MM), UF = hostU(ZONE_FAR_MM);
+        }, hostU = function (X) { return hostUat(jz, X); };
+        /* UNDER A DOME THE INTERFACE'S REACH IS SHORTER: the part over a stack's top grows from the interface's reach to the transition's (a dome: 1.15 x in area on the Sphere; a flat floor 1.0), and
+           Bambu's interface there is the inner part only (the Sphere's plate at 9.32: transition outside R 2.4, interface in it; ours was all interface) */
+        var tjz = zones[jz].topI != null ? zones[jz].topI : jz, hjt = SP[tjz].h, trimI = ZONE_REACH_TRIM_MM;
+        if (ZONE_DOME_TRIM_MM > 0) {
+          var aI1 = hostUat(tjz, gap + (NI - 1) * hjt - ZONE_REACH_TRIM_MM), aT1 = hostUat(tjz, gap + (NI + NT - 1) * hjt - ZONE_REACH_TRIM_MM);
+          if (!g.isEmpty(aI1) && !g.isEmpty(aT1) && g.area(aT1) > DOME_PLATEAU_RATIO * g.area(aI1)) trimI = ZONE_DOME_TRIM_MM;
+        }
+        var UI = hostU(gap + (NI - 1) * hj - trimI), UT = hostU(gap + (NI + NT - 1) * hj - ZONE_REACH_TRIM_MM), UF = hostU(ZONE_FAR_MM);
         var oI = zones[jz].i.length ? g.unionAll(zones[jz].i) : g.empty(), oT = zones[jz].t.length ? g.unionAll(zones[jz].t) : g.empty();
         var keep = g.diff(g.union(oI, oT), g.diff(UF, UT)), fr = g.diff(keep, UT);
         var nI = g.union(g.inter(g.inter(keep, UI), oI), g.inter(fr, oI));                   /* a walk's transition stays transition: only an interface that lies deeper than the reach steps down */
@@ -2265,7 +4719,7 @@
         }
         if (exactOn && Q0exact) {
           var key = Math.round((sz + d - exShift) * 1e5);
-          hosts.forEach(function (Q) { var e = Q.exact && Q.exact[key]; if (e && !g.isEmpty(e)) cs.push(e); });
+          hosts.forEach(function (Q) { var e = Q.exactGet && Q.exactGet(key); if (e && !g.isEmpty(e)) cs.push(e); });
         }
         return cs.length ? g.unionAll(cs) : null;
       }
@@ -2280,12 +4734,10 @@
           if (!L.paths.length) return;
           [dInEx(j), dTrEx(j), dCl(j, dInEx(j)) + REACH_EXTRA_MM, dCl(j, dTrEx(j)) + REACH_EXTRA_MM, PLATE_UP_MM, PLATE_UP_LOW_MM].forEach(function (dd) { var z = SP[j].printZ + dd - exShift; zs[Math.round(z * 1e5)] = z; });
         });
-        var list = Object.keys(zs).map(function (k) { return zs[k]; }).sort(function (a, b) { return a - b; });
+        /* each height is cut when it is first read (most never are: a layer's six reaches, and only some are asked); exactAt keeps it by its height */
         hosts.forEach(function (Q) {
           if (!Q.exactAt || !Q.soupOk) return;
-          var cs = Q.exactAt(list);
-          Q.exact = {};
-          list.forEach(function (z, i) { Q.exact[Math.round(z * 1e5)] = cs[i]; });
+          Q.exactGet = function (key) { return Object.prototype.hasOwnProperty.call(zs, key) ? Q.exactAt([zs[key]])[0] : undefined; };
           Q0exact = true;
         });
       }
@@ -2315,13 +4767,13 @@
       var RIBBON_T_RATIO = 3;
       var RIBBON_SERPENTINE = true;
       var IFILL_RIBBON_MM = 0.38;   /* the ridge's ribbon: Bambu's zig-zag stands this far in from each loop's line (strokes 1.1 mm across a 0.46 band, not the whole ribbon)  */
-      var IFILL_IN_MM = 0.2;   /* the interface's hatch runs from loop to loop, as the transition's does (it was the slab inset a whole wall: only the wide parts of a ring were filled, and Bambu's interface ring is filled round); it stops this far short of the loops' line */
+      var IFILL_IN_MM = 0.3;   /* the interface's hatch runs from loop to loop, as the transition's does (it was the slab inset a whole wall: only the wide parts of a ring were filled, and Bambu's interface ring is filled round); it stops this far short of the loops' line. 0.2 laid a line 0.2 mm from the loop beside it, on top of it (the diamond's side strips had 3 lines to Bambu's 2: line length x1.13); 0.3 puts the line where Bambu's is (0.98 mm from the outer loop) and the length at x1.05. The transition's hatch reaches its loops in Bambu's (0.3 there left it 15 % short) */
       var REGION_FILL_GAP_MM = 0.04;
       var PLANAR_2ND_DIFF = 0.12;   /* a zone whose area's second difference over three layers is under this share of it is a plane's */
       var EXACT_OUTLINE = true;       /* A RIBBON PLATE (the ridge) is Bambu's: each layer the part's EXACT section at the layer's reach (one section, not the union of the layers up to it; the reach never past the stack top's own face: dCl), the loops' centre PLATE_OUT_MM + 0.12 past it (measured on all six pieces: the outer edge stands 0.33 - 0.38 past the outline). Domes keep the union cut: a single section at that reach is far wider than theirs. */
       var REACH_EXTRA_MM = 0;   /* the section is read this much higher: a plane's edge moves 2.75 mm for 1 mm of height, and Bambu's plate stood 0.19 mm past ours on the downhill side */
       var PLATE_OUT_MM = -0.11;
-      var HOLE_SNAP_MM = 0.3, CONE_REACH_MM = 0.18, DISC_REACH_MM = 0.24, DISC_CLOSING = 0.88, DISC_CLIP_MM = -0.07, PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
+      var LOOP_SMOOTH_MM = 0.4, HOLE_SNAP_MM = 0.3, CONE_REACH_MM = 0.18, DISC_REACH_MM = 0.24, DISC_CLOSING = 0.88, DISC_CLIP_MM = -0.07, PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
       var PLATE_UP_MM = 0.21;      /* the uphill edge: the plate stops where the part's section 0.21 mm over the layer begins (the face there stands 0.21 over it; Bambu's ribbon is 0.9 mm of the face's height, ours was 1.05) */
       var PLATE_BAND_MM = 0.7;      /* how far past the support mesh's footprint the outline may run */
       var CURVED_SHRINK_MM = 0.1;   /* on a curved face (the zone changes layer on layer) the host cut is this much narrower: a dome's plate was out past Bambu's */
@@ -2499,7 +4951,16 @@
                   }
                 }
               }
-              var loopIn = steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
+              /* A STEADY ZONE UNDER A DOME IS NOT A FLAT FLOOR: a dome's plateau layers keep their size too (Bambu's Sphere: 2.58 - 2.61 on every layer from the fourth), but the part over
+                 them is not flat - its section grows from the interface's reach to the transition's (1.15 - 1.16 x in area at the stack's top layer on the Sphere, 1.0 on a flat ring, 1.04 - 1.08 on the Negative Spheres' filleted floor) - and its loops lie in from the slab's edge
+                 (0.12) as on any dome, not out past it (0.15: ours stood 0.25 too far out, 2.83 and 2.90 to 2.60) */
+              var flatFloor = steady;
+              if (steady && DOME_PLATEAU_RATIO > 0) {
+                var tj0 = zones[j].topI != null ? zones[j].topI : j;                  /* a stack stands under one face: its top layer's reaches say what the face is */
+                var hI0 = hostExCs(tj0, dInEx(tj0)), hT0 = hostExCs(tj0, dTrEx(tj0));
+                if (hI0 && hT0 && !g.isEmpty(hI0) && !g.isEmpty(hT0) && g.area(hT0) > DOME_PLATEAU_RATIO * g.area(hI0)) flatFloor = false;
+              }
+              var loopIn = flatFloor ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
               var inLoop = g.offset(g.inter(Sj, sheetCs), -loopIn);
               hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
               var ZI = stI.length ? g.offset(g.unionAll(stI), w / 2) : g.empty(), ZT = stT.length ? g.offset(g.unionAll(stT), w / 2) : g.empty();
@@ -2508,7 +4969,7 @@
               if (hIc && steady && HOST_GROW_MM > 0) hIc = g.offset(hIc, HOST_GROW_MM);
               if (hTc && steady && HOST_GROW_MM > 0) hTc = g.offset(hTc, HOST_GROW_MM);
               if (EXACT_OUTLINE && !steady && ribbonSlab && Q0exact) {
-                var exAt = function (d) { var key = Math.round((SP[j].printZ + d - exShift) * 1e5), u = null; hosts.forEach(function (Q) { var e = Q.exact && Q.exact[key]; if (e && !g.isEmpty(e)) u = u ? g.union(u, e) : e; }); return u; };
+                var exAt = function (d) { var key = Math.round((SP[j].printZ + d - exShift) * 1e5), u = null; hosts.forEach(function (Q) { var e = Q.exactGet && Q.exactGet(key); if (e && !g.isEmpty(e)) u = u ? g.union(u, e) : e; }); return u; };
                 var eI = exAt(dCl(j, dInEx(j)) + REACH_EXTRA_MM), eT = exAt(dCl(j, dTrEx(j)) + REACH_EXTRA_MM);
                 if (eI && eT) {
                   var XO = PLATE_OUT_MM + loopIn;
@@ -2558,7 +5019,7 @@
                   if (!g.isEmpty(bridge)) inner = g.isEmpty(inner) ? g.inter(near, g.offset(bridge, wI)) : g.union(inner, g.inter(near, g.offset(bridge, wI / 2 + 0.05)));
                 }
                 g.polys(inner).forEach(function (ring) {
-                  if (ring.length > 2) L.paths.push({ feature: rg[1], width: wI, closed: true, pts: ring, typed: true });
+                  if (ring.length > 2) L.paths.push({ feature: rg[1], width: wI, closed: true, pts: (!flatFloor && !ribbonSlab && !cavGround && LOOP_SMOOTH_MM > 0) ? smoothRing(ring, LOOP_SMOOTH_MM) : ring, typed: true });
                 });
               });
             }
@@ -2829,9 +5290,10 @@
     var lines = [];
     lines.push(res.planes.length + ' layers at ' + res.options.layerMm + ' mm (first ' + res.options.firstLayerMm +
       ' mm), walls ' + res.options.outerWallWidthMm + ' / ' + res.options.innerWallWidthMm + ' mm, ' +
-      Math.round(res.options.sparseDensity * 100) + ' % ' + res.options.sparsePattern + ', support below ' +
+      Math.round(res.options.sparseDensity * 100) + ' % ' + patternLabel(res.options.sparsePattern) + ', support below ' +
       res.options.supportThresholdDeg + ' deg');
     res.objects.forEach(function (ob) {
+      if (ob.role === 'raft') { lines.push(ob.name + ': ' + res.raft.layers + ' layer(s) - ' + res.raft.base + ' base, ' + res.raft.interface + ' interface - top at ' + res.raft.topMm.toFixed(2) + ' mm, the plate on it at ' + res.raft.liftMm.toFixed(2)); return; }
       var st = ob.sectionStats;
       var hist = Object.keys(ob.wallCountHistogram).sort().map(function (k) {
         return k + ' wall' + (k === '1' ? '' : 's') + ' x' + ob.wallCountHistogram[k];
@@ -2933,6 +5395,7 @@
     L.push('; inner_wall_line_width = ' + o.innerWallWidthMm);
     L.push('; sparse_infill_line_width = ' + o.infillWidthMm);
     L.push('; wall_loops = ' + o.wallLoops);
+    if (o.wallGenerator === 'arachne') L.push('; wall_generator = arachne');     /* only then: a classic slice's text is as it was */
     L.push('; top_shell_layers = ' + o.topShellLayers);
     L.push('; bottom_shell_layers = ' + o.bottomShellLayers);
     L.push('; sparse_infill_density = ' + Math.round(o.sparseDensity * 100) + '%');
@@ -2984,7 +5447,23 @@
     brimFor: brimFor,
     brimWanted: brimWanted,
     thinWalls: thinWalls,
+    arachneWalls: arachneWalls,
     medialPaths: medialPaths,
+    concentricFill: concentricFill,
+    spiralFill: spiralFill,
+    hilbertFill: hilbertFill,
+    honeycomb3dFill: honeycomb3dFill,
+    honeycomb3dAt: honeycomb3dAt,
+    gyroidFill: gyroidFill,
+    linesFill: linesFill,
+    cubicAt: cubicAt,
+    adaptiveCubicLattice: adaptiveCubicLattice,
+    honeycombFill: honeycombFill,
+    lightningFill: lightningFill,
+    GYROID_SCALE: GYROID_SCALE,
+    hilbertPoint: hilbertPoint,
+    clipLine: clipLine,
+    patternLabel: patternLabel,
     toGcode: toGcode,
     describe: describe,
     loadKernel: loadKernel,

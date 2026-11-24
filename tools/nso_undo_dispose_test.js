@@ -101,8 +101,8 @@ vm.runInContext([
   ...LIFTED.map(n => fnSource(core, n)),
   // the selection outline, as app-sel-outline.js draws it (the worker path is not reached by a one-triangle piece, and
   // `window` is bare here: no NSO_Work)
-  'const OUTLINE_WORKER_TRIS = 50000; let edgeCache = new WeakMap(); const jobs = new WeakMap();',
-  ...['stripOutline', 'positionOf', 'cacheGet', 'cachePut', 'isFor', 'selected', 'useWorker', 'drawOutline', 'buildHere',
+  'const OUTLINE_WORKER_TRIS = 50000; const OUTLINE_NEARER = 0.002; let edgeCache = new WeakMap(); const jobs = new WeakMap();',
+  ...['outlineNearer', 'stripOutline', 'positionOf', 'cacheGet', 'cachePut', 'isFor', 'selected', 'useWorker', 'drawOutline', 'buildHere',
     'buildInWorker', 'refreshOutline'].map(n => fnSource(selOutline, n)),
   'this.__app = { pushUndo, clearUndo, clearRedo, undoLast, undoLastDiscard, redoLast, nsoReleaseGeometries, refreshOutline };'
 ].join('\n'), ctx, { filename: 'app-core.js (lifted)' });

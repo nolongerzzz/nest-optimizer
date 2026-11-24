@@ -1,0 +1,86 @@
+## Crop card - Lift (with Detach flange) moves in, Lasso is a new shape (2026-11-07)
+Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side in **`docs/LIFT.md` section 7**.
+- **Lift moved from Subtract to Crop**, as a button that reads like CROP (full width, lit while open). Pressing it
+  opens its panel in the card - count, *How far out counts*, Strip, **Detach flange** and its readout - and pressing
+  it again folds the panel away. Detach flange is now part of Lift (inside `#lift-panel`; `btn-detach` and
+  `detach-readout` kept). Subtract is Subtract B from A, Extract bit (with Carve), Punch, Hollow, Split to parts.
+- **Lift and a shape never run together:** Lift armed puts any Crop shape away, picking a shape folds Lift away,
+  shutting the Crop card folds Lift away. With the Crop card open a press on a piece only picks it; the one exception
+  is a piece Lift left in the air, which can be grabbed and dropped (`startMoveDrag`, `cropYieldsToLifted` in app-core).
+- **Lasso** is a sixth shape: drag a loop round what to copy on the screen (Alt-drag orbits). The loop is the rays
+  through its corners from the camera it was drawn in - a cone - so the copy is what the loop sees, front to back.
+  Engine: `{ kind: 'lasso', eye, dirs, near?, far? }` in `nso_crop.js` (extrude with a top scale, so it is exactly a
+  frustum). A loop that crosses itself is widened 5 microns so the copy closes.
+- **Gates:** `crop:engine` 6b (frustum closed form, 296 ok), `crop:drive` 8 and 9 (real-mouse lasso; Lift opens, folds,
+  Detach runs inside it, Lift/shape exclusivity), `page:manifest` (the Crop card is the Shape row, CROP, Cancel and the
+  Lift package), `subtract:card`, `shell:v3`, `ui:shell`, `wire:detach`, and the Lift drives (their Lift button is in
+  the Crop card, which stands over the left of the view: `nso_lift_plate_drive_lib.js` `setClearOfCard` slides the
+  picture right for the ones that click on a piece).
+- **Known, not from this change:** `shell:v3`'s CLEAR PLATE check fails on the branch before it too.
+- **Piece is off the card** (2026-11-07): the shape that took another piece as the cutter was left over from another
+  build and Box, Cylinder, Sphere, Outline and Lasso cover it. Removed from `index.html` and `app-crop-card.js` (its
+  state, readout, overlay and click-pick); the engine keeps `{ kind: 'piece' }` (`crop:engine` 4 still runs it). The
+  drive checks that used it now use Box (`wire:crop`'s refusal) or Outline of the star (`crop:shapes`'s refusal).
+- **Wall** (2026-11-07), the sixth shape: the manual stand-in for what Lift should find by itself. Click a flat
+  wall of the piece; a straight yellow line appears on the wall's outline (outermost loop of the coplanar patch, so a
+  bump is inside it); drag the handle, or click the piece (say behind a bump, from the side), to set how far out the line
+  is; CROP copies what stands outside it - the bump and nothing else with the line flush - and leaves the original alone
+  (Subtract the copy for a clean wall). Shift-click picks another wall. Engine `{ kind: 'wall', ... }` and
+  `NSO_Crop.wallFace`; the line is held 0.5 micron outside where it is set (see docs/CROP.md). Gates: `crop:engine` 6c,
+  `crop:drive` 5b. One wall at a time; the outline is the wall's own, not editable yet.
+- **Wall: the bump fixtures and the curved-surface refusal** (2026-11-07): `fixtures/crop-wall/` has `block_bump.stl`,
+  `sphere_bump.stl` and `cone_bump.stl` (made by `tools/nso_crop_wall_fixtures.js` with the app's kernel; closed). Wall
+  on the sphere or the cone's slope finds one facet of the curve; it now refuses in words ("that is a curved surface,
+  not a flat wall") rather than draw a line on a sliver. The cone's base is a wall (`crop:engine` 6d: 1 mm into it is
+  the closed form, within 0.05%). `crop:drive` 5b clicks the sphere and the cone with a real mouse.
+- **Wall's curved-surface refusal made robust** (2026-11-07): the first version only refused a clean one- or two-triangle
+  facet, so a click at a bump's foot on the sphere (where the bump re-cuts the facets into coplanar groups of 3-9
+  triangles) or on the cone's slope next to the pin still drew a line on a sliver. Now a patch is curved when it is under
+  1% of the piece's surface and over half its border bends away by under 20 degrees - every triangle of the sphere and
+  the cone's slope is refused, only the cone's base and the pin's flat end are walls.
+- **Lift's list** (2026-11-07): opening Lift scans every surface (top, each flat face that is a base, each curved surface)
+  once and lists what each holds, with a Lift button per row; the card starts on the surface that has the feature, so a bump
+  on a wall or a curve is no longer "0 features found". A curved surface is read from beside each small smooth patch: the
+  surface engine takes what lies outside its region to be the features, so only a seed beside a bump finds it (the cause of
+  "click slightly outside and it finds it"). New `lift:list`; `lift:any-face`, `lift:assembly` and `lift:plate` updated for the
+  new start (they put the card on the top first / expect the scan's cached reads). The gates that remain (hover reads
+  faces, off-piece resets to the top, clicks spent reading faces, Strip is per surface) are listed in docs/LIFT.md.
+- **Pieces move with the Crop card open** (2026-11-07): the card used to refuse every piece drag while open ("Cutter open -
+  close cutter to move pieces"). Now a press on a piece is the ordinary select-and-move whenever no shape is picked (or lent
+  to the Foam gun) and Lift is not armed (`cropCardIdle`, `NSO_CropCard.idle()`); with a shape up, or Lift armed, it is the
+  tool's, as before. `crop:drive` 6b drags a piece four ways.
+- **Lift highlights what it found** (2026-11-07): on opening, every liftable feature on every surface the scan read is tinted
+  and outlined in blue, not only on hover. The highlight showed the curved reads were too big (the sphere's "feature" was 301 mm²
+  for a 56 mm² dome: the engine grows its base region only while the normal turns under 12 deg over 4 mm, which an R15 curve
+  breaks, so the part of the base it never reached was lumped in with the bump). The scan now seeds a few ways round, out beyond
+  the bump's foot, and keeps the tightest read: 62 mm² on the sphere, 64 on the cone. `lift:list` checks the highlight (one block,
+  sphere, cone, and a block with bumps on two walls drawing both).
+- **Wall on a bump: the bendable loop** (2026-11-07): a click on a bump (a small patch: a dome, a pin, a block's bump top) draws the
+  loops of edges round it and picks its foot; click another drawn loop / crease edge to switch; CROP copies what is inside, triangle
+  for triangle, with the underside closed by Lift's own curved fill (so the copy follows the base's curve; Lift's detection is not
+  involved). `NSO_Crop.bumpLoops`, `{ kind: 'loop', tris }`, `NSO_LiftCurved.surface.island` (the island of a chosen set of triangles).
+  Volumes match the kernel: sphere dome 0.3%, cone pin 0.08%, block bump exact. Fixing the cone needed two sampling changes in
+  nso_lift_curved.js (corners near the root only; sample points across long triangles) - the fan of 30 mm triangles had given Lift a
+  fit through 10 far points, an underside 0.5 mm off the cone, and 166 mm3 for a 50 mm3 pin. Lift's own node suites pass unchanged.
+- **The patch Lift leaves** (2026-11-07, from "cone needs a complete patch, sphere a looser weave"): on the cone the plate patch lay
+  0.41 mm off the cone (0.88 worst) because the fill's neighbour-matching term pulls toward a fan's far corners; on the sphere it was
+  4,422 triangles for 28 mm2 because the lattice followed the dome's tiny root edges. Now a smooth fit (rms under 0.02 mm) fills with
+  the base alone, and the lattice follows the neighbours' triangle size (x1.6 on a smooth fit): sphere ~250 triangles at 0.006 mm,
+  cone 64 at 0.004 mm. `lift:list` 7 checks it in the app. The loop crop's copy uses the same fill.
+- **ButVase.3mf study** (2026-11-08; "Ornate Butterfly Pitcher", 947k triangles, one part named `single_color-219_fixed.stl`, one welded
+  shell, no separate bodies to peel off). Goal: list the butterflies, vines and handle individually, leave a plain vase. Findings, all
+  prototyped as numpy scripts in `tools/probes/vase/` (not yet in the app):
+  - Lift today reads 0 features: the piece is over `SCAN_MAX_TRIS` (150k) so only its top is scanned, and 96% of the area is one smooth
+    patch under the 30 deg crease rule - the feet of the features are soft blends, not creases.
+  - What works: **relief above a one-sided local base fit**. A coarse seed grid (5 mm); at each seed take the same-facing surface points
+    within 22 mm, fit a quadric height field to the lower envelope (start from the lowest 35%, refit keeping points < 0.25 mm over the
+    fit, 6 passes); a point's relief is its height above the nearest seed's fit. The vase body comes out flat (about 0 mm) and the
+    vines, leaves, butterflies and handle all stand out (`relief3d.py`, `bands.py`). ~15 s for 315k samples in numpy.
+  - Relief > 0.5 mm is still one connected region (vine, leaves, butterflies and handle are fused), so it must be split. Normal
+    divergence (signed curvature, `curv.py`) shows convex rims round every feature but only weak, broken concave seams; a distance-
+    transform watershed of the feature mask with h-maxima markers (`ws.py`, on the unwrapped (angle, z) image for now) splits it into
+    ~26 pieces that are recognisably leaves, butterfly wings, vine runs and handle sections - but also fragments one vine into
+    several runs and joins the lower vine branch to the handle, so a merge step (or a click-to-merge in the list) is still needed.
+  - Rim and base edges give false relief (fit has no support beyond the edge): mask them.
+  - A real port needs: spatial grid instead of cKDTree, geodesic (surface-graph) distance transform instead of the unwrapped image,
+    and each segment lifted through `NSO_LiftCurved.surface.island` + `lift` as the loop crop does (the handle has two root loops).

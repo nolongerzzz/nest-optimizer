@@ -197,6 +197,9 @@ jobs:
     # See WHERE IT RUNS above. [self-hosted, nso, main] for a full run and for a
     # dispatch with a comma in `shard`, [self-hosted, nso] for a dispatch that
     # names one shard, ubuntu-latest for everything else, and for every pull_request.
+    # ubuntu-latest is Ubuntu 26.04 since 2026-11-14: Playwright 1.56.1 would not
+    # install Chromium there (Tests #434, #435); 1.63.0 and later know 26.04, so keep
+    # package.json's playwright at one of those.
     runs-on: ${{ fromJSON(github.event_name != 'pull_request' && vars.CI_RUNNER == 'self-hosted' && (github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && !contains(inputs.shard, ',') && '["self-hosted","nso"]' || '["self-hosted","nso","main"]') || '"ubuntu-latest"') }}
     # A shard is ~8 minutes on a typical runner (~369s of tests + setup).
     # 15 was set when a shard was ~4 minutes; Tests #231 and #233 were

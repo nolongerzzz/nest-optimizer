@@ -570,6 +570,191 @@ async function crop(label, piece, shape, expect) {
   }
 
   /* =========================================================================
+     6b. Lasso: a loop drawn on the screen is a cone from the eye
+     The oracle is the closed form: a square loop of side a at depth D, seen from the
+     eye through a cube, is a frustum - the area at depth d is (a d / D)^2 - and the
+     cube's own faces at depths d0 and d1 cut it: V = a^2 (d1^3 - d0^3) / (3 D^2).
+     ========================================================================= */
+  console.log('\n=== 6b. lasso: the cone of rays through a loop ===');
+  {
+    const cube = boxSoup([-10, -10, -10], [10, 10, 10]), cubeP = { rawTris: cube }, E = [0, -100, 0];
+    const ring = pts => pts.map(([x, z]) => [x, 100, z]);          // a loop on the plane 100 mm in front of the eye
+    const sq = a => ring([[-a / 2, -a / 2], [a / 2, -a / 2], [a / 2, a / 2], [-a / 2, a / 2]]);
+    const frustum = (a, d0, d1, D) => a * a * (d1 ** 3 - d0 ** 3) / (3 * D * D);
+    await crop('lasso: a 10 mm square loop through a 20 mm cube', cubeP, { kind: 'lasso', eye: E, dirs: sq(10) },
+      { volume: frustum(10, 90, 110, 100), tol: 0.01, validate: true });
+    await crop('lasso: a 14 mm square loop, the same cube', cubeP, { kind: 'lasso', eye: E, dirs: sq(14) },
+      { volume: frustum(14, 90, 110, 100), tol: 0.01 });
+    const a = await crop('lasso: a loop wider than the cube is the whole cube', cubeP, { kind: 'lasso', eye: E, dirs: sq(60) }, { volume: 8000, tol: 0.001 });
+    check('...a copy of all of it: its 12 faces', a.ok && a.faces === 12, String(a.faces));
+    const n = 64, rr = 5, A0 = 0.5 * n * rr * rr * Math.sin(2 * Math.PI / n);
+    await crop('lasso: a 64-gon loop (a round one)', cubeP, { kind: 'lasso', eye: E, dirs: ring(Array.from({ length: n }, (_, i) => [rr * Math.cos(i / n * 2 * Math.PI), rr * Math.sin(i / n * 2 * Math.PI)])) },
+      { volume: A0 * (110 ** 3 - 90 ** 3) / (3 * 1e4), tol: 0.01 });
+    // winding does not matter, nor how long the rays are
+    const rev = sq(10).slice().reverse().map(d => d.map(v => v * 3));
+    await crop('lasso: the loop wound the other way, rays 3x as long', cubeP, { kind: 'lasso', eye: E, dirs: rev }, { volume: frustum(10, 90, 110, 100), tol: 0.01 });
+    // from above, and from an oblique eye: closed, the right depth of material, original untouched
+    await crop('lasso: seen from straight above', cubeP, { kind: 'lasso', eye: [0, 0, 100], dirs: [[-5, -5], [5, -5], [5, 5], [-5, 5]].map(([x, y]) => [x, y, -100]) },
+      { volume: frustum(10, 90, 110, 100), tol: 0.01 });
+    const eye3 = [70, -60, 50], aim = eye3.map(v => -v), L3 = Math.hypot(...aim), ctr = aim.map(v => v / L3);
+    const side = [ctr[1], -ctr[0], 0], sl = Math.hypot(side[0], side[1]), u = side.map(v => v / sl);
+    const w = [u[1] * ctr[2] - u[2] * ctr[1], u[2] * ctr[0] - u[0] * ctr[2], u[0] * ctr[1] - u[1] * ctr[0]];
+    const obl = [[-5, -4], [6, -3], [5, 5], [-4, 6]].map(([x, y]) => [0, 1, 2].map(k => ctr[k] * L3 + u[k] * x + w[k] * y));
+    const o = await crop('lasso: from an oblique eye, a skew loop', cubeP, { kind: 'lasso', eye: eye3, dirs: obl }, { validate: true });
+    check('...it is a part of the cube, not all of it', o.ok && o.volumeMm3 > 50 && o.volumeMm3 < 7500, f3(o.volumeMm3));
+    const bow = await crop('lasso: a bowtie (the loop crossed itself) keeps both lobes', cubeP, { kind: 'lasso', eye: E, dirs: ring([[-6, -3], [6, 3], [6, -3], [-6, 3]]) });
+    check('...more than one lobe, less than the cube', bow.ok && bow.volumeMm3 > 200 && bow.volumeMm3 < 8000, f3(bow.volumeMm3));
+    // plan agrees with run, builds nothing
+    const pl = await C.plan(cubeP, { kind: 'lasso', eye: E, dirs: sq(10) });
+    check('lasso: plan() agrees with run() and builds nothing', pl.ok && near(pl.volumeMm3, frustum(10, 90, 110, 100), 0.5) && !pl.tris);
+    // the cutter on its own: the preview's soup is closed, and the cone's own volume is the frustum between the depths given
+    const cs = await C.cutterSoup({ kind: 'lasso', eye: E, dirs: sq(10), near: 90, far: 110 });
+    check('lasso: cutterSoup draws the cone between near and far, closed', cs.soup && C.census(cs.soup).open === 0 && near(C.volume(cs.soup), frustum(10, 90, 110, 100), 0.5),
+      cs.soup ? f3(C.volume(cs.soup)) + ' mm3' : cs.reason);
+    const nf = await C.cutterSoup({ kind: 'lasso', eye: E, dirs: sq(10) });
+    check('...and with no depths and no piece it asks for them', !!nf.reason && /depths/.test(nf.reason), nf.reason);
+  }
+
+  /* =========================================================================
+     6c. Wall: one flat wall of a piece, a line parallel to it, and what stands outside the line
+     A 40 x 20 x 10 block with a 4 x 4 x 2 bump on its +x wall (x = 40). Closed forms: the line at
+     the wall holds the bump, 4 x 4 x 2 = 32; 1 mm out from it, 4 x 4 x 1 = 16; 1 mm INTO the wall,
+     the bump and a 1 mm skin of the whole wall, 32 + 20 x 10 x 1 = 232.
+     ========================================================================= */
+  console.log('\n=== 6c. wall: the bump on a wall, cropped off behind a line ===');
+  {
+    const kern = ctx.NSO_CSG, wasm = await kern.load();
+    const blk = kern.soupToManifold(wasm, boxSoup([0, 0, 0], [40, 20, 10])), bmp = kern.soupToManifold(wasm, boxSoup([39, 8, 3], [42, 12, 7]));
+    // the bump is 42 - 40 = 2 proud, and its base is 1 mm sunk into the block (so the union has no coplanar seam on the wall)
+    const both = blk.add(bmp), bumpy = kern.manifoldToSoup(both);
+    blk.delete(); bmp.delete(); both.delete();
+    const bumpyP = { rawTris: bumpy };
+    check('fixture: the block with its bump is closed, 8000 + 2 x 16 mm3', C.census(bumpy).open === 0 && near(C.volume(bumpy), 8000 + 32, 1e-3), String(C.volume(bumpy)));
+    // a triangle on the +x wall away from the bump: the wall is every triangle in its plane
+    let wallTri = -1, topTri = -1, bumpTopTri = -1;
+    for (let t = 0; t < bumpy.length / 9; t++) {
+      const o = t * 9, xs = [bumpy[o], bumpy[o + 3], bumpy[o + 6]], ys = [bumpy[o + 1], bumpy[o + 4], bumpy[o + 7]], zs = [bumpy[o + 2], bumpy[o + 5], bumpy[o + 8]];
+      if (xs.every(x => Math.abs(x - 40) < 1e-6) && Math.min(...ys) < 4 && wallTri < 0) wallTri = t;
+      if (zs.every(z => Math.abs(z - 10) < 1e-6) && topTri < 0) topTri = t;
+      if (xs.every(x => Math.abs(x - 42) < 1e-6) && bumpTopTri < 0) bumpTopTri = t;
+    }
+    const F = C.wallFace(bumpy, wallTri);
+    check('wallFace: the +x wall faces +x, 4 corners, 20 x 10', F.ring && near(F.n[0], 1, 1e-9) && F.ring.length === 4 && near(F.areaMm2, 200, 1e-6) &&
+      near(Math.min(...F.size), 10, 1e-6) && near(Math.max(...F.size), 20, 1e-6), F.ring ? JSON.stringify({ n: F.n, corners: F.ring.length, area: F.areaMm2, size: F.size }) : F.reason);
+    check('...the bump is a hole in it, not part of its outline', F.holes === 1, String(F.holes));
+    check('...o is on the wall plane, u square to n, w = n x u', near(F.o[0], 40, 1e-9) && near(F.u[0] * F.n[0] + F.u[1] * F.n[1] + F.u[2] * F.n[2], 0, 1e-9) &&
+      near(F.w[0], F.n[1] * F.u[2] - F.n[2] * F.u[1], 1e-9));
+    const FT = C.wallFace(bumpy, topTri);
+    check('wallFace: the top is a wall too, facing +z, 40 x 20', FT.ring && near(FT.n[2], 1, 1e-9) && near(FT.areaMm2, 800, 1e-6), FT.ring ? String(FT.areaMm2) : FT.reason);
+    const FB = C.wallFace(bumpy, bumpTopTri);
+    check('wallFace: the bump\'s own face is a 4 x 4 wall facing +x, 2 mm out', FB.ring && near(FB.n[0], 1, 1e-9) && near(FB.o[0], 42, 1e-9) && near(FB.areaMm2, 16, 1e-6), FB.ring ? String(FB.areaMm2) : FB.reason);
+    check('wallFace refuses a triangle that is not there, in words', /not a triangle/.test(C.wallFace(bumpy, 1e6).reason));
+    const wall = off => ({ kind: 'wall', o: F.o, n: F.n, u: F.u, ring: F.ring, off });
+    const at0 = await crop('wall: the line at the wall holds the bump', bumpyP, wall(0), { volume: 4 * 4 * 2, tol: 0.05, validate: true });
+    check('...and is only that: a 4 x 4 x 2 block, 12 faces', at0.ok && at0.faces === 12 && near(at0.bbox.lo[0], 40, 1e-3) && near(at0.bbox.hi[0], 42, 1e-4), at0.ok ? at0.faces + ' faces, x ' + at0.bbox.lo[0] + '..' + at0.bbox.hi[0] : at0.reason);
+    await crop('wall: the line 1 mm out holds the top half of it', bumpyP, wall(1), { volume: 4 * 4 * 1, tol: 0.1 });
+    await crop('wall: the line 1 mm into the wall holds the bump and a 1 mm skin of the whole wall', bumpyP, wall(-1), { volume: 32 + 200, tol: 0.05 });
+    const pl = await C.plan(bumpyP, wall(0));
+    // the line is kept half a micron outside where it is set (DEFAULTS.wallNudgeMm), so a wall at 0 does not leave a film
+    check('wall: plan() agrees and builds nothing', pl.ok && near(pl.volumeMm3, 32, 0.02) && !pl.tris);
+    const cs = await C.cutterSoup({ kind: 'wall', o: F.o, n: F.n, u: F.u, ring: F.ring, off: 0, reach: 3 });
+    check('wall: cutterSoup draws the outline wall extruded from the line to the reach, closed', cs.soup && C.census(cs.soup).open === 0 && near(C.volume(cs.soup), 200 * 3, 0.2), cs.soup ? String(C.volume(cs.soup)) : cs.reason);
+    // a posed piece: P is the piece seen on the plate, raw = Rz(37) P + t; the wall is found in P and cropped from the raw soup
+    const pose = toRawOf(37, [11, -4, 2]), bumpyP2 = rawToP(bumpy, 37, [11, -4, 2]);
+    const FP = C.wallFace(bumpyP2, wallTri);
+    await crop('wall: a posed piece (toRaw), the same bump', { rawTris: bumpy, toRaw: pose }, { kind: 'wall', o: FP.o, n: FP.n, u: FP.u, ring: FP.ring, off: 0 }, { volume: 32, tol: 0.05 });
+  }
+
+  /* =========================================================================
+     6d. Wall on the sphere and the cone (tools/nso_crop_wall_fixtures.js: each has a bump on its curved side)
+     Wall draws its line on a FLAT wall. On a sphere or a cone's slope there is none - a click lands on one facet of the
+     curve - and it says so in words rather than lay a line on a sliver. The cone's own flat base is a wall, and cropping
+     1 mm into it is a closed form: the cone's volume in z < 1, over the 96-gon base.
+     ========================================================================= */
+  console.log('\n=== 6d. wall: the sphere and the cone with their bumps ===');
+  {
+    const fx = await require('./nso_crop_wall_fixtures.js').build();
+    check('fixtures: block, sphere and cone, each with its bump, are closed', ['block', 'sphere', 'cone'].every(k => C.census(fx[k]).open === 0 && C.census(fx[k]).repeated === 0));
+    const triWhere = (soup, f) => { for (let t = 0; t < soup.length / 9; t++) { const o = t * 9, c = [0, 1, 2].map(a => (soup[o + a] + soup[o + 3 + a] + soup[o + 6 + a]) / 3); if (f(c, o)) return t; } return -1; };
+    // the sphere (R15, centre (0,0,15)): a facet 7 mm round from the dome bump on +x; the cone: a facet of the slope 5 mm from the pin
+    const st = triWhere(fx.sphere, c => Math.abs(Math.hypot(c[0], c[1], c[2] - 15) - 15) < 0.05 && c[0] > 0 && Math.hypot(c[1], c[2] - 15) > 6.5 && Math.hypot(c[1], c[2] - 15) < 8.5);
+    const ct = triWhere(fx.cone, c => c[2] > 3 && c[2] < 20 && Math.abs(Math.hypot(c[0], c[1]) - 15 * (1 - c[2] / 25)) < 0.05 && c[0] > 0 && Math.hypot(c[1], c[2] - 8) > 4.5 && Math.hypot(c[1], c[2] - 8) < 7);
+    check('a triangle of each curved surface was found to click', st >= 0 && ct >= 0, st + ', ' + ct);
+    /* EVERY triangle of the curves, the ones in the bump's foot included (a click there, as a person's is, lands on the
+       coplanar groups the bump's intersection re-cuts the facets into - 3 to 9 triangles - not only on clean facets):
+       the sphere is refused all over; the cone is refused all over its slope and kept only on its two flat ends. */
+    let sphereKept = 0, coneKept = {}, coneRefused = 0;
+    for (let t = 0; t < fx.sphere.length / 9; t += 3) if (!C.wallFace(fx.sphere, t).curved) sphereKept++;
+    for (let t = 0; t < fx.cone.length / 9; t++) { const F = C.wallFace(fx.cone, t); if (F.curved) coneRefused++; else { const k = F.tris + ' tris, ' + f3(F.areaMm2) + ' mm2'; coneKept[k] = (coneKept[k] || 0) + 1; } }
+    check('every triangle of the sphere (a third of them, the bump\'s foot too) is refused as a curved surface', sphereKept === 0, sphereKept + ' accepted');
+    check('every triangle of the cone\'s slope, the pin\'s foot too, is refused; only the flat base (94) and the pin\'s flat end (46) are walls', coneRefused === 406 - 94 - 46 &&
+      Object.keys(coneKept).map(k => k.split(',')[0]).sort().join('|') === '46 tris|94 tris', coneRefused + ' refused; kept ' + JSON.stringify(coneKept));
+    const rs = C.wallFace(fx.sphere, st), rc = C.wallFace(fx.cone, ct);
+    check('a click on the sphere is refused in words: a curved surface, not a flat wall', !rs.ring && rs.curved === true && /curved surface, not a flat wall/.test(rs.reason), rs.reason);
+    check('a click on the cone\'s slope is refused the same way', !rc.ring && rc.curved === true && /curved surface, not a flat wall/.test(rc.reason), rc.reason);
+    // the cone's base is flat: one wall of 94 triangles, a 96-gon
+    const bt = triWhere(fx.cone, (c, o) => [2, 5, 8].every(a => Math.abs(fx.cone[o + a]) < 1e-6));
+    const FB = C.wallFace(fx.cone, bt), A96 = 0.5 * 96 * 225 * Math.sin(2 * Math.PI / 96);
+    check('the cone\'s base is a wall: faces down, a 96-gon of 706.4 mm2, the slope\'s foot its outline', FB.ring && near(FB.n[2], -1, 1e-9) && near(FB.areaMm2, A96, 0.01) && FB.ring.length === 96, FB.ring ? FB.ring.length + ' corners, ' + f3(FB.areaMm2) : FB.reason);
+    // 1 mm into the base: the cone's volume under z = 1 is  A96 * (25/3) * (1 - (24/25)^3)
+    const want = A96 * (25 / 3) * (1 - Math.pow(24 / 25, 3));
+    await crop('wall: 1 mm into the cone\'s base holds the foot of the cone', { rawTris: fx.cone }, { kind: 'wall', o: FB.o, n: FB.n, u: FB.u, ring: FB.ring, off: -1 }, { volume: want, tol: 0.2, validate: true });
+    check('...and the line AT the base holds nothing (nothing of the cone is below it)', !(await C.plan({ rawTris: fx.cone }, { kind: 'wall', o: FB.o, n: FB.n, u: FB.u, ring: FB.ring, off: 0 })).ok);
+    // the block still takes its bump: its wall is flat, its bump the only thing proud of it
+    const bw = triWhere(fx.block, (c, o) => [0, 3, 6].every(a => Math.abs(fx.block[o + a] - 40) < 1e-6) && Math.min(fx.block[o + 1], fx.block[o + 4], fx.block[o + 7]) < 4);
+    const FW = C.wallFace(fx.block, bw);
+    await crop('wall: the generator\'s block, the line at its +x wall holds the 4 x 4 x 2 bump', { rawTris: fx.block }, { kind: 'wall', o: FW.o, n: FW.n, u: FW.u, ring: FW.ring, off: 0 }, { volume: 32, tol: 0.05 });
+  }
+
+  /* =========================================================================
+     6e. Loop: the bendable line round a bump, and a copy whose underside follows the base's curve
+     A click on a bump finds the loops of edges round it (a pin: its end rim, then its foot) and picks the outermost - where
+     it meets what it stands on. The copy is the triangles inside it, exactly, closed by Lift's fill, which continues the
+     base across the loop. Checked against what the kernel says stands out of each body (tools/nso_crop_wall_fixtures.js).
+     ========================================================================= */
+  console.log('\n=== 6e. loop: the bump on a curved base, copied with its underside following the curve ===');
+  {
+    const FXm = require('./nso_crop_wall_fixtures.js'), fx = await FXm.build(), orc = await FXm.oracles();
+    const LCtx = csgContext();
+    LCtx.window = LCtx;
+    vm.runInContext('var state = {}; var THREE = {};', LCtx);
+    for (const f of ['nso_lift.js', 'nso_lift_auto.js', 'nso_lift_curved.js', 'app-cut.js', 'nso_crop.js']) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), LCtx, { filename: f });
+    const LCr = LCtx.NSO_Crop;
+    const triNear = (soup, pt, r) => { let best = -1, bd = 1e9; for (let t = 0; t < soup.length / 9; t++) { const o = t * 9, c = [0, 1, 2].map(a => (soup[o + a] + soup[o + 3 + a] + soup[o + 6 + a]) / 3), d = Math.hypot(c[0] - pt[0], c[1] - pt[1], c[2] - pt[2]); if (d <= r && d < bd) { bd = d; best = t; } } return best; };
+    const nrm = [25 / Math.hypot(25, 15), 15 / Math.hypot(25, 15)];
+    const cases = [
+      ['sphere', fx.sphere, triNear(fx.sphere, [18, 0, 15], 1.5), 1, orc.sphere, 0.01],
+      ['cone', fx.cone, triNear(fx.cone, [10.2 + nrm[0] * 3.9, 0, 8 + nrm[1] * 3.9], 1.5), 2, orc.cone, 0.01],
+      ['block', fx.block, triNear(fx.block, [42, 10, 5], 1.5), 2, orc.block, 0.005]
+    ];
+    for (const [label, soup, tri, ncand, want, tol] of cases) {
+      const B = LCr.bumpLoops(soup, tri);
+      check(label + ': a click on the bump finds its loops: ' + ncand + ' drawn, the outermost picked', B.ok && B.candidates.length === ncand && B.pick === ncand - 1, B.ok ? B.candidates.length + ' candidates, pick ' + B.pick : B.reason);
+      const before = bytes(soup);
+      const r = await LCr.run({ rawTris: soup }, { kind: 'loop', tris: B.candidates[B.pick].tris });
+      check(label + ': its copy comes out, closed', r.ok && r.census && r.census.open === 0 && r.census.repeated === 0, r.ok ? r.faces + ' faces' : r.reason);
+      check(label + ': the copy is what stands out of the body - ' + f3(want) + ' mm3 by the kernel', r.ok && pct(r.volumeMm3, want) <= tol * 100, r.ok ? f3(r.volumeMm3) + ' (' + f3(pct(r.volumeMm3, want)) + '%)' : r.reason);
+      check(label + ': the piece is byte for byte as it was', bytes(soup) === before);
+      if (r.ok) { const j = validate(r.tris); check(label + ': tools/mesh_validate.py, self-intersection included', j.clean, j.summary); }
+      const pl = await LCr.plan({ rawTris: soup }, { kind: 'loop', tris: B.candidates[B.pick].tris });
+      check(label + ': plan() agrees and builds nothing', pl.ok && near(pl.volumeMm3, want, want * tol) && !pl.tris);
+    }
+    // the cone's pin end rim is a loop of its own: a flat disc has no surface to continue, said in words
+    const Bc = LCr.bumpLoops(fx.cone, cases[1][2]);
+    const rim = await LCr.run({ rawTris: fx.cone }, { kind: 'loop', tris: Bc.candidates[0].tris });
+    check('the cone pin\'s end rim, picked as the loop, is refused in words - nothing to continue under a flat end', !rim.ok && /cannot be lifted|wraps round|too little/.test(rim.reason), rim.reason);
+    // a click that is on the surface a bump stands on is not a bump
+    const body = triNear(fx.sphere, [-15, 0, 15], 1.5);
+    const Bb = LCr.bumpLoops(fx.sphere, body);
+    check('a click on the sphere itself is not a bump: said in words', !Bb.ok && /not a bump/.test(Bb.reason), Bb.reason);
+    // a crease edge clicked picks that edge's loop
+    const Be = LCr.bumpLoops(fx.cone, cases[1][2], { edge: Bc.candidates[0].edges[0] });
+    check('a click on a crease edge (the pin\'s end rim) picks that edge\'s loop', Be.ok && Be.pick === 0, Be.ok ? 'pick ' + Be.pick : Be.reason);
+    check('a triangle that is not there is refused in words', /not a triangle/.test(LCr.bumpLoops(fx.sphere, 1e7).reason));
+    check('a loop with no triangles is refused in words', /needs the triangles inside it/.test((await LCr.plan({ rawTris: fx.sphere }, { kind: 'loop', tris: [] })).reason));
+  }
+
+  /* =========================================================================
      7. refusals
      ========================================================================= */
   console.log('\n=== 7. refusals: only a shape that holds nothing, or a result that is not closed ===');
@@ -590,6 +775,15 @@ async function crop(label, piece, shape, expect) {
       ['a shape that is not one', hingeP, { kind: 'torus' }, /unknown shape/],
       ['no shape at all', hingeP, null, /no shape/],
       ['a Piece with no other piece', hingeP, { kind: 'piece' }, /another piece/],
+      ['a wall with no outline', hingeP, { kind: 'wall', o: [0, 0, 0], n: [1, 0, 0], u: [0, 0, 1] }, /needs its outline/],
+      ['a wall with no normal', hingeP, { kind: 'wall', o: [0, 0, 0], u: [0, 0, 1], ring: [[0, 0], [1, 0], [1, 1]] }, /needs a point on it/],
+      ['a wall line out past the piece', hingeP, { kind: 'wall', o: [18, 4, 4], n: [1, 0, 0], u: [0, 0, 1], ring: [[-3, -3], [3, -3], [3, 3], [-3, 3]], off: 20 }, /out past everything/],
+      ['a wall line that holds nothing (the line at a wall with nothing proud of it)', hingeP, { kind: 'wall', o: [18, 4, 4], n: [1, 0, 0], u: [0, 0, 1], ring: [[-3, -3], [3, -3], [3, 3], [-3, 3]], off: 0 }, /pull the line in/],
+      ['a lasso of two points', hingeP, { kind: 'lasso', eye: [9, -100, 4], dirs: [[0, 1, 0], [1, 1, 0]] }, /at least 3 points/],
+      ['a lasso with no eye', hingeP, { kind: 'lasso', dirs: [[0, 1, 0], [1, 1, 0], [0, 1, 1]] }, /needs the eye/],
+      ['a lasso round empty air', hingeP, { kind: 'lasso', eye: [9, -100, 4], dirs: [[55, 100, -5], [65, 100, -5], [65, 100, 5], [55, 100, 5]] }, /holds nothing/],
+      ['a lasso drawn behind the piece', hingeP, { kind: 'lasso', eye: [9, 100, 4], dirs: [[-5, 100, -5], [5, 100, -5], [5, 100, 5], [-5, 100, 5]] }, /behind the eye/],
+      ['a lasso that only has a line in it', hingeP, { kind: 'lasso', eye: [9, -100, 4], dirs: [[0, 100, 0], [5, 100, 0], [10, 100, 0]] }, /encloses nothing/],
       ['an outline with a negative offset', hingeP, { kind: 'outline', source: HINGE, d1: -1 }, /distance of 0 or more/],
       ['an outline with one height', hingeP, { kind: 'outline', source: HINGE, z1: 1 }, /both heights/],
       ['an outline with its heights upside down', hingeP, { kind: 'outline', source: HINGE, z1: 5, z2: 1 }, /z1 below z2/],

@@ -1,7 +1,8 @@
 /* app-detach.js - Detach a detected flange from a piece, and Reattach it
  * somewhere else. The app layer over nso_detach.js.
  *
- * Cut menu, below Crop. Two buttons:
+ * Detach flange is part of Lift, in the Crop card (the Lift panel); Reattach is in
+ * the Connect card. Two buttons:
  *
  *   Detach flange   on the cutter's piece. NSO_Flange.detect finds the flange,
  *                   NSO_Detach.detach caps the piece on its own neck wall and

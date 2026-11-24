@@ -19,28 +19,35 @@ const check = (name, cond, detail) => {
    pieces panel is pinned in the top-right corner. The column's slabs top to
    bottom, in their groups (tools/nso_shell_v3_test.js gates the groups'
    pitch and gaps); the view row (X, the eye, the target) is pinned under
-   them. */
-const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
-             'menu-gen', 'btn-lock-pos', 'btn-plate-lock', 'btn-undo', 'btn-delete-placed', 'menu-export'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports',
-             'menu-add', 'menu-bit', 'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-slice',
-             'btn-microscope', 'menu-repair'];
+   them.
+   The card regroup (2026-11-16): Print (menu-supports) ends the row's left group, after
+   Lock plate; Generate (menu-gen, was Gen+) heads the column; Crop shares the Cut / Crop
+   slab (no slab of its own); Punch is a card under it; Assemble follows Sculpt; Weave is a
+   section of Fill & fix, which sits between G-scope and Check & repair. */
+const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip',
+             'btn-lock-pos', 'btn-plate-lock', 'menu-supports', 'btn-undo', 'btn-delete-placed', 'menu-export'];
+const COL = ['menu-gen', 'menu-scale', 'menu-cut', 'menu-punch', 'menu-connect',
+             'menu-add', 'menu-bit', 'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt',
+             'menu-assemble', 'btn-microscope', 'menu-fillfix', 'menu-repair'];
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL.filter(id => id.startsWith('menu-')));
 
 /* Every control that lived in the sidebar, and where it is now (Join and
    A-B-C as one card under Join; Plate and Pieces in the pinned Plate & pieces panel;
    Pack's Optimize a slab of its own, under Export). */
 const HOME = {
-  'menu-joins': ['join-slot-a', 'join-slot-b', 'join-slot-c',
+  // ASSEMBLE: Open editor, then the Join, Seat and Align cards as its three sections
+  'menu-assemble': ['btn-asm-open',
+                'join-slot-a', 'join-slot-b', 'join-slot-c',
                 'join-name-a', 'join-name-b', 'join-name-c', 'btn-join', 'btn-join-clear',
                 'joins-card', 'join-horizontal', 'join-gap-ab-on', 'join-gap-ab', 'join-gap-ab-value',
-                'join-gap-bc-on', 'join-gap-bc', 'join-gap-bc-value', 'join-readout'],
-  'menu-align': ['btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock',
-                 'btn-center-lock-pick', 'center-lock-ref'],
-  'menu-seat': ['btn-seat-support', 'seat-gap', 'seat-gap-value', 'btn-seat-here',
+                'join-gap-bc-on', 'join-gap-bc', 'join-gap-bc-value', 'join-readout',
+                'btn-seat-support', 'seat-gap', 'seat-gap-value', 'btn-seat-here',
                 'chk-oversize-washer', 'oversize-gap', 'btn-seat-flush', 'btn-flip-port',
-                'btn-seat-grid'],
-  'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'btn-hollow', 'btn-hollow-safe', 'btn-lift'],
+                'btn-seat-grid',
+                'btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock',
+                'btn-center-lock-pick', 'center-lock-ref'],
+  'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-hollow', 'btn-hollow-safe'],
+  'menu-crop': ['btn-lift'],      // Lift (with Detach flange in its panel) moved here from Subtract
   'plate-panel': ['plate-select', 'custom-size', 'custom-w', 'custom-d', 'custom-h',
                  'plate-dims', 'plate-area', 'plate-grid-show', 'chk-plate-grid-snap',
                  'build-volume-warning', 'model-list', 'clone-count', 'btn-clone'],
@@ -163,7 +170,7 @@ withApp(async (page, logs) => {
       });
       return out;
     }, ROW);
-    const FIXED = ['menu-import', 'menu-gen', 'btn-undo', 'btn-delete-placed', 'menu-export'];
+    const FIXED = ['menu-import', 'menu-supports', 'btn-undo', 'btn-delete-placed', 'menu-export'];
     const atRest = await measure();
     const widthOf = id => atRest.find(b => b.id === id).w;
     check('at 1500 px wide, with this font, no row label is cut',
@@ -248,14 +255,14 @@ withApp(async (page, logs) => {
 
     /* Read after the 0.12 s transition, not in the same turn as the open. */
     const look = () => page.evaluate(() => {
-      const cs = getComputedStyle(document.querySelector('#menu-seat > summary'));
+      const cs = getComputedStyle(document.querySelector('#menu-assemble > summary'));
       return { b: cs.borderTopColor, s: cs.boxShadow };
     });
     const lit = { shut: await look() };
-    await page.evaluate(() => { document.getElementById('menu-seat').open = true; });
+    await page.evaluate(() => { document.getElementById('menu-assemble').open = true; });
     await page.waitForTimeout(300);
     lit.open = await look();
-    await page.evaluate(() => { document.getElementById('menu-seat').open = false; });
+    await page.evaluate(() => { document.getElementById('menu-assemble').open = false; });
     check('open shows by a lit border and a glow', lit.open.b !== lit.shut.b && lit.open.s !== lit.shut.s,
       JSON.stringify(lit));
     const dis = await page.evaluate(() => {
@@ -277,10 +284,12 @@ withApp(async (page, logs) => {
         const body = document.querySelector('#' + id + ' > .vp-menu-body').getBoundingClientRect();
         const cs = getComputedStyle(document.querySelector('#' + id + ' > .vp-menu-body'));
         // A member open inside its drop-down (Join's first card, shown with its column) is part of that panel.
-        return { n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length, open: document.getElementById(id).open,
+        // Measure's card is not counted: it is the one panel allowed to stay open beside another (app-join.js).
+        return { n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => d.id !== 'menu-measure' && !d.parentElement.closest('.vp-menu[open]')).length, open: document.getElementById(id).open,
                  x: body.left, y: body.top, rad: cs.borderTopLeftRadius, fs: cs.fontSize, tt: cs.textTransform };
       }, id);
-      if (st.n !== 1 || !st.open) counts.push(id + ' n=' + st.n);
+      // Measure is not counted (above), so by itself it leaves none of the others open.
+      if (st.n !== (id === 'menu-measure' ? 0 : 1) || !st.open) counts.push(id + ' n=' + st.n);
       spots.push(Object.assign({ id }, st));
     }
     check('opening each button in turn leaves exactly one .vp-menu[open] (not counting a member inside it)', counts.length === 0,

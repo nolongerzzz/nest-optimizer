@@ -61,6 +61,9 @@
     minDepthNozzles: 0.5, // a thread shallower than this many nozzle widths is refused (it cannot form)
     softPitchNozzles: 2   // ...and one finer than this many gets a note: it will print as a rough groove
   };
+  /* A plain shank stands this far over the thread's crests: the step between the two outlines must be wider than either's chord sag (a few
+     microns), or the ring that closes it grazes the thread's wall. 0.1 mm does not print. */
+  var SHANK_STEP = 0.1;
   var SNAP = 3e-4;        // mm: a thread vertex this near a clip plane is moved onto it (0.3 um). The app welds at 1e-4 (NSO_Repair.WELD_TOL, mesh_validate.py), so a
                           // crossing point closer than that to a vertex would be welded into it and leave a sliver; nothing is left within 3 times that
 
@@ -308,16 +311,116 @@
     };
   }
 
+  /* A surface given as a radius at every (angle, height): r = fn(theta, z), sampled on `cols` columns round and the heights `rows(z0, z1)`
+     gives (bottom to top, z0 and z1 included). A knurled or fluted head is one: its grooves are r(theta), its rounded or chamfered edges
+     r(z). Any fn is a single radius per (theta, z), so the surface is closed by its two end rings and cannot fold. */
+  function field(fn, o) {
+    return {
+      kind: 'field',
+      make: function (M, z0, z1) {
+        var n = Math.max(12, o.cols | 0), zs = o.rows(z0, z1), lo = [], hi = [], rings = [], i, j;
+        for (j = 0; j < zs.length; j++) {
+          var ring = [];
+          for (i = 0; i < n; i++) {
+            var t = 2 * Math.PI * i / n, r = fn(t, zs[j]);
+            ring.push(M.v(r * Math.cos(t), r * Math.sin(t), zs[j]));
+          }
+          rings.push(ring);
+        }
+        for (j = 0; j + 1 < rings.length; j++) {
+          var A = rings[j], C = rings[j + 1];
+          for (i = 0; i < n; i++) { var k = (i + 1) % n; M.tri(A[i], A[k], C[k]); M.tri(A[i], C[k], C[i]); }
+        }
+        lo = rings[0]; hi = rings[rings.length - 1];
+        return { lo: lo, hi: hi };
+      }
+    };
+  }
+
+  /* The heights a head's rows sit at: fine (`step`) through each edge zone of height `edge`, one row between. */
+  function edgeRows(edge, step) {
+    return function (z0, z1) {
+      var H = z1 - z0, e = Math.min(edge, H / 2), zs = [], q, nE = Math.max(2, Math.ceil(e / step));
+      for (q = 0; q <= nE; q++) zs.push(z0 + e * q / nE);
+      if (H - 2 * e > 1e-6) for (q = 0; q <= nE; q++) zs.push(z1 - e + e * q / nE);
+      else for (q = 1; q <= nE; q++) zs.push(z0 + e + (H - e) * q / nE);
+      return zs.filter(function (z, k) { return k === 0 || z - zs[k - 1] > 1e-6; });
+    };
+  }
+
+  /* THUMB HEADS - the two on the screws they were measured from (docs/THREADS.md, "Thumb heads"):
+
+     KNURLED: a cylinder with `n` round-bottomed grooves (each a circular cutter of sagitta `depth` across `width` of its period), its edges a
+     45 degree chamfer `edge` deep at the faces blended into the side by a round of radius 2 x edge. r = min(grooved(theta), edge(z)): the
+     grooves fade out into the chamfer. (Measured: Ø32, 25 grooves 1.03 deep, 3 mm chamfer into a 6 mm round.)
+
+     FLUTED: `n` convex lobes (circular arcs) over shallow round valleys `depth` below them, filleted together; its edges a chamfer `edge`
+     deep at the faces sloping at 36 degrees off the axis, and the flutes run through it a quarter as deep. (Measured: Ø26.2, 13 lobes 1.25
+     deep, a 2.43 mm chamfer at a 0.726 slope.) */
+  function knurledFn(R, n, depth, width, edge) {
+    var per = 2 * Math.PI / n, phw = Math.max(0.05, Math.min(0.95, width)) * per / 2;
+    var a = R * Math.sin(phw), rg = (a * a + depth * depth) / (2 * depth), cx = (R - depth) + rg;
+    var rho = 2 * edge, t = rho * Math.tan(Math.PI / 8), zLine = Math.max(0, edge - t / Math.SQRT2), zArc = edge + t;
+    function groove(th) {
+      var ph = ((th % per) + per) % per; if (ph > per / 2) ph -= per;
+      if (Math.abs(ph) >= phw) return R;
+      var uc = cx * Math.cos(ph), disc = uc * uc - cx * cx + rg * rg;
+      return disc > 0 ? Math.min(R, uc - Math.sqrt(disc)) : R;
+    }
+    function edgeR(zd) {
+      if (zd >= zArc) return R;
+      if (zd <= zLine) return R - edge + zd;
+      var dz = zd - (edge + t); return (R - rho) + Math.sqrt(Math.max(0, rho * rho - dz * dz));
+    }
+    return { fn: function (th, z, H) { var zd = Math.min(z, H - z); return Math.min(groove(th), edgeR(zd)); }, edgeZone: zArc, minFace: Math.min(R - depth, R - edge) };
+  }
+  function flutedFn(R, n, depth, edge) {
+    var per = 2 * Math.PI / n, Rv = R - depth, frac = 0.75, phe = frac * per / 2, k = Math.min(0.4, depth * 0.5);
+    // a lobe: a circle of radius rho centred D = R - rho out, wide enough to come down to the valley at +-phe
+    function lobeAt(ph, rho) { var D = R - rho, s = D * Math.sin(ph), q = rho * rho - s * s; return q > 0 ? D * Math.cos(ph) + Math.sqrt(q) : -Infinity; }
+    var lo = 1e-3, hi = R;
+    for (var it = 0; it < 60; it++) { var mid = (lo + hi) / 2; if (lobeAt(phe, mid) > Rv) hi = mid; else lo = mid; }
+    var rho = (lo + hi) / 2, slopeE = Math.tan(36 * Math.PI / 180), zEdge = edge / slopeE, wave = 0.25;
+    var lift = (Math.sqrt(depth * depth + k * k) - depth) / 2;
+    function prof(th) {
+      var ph = ((th % per) + per) % per; if (ph > per / 2) ph -= per;
+      var a = lobeAt(ph, rho), b = Rv;
+      if (!isFinite(a)) return b - lift;                                         // past the lobe's reach: the valley
+      return (a + b + Math.sqrt((a - b) * (a - b) + k * k)) / 2 - lift;          // a smooth max, less what it adds at a crest: the crest is R                // the lobe and the valley, filleted together (a smooth max)
+    }
+    return { fn: function (th, z, H) {
+      var zd = Math.min(z, H - z), p = prof(th);
+      if (zd >= zEdge) return p;
+      var cone = R - edge + zd * slopeE;
+      return Math.min(p, cone - wave * (R - p));
+    }, edgeZone: zEdge, minFace: R - edge - wave * depth };
+  }
+
   /* the helical thread. o: { offset (radial, mm: an internal thread's fit), slope (dr/dz, a taper), phase (0..1 of a pitch),
-     columns } */
+     columns, bevelLo / bevelHi { len, angle } }.
+
+     A BEVEL is a cone the thread is held inside at that end: r <= rTip + (distance from the end) * tan(angle), rTip = R - len * tan(angle),
+     so the cone meets the crests `len` mm from the end and the end face is a disc of radius rTip. It is applied to every grid vertex's
+     radius - the surface stays one function r(theta, z), so it is still closed, still wound outward and cannot fold - and the grid gets
+     finer rows (each profile segment cut so no row is more than max(0.15, P / 16) mm from the next) so the cone is drawn smooth. With no
+     bevel the rows are the profile's four corners, exactly as before. */
   function thread(sp, o) {
     o = o || {};
-    var off = o.offset || 0, slope = o.slope || 0, B = 4;
+    var off = o.offset || 0, slope = o.slope || 0;
+    var bLo = o.bevelLo && o.bevelLo.len > 0 ? o.bevelLo : null, bHi = o.bevelHi && o.bevelHi.len > 0 ? o.bevelHi : null;
     return {
       kind: 'thread', spec: sp,
       make: function (M, z0, z1) {
         var P = sp.P, hand = sp.hand, N = o.columns || columnsFor(sp.R + off);
-        var ub = [0, sp.fr, sp.fr + sp.w, sp.fr + sp.w + sp.fc], rb = [sp.R - sp.h + off, sp.R - sp.h + off, sp.R + off, sp.R + off];
+        var corner = [0, sp.fr, sp.fr + sp.w, sp.fr + sp.w + sp.fc, P], cr = [sp.R - sp.h + off, sp.R - sp.h + off, sp.R + off, sp.R + off, sp.R - sp.h + off];
+        var ub = [], rb = [], step = (bLo || bHi) ? Math.max(0.15, P / 16) : Infinity;
+        for (var g = 0; g < 4; g++) {                        // each profile segment, cut into equal rows when a bevel wants them
+          var seg = corner[g + 1] - corner[g], nsub = isFinite(step) ? Math.max(1, Math.ceil(seg / step - 1e-9)) : 1;
+          for (var q0 = 0; q0 < nsub; q0++) { var f0 = q0 / nsub; ub.push(corner[g] + seg * f0); rb.push(cr[g] + (cr[g + 1] - cr[g]) * f0); }
+        }
+        var B = ub.length, shortDiag = !!(bLo || bHi) && hand > 0;          // (left hand: A-C is already the shorter one)
+        var tanLo = bLo ? Math.tan(bLo.angle * Math.PI / 180) : 0, tanHi = bHi ? Math.tan(bHi.angle * Math.PI / 180) : 0;
+        var tipLo = bLo ? sp.R + off - bLo.len * tanLo : 0, tipHi = bHi ? sp.R + off - bHi.len * tanHi : 0;
         var ph = (o.phase || 0) * P;
         var kmin = Math.floor((z0 - 2 * P) / P) - 1, kmax = Math.ceil((z1 + 2 * P) / P) + 1, rows = (kmax - kmin + 1) * B, TOT = N * rows;
         var X = new Float64Array(TOT), Y = new Float64Array(TOT), Z = new Float64Array(TOT), row, i;
@@ -327,6 +430,10 @@
             var th = 2 * Math.PI * i / N, z = ub[b] + k * P + hand * P * i / N + ph, id = row * N + i;
             if (Math.abs(z - z0) < SNAP) z = z0; else if (Math.abs(z - z1) < SNAP) z = z1;      // a vertex a hair off a plane IS on it: crossing points that close would collapse in float32
             var r = rb[b] + slope * (z - z0);
+            // the cone runs on past the end (the rows there are clipped away, but the crossing points on the end face are interpolated
+            // from them: a cone held flat beyond the end would lift the face's rim off the cone)
+            if (bHi) r = Math.min(r, Math.max(0.05, tipHi + (z1 - z) * tanHi));
+            if (bLo) r = Math.min(r, Math.max(0.05, tipLo + (z - z0) * tanLo));
             X[id] = r * Math.cos(th); Y[id] = r * Math.sin(th); Z[id] = z;
           }
         }
@@ -372,7 +479,9 @@
           for (row = 0; row + 1 < rows; row++) {
             var A = vid(i, row), Bq = vid(i + 1, row), C = vid(i + 1, row + 1), D = vid(i, row + 1);
             if (A < 0 || Bq < 0 || C < 0 || D < 0) continue;
-            tri(A, Bq, C); tri(A, C, D);
+            // the quad's shorter diagonal: column i+1 is a pitch / N higher (right hand), so B-D is shorter than A-C. A long, thin
+            // triangle across a sheared quad sags off a curved surface - on a bevel's cone the next row's triangles came within its sag.
+            if (shortDiag) { tri(A, Bq, D); tri(Bq, C, D); } else { tri(A, Bq, C); tri(A, C, D); }
           }
         }
         return { lo: dedupe(onLo), hi: dedupe(onHi) };
@@ -428,51 +537,116 @@
   function fitOf(o) { var f = num(o && o.fit); return f == null ? DEFAULTS.fit : f; }
   function finish(res, soup, info, text) { res.ok = true; res.soup = soup; res.info = info; res.volumeMm3 = volumeOf(soup); res.reason = text; return res; }
 
+  /* A bevel asked for: { len, angle } or null. o.bevel is its length along the axis (mm, 0 or blank: none), o.bevelAngle its angle off the
+     axis (degrees, default 45). Refused in words if it would take the end below a third of the thread's radius or is longer than `room`. */
+  function bevelOf(o, sp, room, what) {
+    var len = num(o.bevel), ang = num(o.bevelAngle);
+    if (!(len > 0)) return { ok: true, b: null };
+    if (ang == null) ang = 45;
+    if (!(ang >= 15 && ang <= 75)) return { ok: false, reason: 'a bevel angle of ' + fmt(ang, 1) + '° is outside 15° to 75° off the axis' };
+    var tip = sp.R - len * Math.tan(ang * Math.PI / 180);
+    if (tip < sp.R / 3) {
+      return { ok: false, reason: 'a ' + fmt(len, 1) + ' mm bevel at ' + fmt(ang, 0) + '° would take the end down to Ø' + fmt(Math.max(0, 2 * tip)) + ' - under a third of the Ø' + fmt(sp.major) + '; make it at most ' +
+        fmt(Math.floor((sp.R * 2 / 3) / Math.tan(ang * Math.PI / 180) * 10) / 10, 1) + ' mm' };
+    }
+    if (len > room + 1e-9) return { ok: false, reason: 'a ' + fmt(len, 1) + ' mm bevel is longer than the ' + what + ' leaves room for (' + fmt(Math.max(0, room), 1) + ' mm)' };
+    return { ok: true, b: { len: len, angle: ang, tipDiaMm: 2 * tip } };
+  }
+  /* The bevel that just clears the roots: the end comes down to a quarter of the thread's depth inside its root, at 45 degrees. */
+  function bevelDefault(size, o) { var r = spec(size, o || {}); return r.ok ? Math.round(1.25 * r.spec.h * 10) / 10 : 1; }
+  function bevelText(b) { return b ? ', bevelled end (' + fmt(b.len, 1) + ' mm at ' + fmt(b.angle, 0) + '°, end Ø' + fmt(b.tipDiaMm, 1) + ')' : ''; }
+
   /* A threaded rod. o: { size, length, hand, major/pitch overrides, slope (dr/dz: a pipe thread's taper, e.g. -spec.slope to
-     narrow toward the free end at z = length; 0, a straight rod, by default) } */
+     narrow toward the free end at z = length; 0, a straight rod, by default), bevel, bevelAngle (both ends) } */
   function rod(o) {
     o = o || {};
     var res = { ok: false, reason: '' }, r = sizeOf(o, 'M8');
     if (!r.ok) { res.reason = r.reason; return res; }
     var sp = r.spec, L = num(o.length) != null ? num(o.length) : 40;
     if (!(L >= sp.P)) { res.reason = 'a rod shorter than one pitch (' + fmt(sp.P) + ' mm) has no thread - make it at least ' + fmt(Math.ceil(sp.P * 2 * 10) / 10, 1) + ' mm'; return res; }
-    var out = assemble([{ z0: 0, z1: L, outer: thread(sp, { slope: num(o.slope) || 0 }), inner: null }]);
-    var info = { kind: 'rod', size: sp.id, spec: sp, lengthMm: L, majorMm: sp.major, minorMm: sp.minor, pitchMm: sp.P, hand: sp.hand > 0 ? 'right' : 'left', note: r.note };
+    var bv = bevelOf(o, sp, (L - sp.P) / 2, 'rod');
+    if (!bv.ok) { res.reason = bv.reason; return res; }
+    var out = assemble([{ z0: 0, z1: L, outer: thread(sp, { slope: num(o.slope) || 0, bevelLo: bv.b, bevelHi: bv.b }), inner: null }]);
+    var info = { kind: 'rod', size: sp.id, spec: sp, lengthMm: L, majorMm: sp.major, minorMm: sp.minor, pitchMm: sp.P, hand: sp.hand > 0 ? 'right' : 'left', note: r.note, bevel: bv.b };
     return finish(res, out.soup, info, 'Threaded rod ' + sp.id + ' (' + sp.familyLabel + '), Ø' + fmt(sp.major) + ' / root Ø' + fmt(sp.minor) + ', pitch ' + fmt(sp.P) + ' mm, ' +
-      (sp.hand > 0 ? 'right' : 'left') + '-hand, ' + fmt(L, 1) + ' mm long' + (r.note ? ' - note: ' + r.note : ''));
+      (sp.hand > 0 ? 'right' : 'left') + '-hand, ' + fmt(L, 1) + ' mm long' + (bv.b ? ', both ends bevelled (' + fmt(bv.b.len, 1) + ' mm at ' + fmt(bv.b.angle, 0) + '°)' : '') + (r.note ? ' - note: ' + r.note : ''));
   }
 
-  /* A bolt, head down on the bed. o: { size, length (the shank, under the head), head 'hex'|'socket', hand, headAF, headK } */
+  /* The thumb heads' own sizes for a thread of major Ø D, from the two screws they were measured on (docs/THREADS.md). */
+  function thumbDefaults(style, D) {
+    var r1 = function (x) { return Math.round(x * 10) / 10; };
+    if (style === 'knurled') { var Dk = r1(2 * D + 2); return { headD: Dk, headK: r1(1.2 * D + 2), count: Math.max(6, Math.round(Math.PI * Dk / 4)), depth: r1(Math.max(0.6, Math.min(2, 0.032 * Dk))), edge: r1(0.094 * Dk) }; }
+    var Df = r1(1.3 * D + 1);
+    return { headD: Df, headK: r1(D + 1), count: Math.max(5, Math.round(Math.PI * Df / 6.3)), depth: r1(Math.max(0.5, 0.048 * Df)), edge: r1(0.093 * Df) };
+  }
+
+  /* A bolt, head down on the bed. o: { size, length (the shank, under the head), head 'hex'|'socket'|'knurled'|'fluted', hand, headAF, headK,
+     headD, count, depth, edge (a thumb head's), shank (the plain, unthreaded part of the length, next to the head), bevel, bevelAngle (the
+     free end) } */
   function bolt(o) {
     o = o || {};
     var res = { ok: false, reason: '' }, r = sizeOf(o, 'M8');
     if (!r.ok) { res.reason = r.reason; return res; }
-    var sp = r.spec, L = num(o.length) != null ? num(o.length) : 25, hw = hardware(sp.major), head = o.head === 'socket' ? 'socket' : 'hex';
+    var sp = r.spec, L = num(o.length) != null ? num(o.length) : 25, hw = hardware(sp.major);
+    var head = ['socket', 'knurled', 'fluted'].indexOf(o.head) >= 0 ? o.head : 'hex';
     if (!(L >= sp.P)) { res.reason = 'a shank shorter than one pitch (' + fmt(sp.P) + ' mm) has no thread'; return res; }
-    var segs;
+    var sh = num(o.shank) || 0;
+    if (sh < 0) { res.reason = 'a plain shank of ' + fmt(sh, 1) + ' mm is refused - 0 or more'; return res; }
+    if (L - sh < 2 * sp.P - 1e-9) { res.reason = 'a ' + fmt(sh, 1) + ' mm plain shank leaves ' + fmt(Math.max(0, L - sh), 1) + ' mm of thread - under two pitches (' + fmt(2 * sp.P, 1) + ' mm); make the shank at most ' + fmt(Math.max(0, L - 2 * sp.P), 1) + ' mm'; return res; }
+    var bv = bevelOf(o, sp, L - sh - sp.P, 'thread');
+    if (!bv.ok) { res.reason = bv.reason; return res; }
+    var threadSeg = function (z) { return { z0: z, z1: k0 + L, outer: thread(sp, { bevelHi: bv.b }), inner: null }; };
+    var shankSeg = function (z) { return sh > 0 ? [{ z0: z, z1: z + sh, outer: circle(sp.R + SHANK_STEP), inner: null }] : []; };   // a hair over the crests, so the step to the thread is nested
+    var segs, k0, extra = (sh > 0 ? ', ' + fmt(sh, 1) + ' mm plain shank' : '') + bevelText(bv.b);
+    var tail = function () { return ', pitch ' + fmt(sp.P) + ' mm, ' + (sp.hand > 0 ? 'right' : 'left') + '-hand' + extra; };
+    var infoBase = { kind: 'bolt', size: sp.id, spec: sp, head: head, lengthMm: L, shankMm: sh, bevel: bv.b, majorMm: sp.major, pitchMm: sp.P, note: r.note };
     if (head === 'hex') {
       var af = num(o.headAF) != null ? num(o.headAF) : hw.headAF, k = num(o.headK) != null ? num(o.headK) : hw.headK;
       if (!(af / 2 > sp.R + 0.3)) { res.reason = 'a hex head ' + fmt(af) + ' across flats does not clear a Ø' + fmt(sp.major) + ' shank - make it over ' + fmt(sp.major + 0.6) + ' mm'; return res; }
       if (!(k > 0)) { res.reason = 'the head needs a height, more than 0'; return res; }
-      segs = [{ z0: 0, z1: k, outer: polygon(6, af), inner: null }, { z0: k, z1: k + L, outer: thread(sp, {}), inner: null }];
-      return finish(res, assemble(segs).soup, { kind: 'bolt', size: sp.id, spec: sp, head: 'hex', lengthMm: L, headAF: af, headK: k, majorMm: sp.major, pitchMm: sp.P, note: r.note },
-        'Hex bolt ' + sp.id + ' × ' + fmt(L, 1) + ' (' + sp.familyLabel + '): ' + fmt(af, 1) + ' across flats, head ' + fmt(k, 1) + ' mm, pitch ' + fmt(sp.P) + ' mm, ' +
-        (sp.hand > 0 ? 'right' : 'left') + '-hand, head down on the bed' + (r.note ? ' - note: ' + r.note : ''));
+      k0 = k;
+      segs = [{ z0: 0, z1: k, outer: polygon(6, af), inner: null }].concat(shankSeg(k), [threadSeg(k + sh)]);
+      return finish(res, assemble(segs).soup, Object.assign(infoBase, { headAF: af, headK: k }),
+        'Hex bolt ' + sp.id + ' × ' + fmt(L, 1) + ' (' + sp.familyLabel + '): ' + fmt(af, 1) + ' across flats, head ' + fmt(k, 1) + ' mm' + tail() + ', head down on the bed' + (r.note ? ' - note: ' + r.note : ''));
     }
-    var D = num(o.headD) != null ? num(o.headD) : hw.capD, K = num(o.headK) != null ? num(o.headK) : hw.capK, sk = num(o.socketAF) != null ? num(o.socketAF) : hw.sock;
-    var depth = Math.min(K * 0.6, Math.max(sk * 0.8, 1.2)), floor = floorFor(sp.nozzle);
-    if (!(D / 2 > sp.R + 0.3)) { res.reason = 'a Ø' + fmt(D) + ' head does not clear a Ø' + fmt(sp.major) + ' shank'; return res; }
-    if (K - depth < floor) { res.reason = 'the head is ' + fmt(K) + ' mm tall - too thin for a ' + fmt(depth, 1) + ' mm socket and a ' + fmt(floor) + ' mm floor under it'; return res; }
+    if (head === 'knurled' || head === 'fluted') {
+      var dfl = thumbDefaults(head, sp.major);
+      var D = num(o.headD) != null ? num(o.headD) : dfl.headD, K = num(o.headK) != null ? num(o.headK) : dfl.headK;
+      var n = num(o.count) != null ? Math.round(num(o.count)) : dfl.count, dep = num(o.depth) != null ? num(o.depth) : dfl.depth, ed = num(o.edge) != null ? num(o.edge) : dfl.edge;
+      var word = head === 'knurled' ? 'grooves' : 'flutes';
+      if (!(n >= 3 && n <= 200)) { res.reason = 'a thumb head has 3 to 200 ' + word + ', not ' + n; return res; }
+      if (!(dep > 0) || dep > D / 6) { res.reason = 'a ' + word.slice(0, -1) + ' depth of ' + fmt(dep, 1) + ' mm is outside 0 to a sixth of the head\'s Ø (' + fmt(D / 6, 1) + ' mm)'; return res; }
+      if (!(ed >= 0)) { res.reason = 'the head\'s edge must be 0 mm or more'; return res; }
+      var hf = head === 'knurled' ? knurledFn(D / 2, n, dep, 0.45, Math.max(ed, 1e-3)) : flutedFn(D / 2, n, dep, Math.max(ed, 1e-3));
+      if (hf.minFace < sp.R + 0.3 + (sh > 0 ? SHANK_STEP : 0)) {
+        res.reason = 'a Ø' + fmt(D, 1) + ' ' + head + ' head with a ' + fmt(ed, 1) + ' mm edge comes in to Ø' + fmt(2 * hf.minFace, 1) + ' at its face - it does not clear the Ø' + fmt(sp.major) + ' thread; make the head wider or the edge smaller';
+        return res;
+      }
+      if (!(K >= 2 * hf.edgeZone + 0.2)) { res.reason = 'a ' + fmt(K, 1) + ' mm tall head is too short for two ' + fmt(hf.edgeZone, 1) + ' mm edges - make it at least ' + fmt(Math.ceil((2 * hf.edgeZone + 0.2) * 10) / 10, 1) + ' mm, or the edge smaller'; return res; }
+      var per = head === 'knurled' ? 16 : 24, cols = Math.min(960, n * per);
+      var surf = field(function (th, z) { return hf.fn(th, z, K); }, { cols: cols, rows: edgeRows(hf.edgeZone, 0.25) });
+      k0 = K;
+      segs = [{ z0: 0, z1: K, outer: surf, inner: null }].concat(shankSeg(K), [threadSeg(K + sh)]);
+      var out;
+      try { out = assemble(segs); } catch (e) { res.reason = 'internal: ' + e.message; return res; }
+      return finish(res, out.soup, Object.assign(infoBase, { headD: D, headK: K, count: n, depth: dep, edge: ed }),
+        (head === 'knurled' ? 'Knurled' : 'Fluted') + ' thumb screw ' + sp.id + ' × ' + fmt(L, 1) + ' (' + sp.familyLabel + '): head Ø' + fmt(D, 1) + ' × ' + fmt(K, 1) + ', ' + n + ' ' + word + ' ' + fmt(dep, 1) +
+        ' deep, ' + fmt(ed, 1) + ' mm ' + (head === 'knurled' ? 'rounded chamfer' : 'chamfer') + ' at its edges' + tail() + ', head down on the bed' + (r.note ? ' - note: ' + r.note : ''));
+    }
+    var D2 = num(o.headD) != null ? num(o.headD) : hw.capD, K2 = num(o.headK) != null ? num(o.headK) : hw.capK, sk = num(o.socketAF) != null ? num(o.socketAF) : hw.sock;
+    var depth = Math.min(K2 * 0.6, Math.max(sk * 0.8, 1.2)), floor = floorFor(sp.nozzle);
+    if (!(D2 / 2 > sp.R + 0.3)) { res.reason = 'a Ø' + fmt(D2) + ' head does not clear a Ø' + fmt(sp.major) + ' shank'; return res; }
+    if (K2 - depth < floor) { res.reason = 'the head is ' + fmt(K2) + ' mm tall - too thin for a ' + fmt(depth, 1) + ' mm socket and a ' + fmt(floor) + ' mm floor under it'; return res; }
     var sockCirc = sk / Math.cos(Math.PI / 6) / 2;
-    if (D / 2 - sockCirc < floor) { res.reason = 'a ' + fmt(sk, 1) + ' hex socket leaves ' + fmt(D / 2 - sockCirc) + ' mm of head round it - under the ' + fmt(floor) + ' mm floor'; return res; }
+    if (D2 / 2 - sockCirc < floor) { res.reason = 'a ' + fmt(sk, 1) + ' hex socket leaves ' + fmt(D2 / 2 - sockCirc) + ' mm of head round it - under the ' + fmt(floor) + ' mm floor'; return res; }
+    k0 = K2;
     segs = [
-      { z0: 0, z1: depth, outer: circle(D / 2), inner: polygon(6, sk) },        // the socket, open on the bed
-      { z0: depth, z1: K, outer: circle(D / 2), inner: null },
-      { z0: K, z1: K + L, outer: thread(sp, {}), inner: null }
-    ];
-    return finish(res, assemble(segs).soup, { kind: 'bolt', size: sp.id, spec: sp, head: 'socket', lengthMm: L, headD: D, headK: K, socketAF: sk, socketDepth: depth, majorMm: sp.major, pitchMm: sp.P, note: r.note },
-      'Socket-head bolt ' + sp.id + ' × ' + fmt(L, 1) + ' (' + sp.familyLabel + '): head Ø' + fmt(D, 1) + ' × ' + fmt(K, 1) + ' with a ' + fmt(sk, 1) + ' hex socket ' + fmt(depth, 1) +
-      ' deep (open on the bed), pitch ' + fmt(sp.P) + ' mm, ' + (sp.hand > 0 ? 'right' : 'left') + '-hand' + (r.note ? ' - note: ' + r.note : ''));
+      { z0: 0, z1: depth, outer: circle(D2 / 2), inner: polygon(6, sk) },        // the socket, open on the bed
+      { z0: depth, z1: K2, outer: circle(D2 / 2), inner: null }
+    ].concat(shankSeg(K2), [threadSeg(K2 + sh)]);
+    return finish(res, assemble(segs).soup, Object.assign(infoBase, { headD: D2, headK: K2, socketAF: sk, socketDepth: depth }),
+      'Socket-head bolt ' + sp.id + ' × ' + fmt(L, 1) + ' (' + sp.familyLabel + '): head Ø' + fmt(D2, 1) + ' × ' + fmt(K2, 1) + ' with a ' + fmt(sk, 1) + ' hex socket ' + fmt(depth, 1) +
+      ' deep (open on the bed)' + tail() + (r.note ? ' - note: ' + r.note : ''));
   }
 
   /* A nut. o: { size, thickness, shape 'hex'|'round', af (across flats / Ø), fit, hand }. Its bore is the bolt's profile + fit. */
@@ -644,7 +818,7 @@
 
   var API = {
     DEFAULTS: DEFAULTS, FAMILY: FAMILY, SIZES: SIZES, sizeIds: function () { return Object.keys(SIZES); }, hardware: hardware,
-    spec: spec, rod: rod, bolt: bolt, nut: nut, fitting: fitting, sleeve: sleeve, cutter: cutter, columnsFor: columnsFor,
+    spec: spec, rod: rod, bolt: bolt, nut: nut, thumbDefaults: thumbDefaults, bevelDefault: bevelDefault, fitting: fitting, sleeve: sleeve, cutter: cutter, columnsFor: columnsFor,
     // building blocks, for the callers that stack their own
     surfaces: { thread: thread, circle: circle, polygon: polygon }, assemble: assemble, volume: volumeOf
   };

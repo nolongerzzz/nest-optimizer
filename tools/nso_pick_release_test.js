@@ -298,6 +298,7 @@ const ROSTER = [
     },
     verb: async (page, id) => {
       const Lib = require('./nso_lift_plate_drive_lib.js'), bar = ROSTER[5].bar;
+      Lib.setClearOfCard(true);   // Lift is in the Crop card, which stands over the left of the view
       const dot = bar.truth.find(t => t.kind === 'dot');
       const tri = Lib.rawTriNear(bar.soup, dot.center[0], dot.center[1], 3.5, 3.7);
       await Lib.frameOn(page, id);
@@ -387,7 +388,7 @@ const ROSTER = [
   // handles take a press only on a hole or its ring - never on bare plate.
   { name: 'Punch', file: () => fx('box_hull_80x40x20-2.stl'),
     arm: async page => {
-      await page.click('#btn-punch');
+      await page.click('#menu-punch > summary');
       await page.waitForFunction(() => nsoPunchState().open, null, { timeout: 5000 });
     },
     verb: async (page, id) => {
@@ -517,6 +518,8 @@ async function twoPoints(page, which) {
 
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 880 });
+  /* The card is DRAW now (docs/DRAW.md): Connect's anchors are its "Anchors on the plate" section, armed while it is open. Open it once; it stays open. */
+  await page.evaluate(() => { const s = document.getElementById('connect-sec-classic'); if (s) s.open = true; });
 
   /* The baseline the rest are read against: nothing armed. */
   console.log('\n=== 0. nothing armed: the reading itself works ===');

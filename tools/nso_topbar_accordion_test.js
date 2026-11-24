@@ -15,11 +15,21 @@ const check = (name, cond, detail) => {
 /* Every top-level drop-down on the page (shell v3): the row, and the column.
    Members held inside one (Gen+'s four, Join's two) are not top-level;
    section 3 covers them. Plate & pieces is pinned open, not a drop-down. */
-const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
-             'menu-gen', 'menu-export'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-add', 'menu-bit',
-             'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
+/* The card regroup (2026-11-16): Print (menu-supports) is in the row, Generate (menu-gen)
+   heads the column; Crop has no slab (it opens from the Cut / Crop card's switch) and Weave
+   is a section of Fill & fix, so neither is a top-level drop-down here. */
+const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip',
+             'menu-supports', 'menu-export'];
+const COL = ['menu-gen', 'menu-scale', 'menu-cut', 'menu-punch', 'menu-add', 'menu-bit',
+             'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-assemble',
+             'menu-fillfix', 'menu-repair'];
 const ALL = ROW.concat(COL);
+/* ONE EXEMPTION: Measure's card stays open beside another (app-join.js's one-panel
+   rule; docked by app-measure.js) so it can be used during a live tool. It is
+   out of the "opening one shuts the rest" rosters below, and out of the count of
+   panels; nso_measure_test.js part D holds that behaviour. Every other pair is
+   unchanged. */
+const EXCL = ALL.filter(id => id !== 'menu-measure');
 
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 900 });
@@ -44,7 +54,7 @@ withApp(async (page, logs) => {
     document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; });
     if (state.cutterOpen && typeof closeCutter === 'function') closeCutter(true);
   });
-  const openCount = () => page.evaluate(() => [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length);
+  const openCount = () => page.evaluate(() => [...document.querySelectorAll('.vp-menu[open]')].filter(d => d.id !== 'menu-measure' && !d.parentElement.closest('.vp-menu[open]')).length);
 
   /* ------------------------------------------------------------------ 1 */
   console.log('\n=== 1. a panel never covers the shell\'s plain buttons ===');
@@ -91,19 +101,19 @@ withApp(async (page, logs) => {
        leave exactly that one panel open. */
     const walk = [];
     const occluded = [];
-    for (const seq of [ALL, ALL.slice().reverse()]) {
+    for (const seq of [EXCL, EXCL.slice().reverse()]) {
       await shutAll();
       for (const id of seq) {
         if (!(await openMenu(id))) occluded.push(id);
         const st = await page.evaluate((id) => ({
           it: document.getElementById(id).open,
-          n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length
+          n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => d.id !== 'menu-measure' && !d.parentElement.closest('.vp-menu[open]')).length
         }), id);
         if (!st.it || st.n !== 1) walk.push(id + ' ' + JSON.stringify(st));
       }
     }
     check('clicking through every drop-down, forwards and back, leaves only the one clicked open',
-      walk.length === 0, walk.length ? walk.slice(0, 6).join('; ') : (2 * ALL.length) + ' clicks');
+      walk.length === 0, walk.length ? walk.slice(0, 6).join('; ') : (2 * EXCL.length) + ' clicks');
     check('no button is ever under another drop-down\'s open panel',
       occluded.length === 0, occluded.length ? occluded.join(', ') : 'none');
 
@@ -129,16 +139,16 @@ withApp(async (page, logs) => {
           if (!top || !top.closest('#' + b)) hidden.push(a + '->' + b);
           B.querySelector(':scope > summary').click();
           await Promise.resolve();
-          const n0 = [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length;
+          const n0 = [...document.querySelectorAll('.vp-menu[open]')].filter(d => d.id !== 'menu-measure' && !d.parentElement.closest('.vp-menu[open]')).length;
           if (n0 !== 1) early.push(a + '->' + b + ' n=' + n0);
           await tick();
-          const n = [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length;
+          const n = [...document.querySelectorAll('.vp-menu[open]')].filter(d => d.id !== 'menu-measure' && !d.parentElement.closest('.vp-menu[open]')).length;
           if (A.open || !B.open || n !== 1) bad.push(a + '->' + b + ' a=' + A.open + ' b=' + B.open + ' n=' + n);
         }
       }
       return { bad, early, hidden };
-    }, ALL);
-    const pairs = ALL.length * (ALL.length - 1);
+    }, EXCL);
+    const pairs = EXCL.length * (EXCL.length - 1);
     check('opening any drop-down closes any other, one .vp-menu[open] left - all ' + pairs + ' ordered pairs',
       res.bad.length === 0, res.bad.length ? res.bad.slice(0, 6).join('; ') : pairs + '/' + pairs);
     check('...already true a microtask after the click, before any next event',
@@ -164,7 +174,7 @@ withApp(async (page, logs) => {
     }
     check('opening Wheel, Stock, Picture or Photo leaves Gen+ open and shuts the other three',
       nested.every(n => n.gen && n.it && n.others === 0), JSON.stringify(nested));
-    await openMenu('menu-seat');
+    await openMenu('menu-assemble');
     await page.waitForTimeout(40);
     check('opening another drop-down shuts Gen+ and whatever was open inside it',
       (await openCount()) === 1, (await openCount()) + ' open');
@@ -190,7 +200,7 @@ withApp(async (page, logs) => {
     /* Every other drop-down in turn: it opens, Cut's card shuts and the
        cutter is disarmed with it; Cut is reopened between each. */
     const wrong = [];
-    for (const other of ALL.filter(id => id !== 'menu-cut')) {
+    for (const other of EXCL.filter(id => id !== 'menu-cut')) {
       await shutAll();
       await openMenu('menu-cut');
       await page.waitForTimeout(40);
@@ -199,13 +209,13 @@ withApp(async (page, logs) => {
       const st = await page.evaluate((o) => ({
         cut: document.getElementById('menu-cut').open,
         other: document.getElementById(o).open,
-        n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length,
+        n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => d.id !== 'menu-measure' && !d.parentElement.closest('.vp-menu[open]')).length,
         cutting: !!state.cutterOpen && state.cutTool === 'cut', helper: !!state.cutHelper
       }), other);
       if (st.cut || !st.other || st.n !== 1 || st.cutting || st.helper) wrong.push(other + ' ' + JSON.stringify(st));
     }
     check('every other drop-down shuts Cut\'s card and disarms the cutter',
-      wrong.length === 0, wrong.length ? wrong.slice(0, 3).join('; ') : (ALL.length - 1) + '/' + (ALL.length - 1));
+      wrong.length === 0, wrong.length ? wrong.slice(0, 3).join('; ') : (EXCL.length - 1) + '/' + (EXCL.length - 1));
 
     /* Back to Cut: armed again, controls live. */
     await shutAll();
@@ -215,7 +225,7 @@ withApp(async (page, logs) => {
       const r = document.getElementById('btn-cut').getBoundingClientRect();
       return {
         menu: document.getElementById('menu-cut').open, cutter: !!state.cutterOpen,
-        n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length,
+        n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => d.id !== 'menu-measure' && !d.parentElement.closest('.vp-menu[open]')).length,
         tools: document.getElementById('cutter-tools').classList.contains('is-open'),
         cutShown: r.width > 0 && r.height > 0
       };

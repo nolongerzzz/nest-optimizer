@@ -24,6 +24,10 @@
   }
 
   function dispose() {
+    if (cur.host) {                                         // an overlay: give the piece under it its own look back
+      cur.host.saved.forEach(function (sv) { sv.mt.transparent = sv.transparent; sv.mt.opacity = sv.opacity; sv.mt.depthWrite = sv.depthWrite; sv.mt.needsUpdate = true; });
+      cur.host = null;
+    }
     cur.meshes.forEach(function (m) {
       if (m.parent) m.parent.remove(m);
       if (m.geometry) m.geometry.dispose();
@@ -39,7 +43,7 @@
 
   /* stand the ghost(s) where the drop would put them */
   function place() {
-    if (!cur.meshes.length) return;
+    if (!cur.meshes.length || cur.host) return;             // an overlay rides on its piece
     var spot = window.nsoFittings && window.nsoFittings.spotFor, prev = null;
     cur.meshes.forEach(function (m, i) {
       var sz = sizeOfMesh(m), at;
@@ -76,8 +80,34 @@
     return cur.meshes.length;
   }
 
+  /* showOn(owner, model, soup): the ghost of an EDIT - the piece as it would become - laid over the piece itself (a raw-frame soup, put
+     in the placed mesh's own frame the way Hollow's preview is), and the piece turned translucent under it until the ghost goes. */
+  function showOn(owner, model, soup) {
+    dispose();
+    if (typeof THREE === 'undefined' || typeof state === 'undefined' || !model) return 0;
+    var entry = (state.placed || []).find(function (p) { return p && p.sourceId === model.id; });
+    if (!entry || !entry.mesh) return 0;
+    var f = (typeof nsoRawFrameOf === 'function') ? nsoRawFrameOf(model) : null, n = soup.length / 3, pos = new Float32Array(soup.length);
+    for (var i = 0; i < n; i++) {
+      var p = [soup[3 * i], soup[3 * i + 1], soup[3 * i + 2]], q = f && typeof nsoLocalPointFromRaw === 'function' ? nsoLocalPointFromRaw(f, p) : p;
+      pos[3 * i] = q[0]; pos[3 * i + 1] = q[1]; pos[3 * i + 2] = q[2];
+    }
+    var g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.computeVertexNormals(); g.computeBoundingBox();
+    var mat = new THREE.MeshStandardMaterial({ color: 0x34d399, metalness: 0.05, roughness: 0.5, emissive: 0x064e3b, emissiveIntensity: 0.35, transparent: true, opacity: 0.6, depthWrite: false });
+    var mesh = new THREE.Mesh(g, mat);
+    mesh.renderOrder = 40; mesh.userData.skipXray = true; mesh.userData.nsoPiecePreview = true;
+    entry.mesh.add(mesh);
+    var mats = Array.isArray(entry.mesh.material) ? entry.mesh.material : [entry.mesh.material];
+    cur.host = { mesh: entry.mesh, saved: mats.map(function (mt) { return { mt: mt, transparent: mt.transparent, opacity: mt.opacity, depthWrite: mt.depthWrite }; }) };
+    mats.forEach(function (mt) { mt.transparent = true; mt.opacity = 0.25; mt.depthWrite = false; mt.needsUpdate = true; });
+    cur.owner = owner; cur.meshes = [mesh];
+    return 1;
+  }
+
   function snapshot() {
-    return { owner: cur.owner, count: cur.meshes.length,
+    return { owner: cur.owner, count: cur.meshes.length, overlay: !!cur.host,
              ghost: cur.meshes.map(function (g) { var p = g.position; return { x: p.x, y: p.y, z: p.z, size: sizeOfMesh(g), inScene: !!g.parent }; }) };
   }
 
@@ -115,7 +145,7 @@
   }
 
   window.nsoPiecePreview = {
-    show: show, clear: clear, place: place, state: snapshot, count: function () { return cur.meshes.length; },
+    show: show, showOn: showOn, clear: clear, place: place, state: snapshot, count: function () { return cur.meshes.length; },
     art: { flipUp: flipUp, moveZ: moveZ, join: join, xform: xform, rotY: rotY, rotZ: rotZ, mul3: mul3, AMBER: [251, 191, 36] }
   };
 })();

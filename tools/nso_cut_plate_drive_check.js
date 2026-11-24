@@ -87,12 +87,13 @@ withApp(async (page, logs) => {
   console.log('1. the card');
   await page.evaluate(() => { document.getElementById('menu-cut').open = true; });
   await page.waitForTimeout(250);
-  check('the Blade row has four buttons, Whole plate the fourth', (await page.$$eval('.cut-blade-mode .btn', b => b.map(x => x.textContent.trim()))).join('|') === 'Full blade|Sized blade|Notch|Whole plate');
+  check('the Blade row has four buttons (Chop, Dice, Notch, Plane), Whole plate one thin button on a row of its own under them', (await page.$$eval('.cut-blade-mode .btn', b => b.map(x => x.textContent.trim()))).join('|') === 'Chop|Dice|Notch|Plane' &&
+    (await page.$$eval('.cut-blade-plate-row .btn', b => b.map(x => x.textContent.trim()))).join('|') === 'Whole plate');
   check('before it is pressed, its fields are hidden', await page.$eval('#cut-plate-fields', e => e.hidden));
   await page.click('#btn-cut-blade-plate');
   await page.waitForTimeout(300);
   check('Whole plate is pressed and its fields show', (await page.getAttribute('#btn-cut-blade-plate', 'aria-pressed')) === 'true' && !(await page.$eval('#cut-plate-fields', e => e.hidden)));
-  const gone = await page.evaluate(() => ['cut-slider', 'cut-miter-dial', 'cut-bevel-dial', 'cut-readout', 'chk-cut-rotate'].map(id => getComputedStyle(document.getElementById(id)).display === 'none' ||
+  const gone = await page.evaluate(() => ['cut-slider', 'cut-miter-dial', 'cut-bevel-dial', 'cut-readout', 'cut-rotate-dial'].map(id => getComputedStyle(document.getElementById(id)).display === 'none' ||
     !document.getElementById(id).offsetParent));
   check('the per-piece slider, dials, readout and Rotate piece stand down', gone.every(Boolean), JSON.stringify(gone));
   check('no per-piece blade, a plate blade instead', await page.evaluate(() => !state.cutHelper) && !!(await plateBlade(page)));

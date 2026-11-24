@@ -8,7 +8,8 @@ Smart build-plate packing for 3D printing.
 
 - Multi-plate support from day one
   - Bambu A1 Mini (180×180)
-  - Bambu A1 / P1S / X1C (256×256)
+  - Bambu A1 / X1C (256×256)
+  - Bambu P1S (256×256; the Slice card's P1S profile)
   - Prusa MK4 / MK3S
   - Creality Ender 3
   - Custom size
@@ -22,21 +23,39 @@ Smart build-plate packing for 3D printing.
   an even offset and whole-piece scaling apply`), with the build-volume verdict appended
   (`fits A1 Mini` / `5.0 mm too wide for A1 Mini`). Under it, one compact row
   per field that applies: **Length / Width / Height** - the piece's own axes
-  as it lies - each inserting or removing material inside one straight run, so
-  walls, floor, holes and lips keep their size; a ring's **Outer Ø** (bore
+  as it lies (Length the long side of the footprint, Width the short side,
+  Height off the plate) - each inserting or removing material inside one straight
+  run, so walls, floor, holes and lips keep their size, or, where there is no
+  straight run that way, stretching the piece along that side alone; a ring's **Outer Ø** (bore
   kept), **Bore Ø** (outer kept) and **Wall** (outer kept) - each moves one
   face, for pipe work - and a rod's **Diameter**; **Offset** (the
   outside in or out, inner faces following - Fatten / Shrink, folded in) on
-  everything but a ring or rod; **Whole ×**, **Longest** and **Fit to plate**.
+  everything but a ring or rod; **Whole ×**, **Longest** (only where no named
+  row already shows the longest edge) and **Fit to plate**.
   Every row has a **slider** and previews on the piece - a translucent ghost
   over it, the piece untouched - until **Set** bakes it (one Undo step).
   See [docs/SECTION.md](docs/SECTION.md)
 - **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
-  by the measured line widths, grid / zigzag infill by density, top and bottom
+  by the measured line widths, grid / rectilinear / concentric / Archimedean chords / 3D honeycomb / gyroid / honeycomb / cubic / adaptive cubic / lightning infill by density, Hilbert curve and octagram spiral surfaces, top and bottom
   shells, and per-layer overhang / support-need calls - opened as a toolpath
   G-scope inspects line by line, like an imported `.gcode.3mf`. Validated
   against real Bambu slices, agreement and disagreement both on record. For
   reverse-engineering and internal iteration ([docs/SLICER.md](docs/SLICER.md))
+- **Custom shape** (Gen+): draw your own outline and make it a **Tray** (walls
+  and a floor - a bin, a drawer or console insert), a **Frame** (walls only) or
+  a **Solid**. Drag points on a snapping grid, double-click a side to add one;
+  every **corner has its own radius** (and inside radius, auto by default so the
+  wall stays even round it), every **side has its own wall thickness** and can
+  be **curved** by dragging its handle. Presets (rectangle, rounded, swept
+  corner, L, trapezoid, hexagon) to start from, a live preview on the plate, a
+  **Big** editor for detail, and refusals in words when a radius or wall does
+  not fit. A **Lip** (a flange out, or a rim in, chamfered underneath so it
+  prints without support), a **Lid** (a plate with a plug that fits the opening
+  with a set clearance, made as a second piece), **Grow / Shrink** for the whole
+  outline, **caliper entry** (type a side's length, or the overall width and
+  depth, and the shape stretches to fit), and **Copy from a piece**: cut the selected piece at a height, see the
+  cut drawn, and read it back as editable points, rounded corners and curved
+  sides ([docs/CUSTOM-SHAPE.md](docs/CUSTOM-SHAPE.md))
 - **Fittings** (Gen+): a slip-on **Cap** for the selected tube (bore = its Ø plus
   a printed-fit gap, walls and closed end = the tube's own wall, closed end down)
   and **2-way / 3-way splitters** - a trunk into 2 or 3 branches - each a new
@@ -52,7 +71,10 @@ Smart build-plate packing for 3D printing.
   **nut** and a bolt + nut set, M2 to M30 (coarse and fine) or G pipe sizes or
   a typed Ø and pitch. Pick one from picture tiles, move a slider for every
   number (Ø, pitch, length, fit, nut thickness) against a **live translucent
-  preview** on the plate, then **Add to plate**. The nut's bore is the bolt's
+  preview** on the plate, then **Add to plate**. **Knurled** and **fluted thumb
+  heads**, a plain **shank** and a **bevelled end**. **Extend thread**: select
+  any screw on the plate and make its thread longer (or shorter) by whole turns
+  - its own pitch, size and profile kept, read off the piece. The nut's bore is the bolt's
   thread plus a 0.2 mm fit, so the pair turns; every piece is a closed,
   wound-outward mesh built directly (no boolean), measured by rays in
   `npm run thread:test` ([docs/THREADS.md](docs/THREADS.md))
@@ -111,14 +133,21 @@ Smart build-plate packing for 3D printing.
 - Auto-nest with optional 45°/90° rotations
 - Adjustable gap between models
 - Live 3D preview
-- **Measure** — click two points on the pieces for the distance between them in mm,
-  or switch to Edge and click one edge for its length. Corners and edges snap, the
-  number is drawn on the piece, and it follows the piece when you move it.
+- **Measure** — click two points on the pieces for the distance between them in mm
+  (or inches, with the **Inches** toggle), or switch to Edge and click one edge for
+  its length. Corners and edges snap, the number is drawn on the piece, and it
+  follows the piece when you move it. **Ruler** lays a 300 mm / 12 in ruler over the
+  viewport: drag it anywhere (it stays level), orbit and pan the piece under it, and
+  use **Align point / Align edge** to see where a corner or an edge sits on its marks.
   See [docs/MEASURE.md](docs/MEASURE.md).
 - **Pottery Wheel**: throw a vessel on an axis - a centred ball sized by
-  Pappus's centroid theorem, one opening push, drag-shaped pulls at any
-  height, and a base trim, with a live clay budget and the nozzle-safety wall
-  floor enforced on every update ([docs/POTTERY-WHEEL.md](docs/POTTERY-WHEEL.md))
+  Pappus's centroid theorem (or just the standard ball, dropped on the plate
+  with nothing to type), a clay-conserving **Flatten** (ball to plate disc),
+  one opening push, a flared plate **Lip**, pulls at any height and a base trim -
+  the piece is a recipe, every number a slider that stays live, the clay
+  conserved, and balls on the piece itself to drag it into shape - and a
+  live clay budget and the nozzle-safety wall floor enforced on every update
+  ([docs/POTTERY-WHEEL.md](docs/POTTERY-WHEEL.md))
 - **Build-volume warning**: a live check against the selected printer's bed
   and build height, per-printer profiles any tool can query
   ([docs/BUILD-VOLUME.md](docs/BUILD-VOLUME.md))
@@ -177,7 +206,20 @@ Smart build-plate packing for 3D printing.
   the piece), press Crop, and the slab inside the box is removed, the far part
   slides back by the box length, and the joint is sealed into one closed piece.
   Stage 1 of two: no sideways alignment yet. See [docs/CROP.md](docs/CROP.md).
-- **Triple join** (Join card) joins three pieces in one press: pick A, B and C,
+- **Assemble** is one card for putting one piece on another - the Join, Seat
+  and Align cards merged. **Open editor** shows the plate's pieces alone on a
+  stage that turns freely: click the face to attach, click where it goes, and a
+  ghost shows it there, face to face, before anything on the plate moves. A
+  3 x 3 pad sets it flush with an edge, into a corner or on the centre; a
+  quarter turn, a nudge and a gap finish it; **Weld into one** or **Place**
+  bakes it as one Undo. The three old cards are sections of the same card,
+  every control where its id says. See [docs/ASSEMBLE-EDITOR.md](docs/ASSEMBLE-EDITOR.md).
+- **Interlocks & pins** is the editor's second tab: a tongue, a round pin or a
+  snap tab on a face, sized by typed caliper values, dragged into place or
+  typed to its distance from the face's edges. With another piece seated on
+  that face, the matching socket - the key grown by the fit - is cut in it.
+  One Undo, and neither piece moves. See [docs/INTERLOCK.md](docs/INTERLOCK.md).
+- **Triple join** (Assemble card, Join by slots) joins three pieces in one press: pick A, B and C,
   choose a **vertical stack** or a **horizontal sequence**, and each of the two
   junctions (A-B, B-C) gets Center lock then Seat (support) at **its own gap**.
   Both gaps span the Seat slider's full range - a real air gap at -0.18, zero
@@ -224,7 +266,8 @@ Smart build-plate packing for 3D printing.
     The card re-scans after each, **Fix all** runs them in order, each is one
     Undo. **Add > Patch** does the same by hovering and clicking a hole. See
     `docs/PATCH.md`.
-- **Carve** is a local carving tool - a handheld rotary tool, not the Cutter's
+- **Carve** (in the **Sculpt** card, its own arm beside the Brush) is a local
+  carving tool - a handheld rotary tool, not the Cutter's
   full-plane Split. Pick a blade profile, arm it, then click a face, an **edge**
   or a **corner** of a piece: the blade is aimed along the outward bisector of
   whatever faces it can reach there and just that local volume is subtracted.
@@ -395,28 +438,29 @@ Smart build-plate packing for 3D printing.
 
 ## Where things are (the shell)
 
-- **Top row**, left to right: Import, Measure (Two points / Edge), Move,
-  Rotate, Tip, Align, Gen+ (Wheel, Stock, Fittings, Picture, Mold, Photo), Lock position,
+- **Top row**, left to right: Import, Measure (Two points / Edge / Align, Inches, Ruler), Move,
+  Rotate, Tip, Gen+ (Wheel, Stock, Fittings, Custom shape, Picture, Mold, Photo), Lock position,
   Lock plate; at the right Undo, Remove and Export, with **Clear plate**
   under Remove and **Optimize** under Export.
 - **Plate & pieces**, pinned open in the top-right corner: the plate picker
   (and Custom W · D · H), the bed grid (auto / on / off) and Snap to grid,
   the pieces list and Clone. Always visible, never a drop-down.
-- **Left column**: G-scope, Scale, Cut, Crop, Join (Join, A-B-C), Seat,
+- **Left column**: G-scope, Scale, Cut, Crop, Assemble (the editor; Join, Seat, Align),
   Supports, Add, Subtract · Shape, Text, Paint, Surface & edges, Sculpt · Check &
   repair on its own at the bottom · X (X-ray), 👁 (Watch), ◎ (frame the
   view) in one row under it.
-- The cards: **Shape** Smooth, Bend, Tube edge (Reducer - with Keep length to cut it into the tube rather than add to it - Roll, Neck), Pull
+- The cards: **Shape** Smooth, Bend, Tubes (Reducer - with Keep length to cut it into the tube rather than add to it - Roll, Neck, Branch: pull a tube out of a tube's wall, its bore opened into the tube's), Cylinders (Neck on a solid rod: a pinch or bulge anywhere along it, or a spigot / collar stepped at an end; Branch: press on a rod and drag to pull a new rod out of its wall, welded on - branches off branches, ready for Limb - [docs/TUBE-EDGE.md](docs/TUBE-EDGE.md)), Pull
   (grab a spot and drag it, with pins; docs/PULL.md), Limb (grab a branch of a
   tree anywhere along it, then stretch it or bend it; docs/LIMB.md) ·
   **Text** the text box, Font, Bold, Italic, Font file, Size, Depth, Angle,
   Mirror, STAMP (docs/TEXT.md) ·
   **Add** Fill / Densify, Foam, Thicken out / in, Extend, Bridge ·
-  **Subtract** Subtract B from A, Extract bit, Carve, Hollow, Hollow to safe
+  **Subtract** Subtract B from A, Extract bit, Hollow, Hollow to safe
   min, Lift (opens G-scope at its Lift row) · **Surface & edges** Soften,
   Mirror, Skin face / wrap / patch, Trace raster, Texture, **Wrap** (one
-  feature laid over a face; docs/SURFTEX.md) · **Sculpt** the
-  Brush · **Check & repair** Check piece, Cap open faces, Repair, Seal,
+  feature laid over a face; docs/SURFTEX.md) · **Sculpt** two arms:
+  the Brush (Emboss, Smooth here; Size, Force) and Carve (ball-nose, flat shave,
+  V-groove; Depth, Radius, Roll) - shutting the card puts either away · **Check & repair** Check piece, Cap open faces, Repair, Seal,
   Non-solid, Solidify.
 - Every drop-down opens at the same spot, right of the column and under the
   row, one at a time. Supports and the slicer's settings are also G-scope's

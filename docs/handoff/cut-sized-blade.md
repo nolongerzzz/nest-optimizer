@@ -68,3 +68,135 @@ Four suites that already fail on the commit before this work (`nso_rotate_rings_
 A 15 mm notch could not be dialled in: the kerf and notch-width sliders stopped at 10 mm (`min(10, span/2)`). `cutSliderMax` now gives every slider room to breathe:
 width 2x the piece's biggest section, depth 1.5x, kerf and notch width 3/4 of its length, each at least 20 mm. The number box still takes anything and the
 range still grows to hold it. `nso_cut_strand_drive_check` (49 gates) sets a 15 mm kerf and a 15 mm notch width by slider.
+
+### Sixth round (2026-11-07): the blade answers only to a press on it or on the piece
+
+A press on the empty plate a grid square or two from the blade still grabbed it and the drag moved it. Cause: `cutBuildBlade` / `cutBuildSizedBlade`
+(`app-cut.js`) each added an invisible hit mesh bigger than the blade (+24 mm across the full blade, +12 mm round the sized box) "for easy drag", and
+`app-core.js` takes any ray hit on `state.cutHelper` as a blade grab. Both hit meshes are gone. The blade's own sheet and edge frame are already
+pickable (`cutOverlay(..., true)`), so a press on the blade still drags it, and a click on the piece still drops the blade there (that branch runs first
+and is unchanged). A press anywhere else on the plate falls through to the plate's orbit.
+
+New `tools/nso_wire_cut_grab_test.js` (`wire:cut-grab`, real mouse, top-down): the click-to-jump, a plate press 8 and 14 mm past the blade (fails on the
+old code: the blade moved 10.4 mm), and a press on the blade frame still dragging it. Trade-off: the full blade seen edge-on is a line, so it is grabbed
+by its frame, not by a fat target.
+
+### Seventh round (2026-11-07): Follow strand
+
+Asked for: "make the sized blade follow this string in a square cut position across the strand as it spirals, so I can click my way from start to
+finish making 1-2 mm slices of salami". Full write-up: `docs/CUT-FOLLOW.md`. New: `nso_strand.js` (THREE-free: section by any plane, direction
+and centre of a strand, march along it; `strand:test`), `app-cut-follow.js` (state in the WORLD, `state.cutFollowAt`; place / Back / Forward / after-cut),
+`tools/nso_cut_follow_drive_check.js` (`follow:drive`). Hooks: `app-core.js` (a click with Follow on traces the cord; a press on the blade does not drag it),
+`app-cut.js` (the `slice` field, state clears, `cutNotchAt` calls `cutFollowAfterCut` and carries the move in its status line), `index.html` (the card rows).
+
+Found while testing: a plane that grazes a surface or the cord's end cuts a tiny outline, so "smallest section" picked wrong directions (now surface normals,
+voted); a plane lying on a cut face cuts part of a disc whose centre is off the axis (sections are gated on area); a march that ran out into empty space
+returned a target there (now the end); Back onto a kerf found another turn of the spiral (refused). `nso_wire_cut_redesign_test` lists the new controls.
+
+### Eighth round (2026-11-07): the Rotate piece wheel
+
+Asked for: the rotate rings are too far out of view to work on small pieces, so a rotary dial like the mitre's inside the Cut card, the Mitre box and Square
+moved under the Mitre wheel so the new wheel fits on its right. The two wheels are now a two-column row (`.cut-dials`, `index.html`, `styles.css`); each column is
+wheel, - / + (directly under it, as the layout gate in `nso_wire_cut_redesign_test` has always pinned), then its name and box (Square beside the Mitre's).
+`app-cut.js`: `cutWireRotateDial`, `cutRotateBy` (through `nsoRotate.turn`, with the lock check and one Undo point per run), `cutPieceHeading` (0 = as loaded,
+clockwise from above); `cutWireMiterStep` takes a third kind for its buttons. The old checkbox is now labelled **Rotate rings** (it still shows the rings and the
+lean options). The wheel is a jog, not a pointer-follower: a piece must not jump to wherever the rail is pressed. A turn clears the Follow strand place (it is held in
+the world). New `tools/nso_cut_rotate_dial_drive_check.js` (`rotate-dial:drive`); `nso_wire_cut_redesign_test` lists the card in its new order.
+
+### Ninth round (2026-11-07): slide along the cord; one box
+
+Asked for: the slider and the drag to work while Follow is on, following the cord instead of pulling the blade off it; Single strand and Follow strand as one checkbox;
+a drag need not go round the whole spiral - section by section, about 90 degrees at a time. Done in `app-cut-follow.js` (the window and the slide) and
+`nso_strand.js` (`centreline`: the stretch either side of a point, out to 90 degrees of turning or 60 mm, as samples of centre / direction / arc length / on-strand;
+node-tested). Putting the blade down keeps the stretch (`fa.win`); `setCutMm` / `getCutMm` / `syncCutUI` (`app-cut.js`) map the slider, the box and the nudges to it,
+`cutTFromPointer` and the pointer up / down (`app-core.js`) take a drag against the stretch (the sample nearest the pointer's ray), and letting go - or a 0.6 s pause - puts
+the blade down for real with a fresh stretch (so the next drag goes another quarter turn). The sliding step is the cheap half of placing (no trace, no march, a narrow
+aim sweep): about 13 ms on the Connector string. One box: `#chk-cut-blade-strand` is gone; Follow strand implies the one-strand isolation (`cutStrandOn`), and **off is the plain
+sized blade that takes everything in its box** - which also means the default is no longer "Single strand on" (`b.strand` is kept as an internal switch for the
+checks that drive the isolation without the following).
+
+Found while testing: the window's end tangents were one-sided, half a baseline early (2.3 degrees off on a tight bend, held at the end of a stretch): extrapolated now.
+`follow:drive` slides with the real mouse (slider, blade, cord), types in the box, nudges, and sweeps a stretch that crosses the kerfs of three cuts: at every stop the
+blade's plane cuts a whole round section of the cord and faces the way the stretch runs.
+
+### Tenth round (2026-11-07): Follow on by default; the rotate rings are gone, the wheel has the axes
+
+Asked for: Follow strand on by default when the Sized blade is picked; the rotate rings option removed, a tick for each rotate option on the same wheel, Horizontal
+ticked by default. `cutBladeState` now starts with `follow: true` (the card resets on every open), so picking Sized is enough; the checks that drive a plain sized blade
+(`notch:drive`, `notch:sever`, `notch:strand-drive`) turn it off first. The rings option is out of the card (`index.html`), `app-cut.js` (`cutSetRotate`, the state, the
+ring boxes), and out of the two places that gave Cut the rings (`app-core.js`'s press claim, `app-rotate-handles.js`'s `cutRings`; the Rotate MENU's rings are untouched).
+The Rotate piece wheel takes the axis from three exclusive ticks (`chk-cut-rot-h` default, `-fb`, `-ss`; `state.cutRotateAxis`), mapped to the ring `turn` or the footprint's along /
+across lean (`nsoRotate.leanNames`), turned through `nsoRotate.turn(ring, ...)`. A lean reads the tilt of the piece's upright axis from the vertical about the lean's axis;
+the upright is kept (`cutRotateRef`) and re-picked only when the piece lands flat on another face or the piece / axis changes, so the reading does not jump 90 degrees when
+another axis becomes the more vertical past 45 (it did, on the first version: released at 51 it read -39). A drag always gets its own Undo step (it used to merge into a
+button press made less than 0.7 s before).
+
+### Eleventh round (2026-11-07): leans pivot in place; Follow strand for the Notch
+
+**Leans pivot in place.** The wheel's Front/back and Side/side were turned through `nsoRotate.turn`, which stands the piece back on the plate after every step - so a tipping piece
+rose and fell. The Rotate menu's rings HOLD the piece (`hold`: pivot on its centre, through the plate where it must, seated once at the end). New in `app-rotate-handles.js`:
+`holdTurn(ring, deg, {A, keep})`, `seatNow`, `seatSoon`, `undoPoint`, `holding`; a hold taken by `holdTurn` is seated and NOT baked (Cut keeps the pose in its own frame - the blade is
+held in the piece's coordinates, which a bake would move) and tells Cut it has landed (`cutRotateSeated`, `app-cut.js`). The wheel takes its Undo point from `undoPoint` (the pose as it will be
+seated; it does not put the piece down for it), keeps a drag pivoting through any pause (`keep`), seats it on release, and `cutActiveModel` (`app-join.js`) seats a turn still in hand before it cuts.
+`nso_cut_rotate_dial_drive_check` gates it: the centre does not move through 0 -> 20 -> 50 degrees, the low end goes through the plate, a pause lands it once, a drag held still for a second keeps
+pivoting, release lands it, one Undo takes it all back seated.
+
+**Follow strand for the Notch** (`nfollow`, off by default; its own box in the Notch rows). `cutFollowOn` knows both blades; the Slice / Back / Forward rows moved out of the Sized fields into a shared
+block under both, labelled Gap for the Notch; depth / width are raised only for the Sized blade. Found while testing: a plane square to the cord next to the wall of a nick cuts a section 7-10% short
+(the cord curves, the nick's walls do not), so the `ok` gate on a section's area is now 0.95..1.06 (was 0.8..1.25); on a clean faceted cord the area spread is 0.996..1.001.
+
+### Twelfth round (2026-11-07): the wheel spins in place about one line, and reads the true turn
+
+From a screen recording of the wheel on the Connector string, Front/back ticked: the piece jumped and tilted freely above the plate, the wheel read 0 with the disc standing on its
+edge, read 30.7 after an Undo had put it flat, and a reading of -4.8 sat on a piece nearly upright. Four causes, all in `app-cut.js`:
+- **Free tilting.** The lean's ring was named from the footprint afresh at every step (`nsoRotate.leanNames`), and a tipping disc's footprint changes shape (a near-square one swaps
+  its long side), so successive steps turned it about different axes. `cutRotateSession` now picks the ring and its world axis once and holds them (`holdTurn` is always given `A`), re-picking
+  only when the piece's turn is not the one the wheel last left (Undo, Redo, the Rotate menu, another tool).
+- **Jumping.** `holdTurn` armed a 600 ms timer that stood the piece on the plate - up off it, mid-spin. The wheel's turns now arm none (`keep: true`); `cutRotateSettle` lands the piece when the
+  wheel is done: another axis ticked, a press outside `#edit-card` (a capture listener), Cut (`cutActiveModel`), `closeCutter`. A drag's release no longer lands it either.
+- **Re-basing.** The lean reference was re-picked when another face came within a degree of upright, so the reading fell to 0 at 90 with the piece on edge. It is now the piece's own upright
+  (`k`, `sgn`, in the BODY frame - mesh turn x `nsoBakedQ` - so a bake does not move it), kept for the piece and the axis: 90 reads 90, 120 reads 120.
+- **Stale after Undo / Redo.** `undoLast` / `redoLast` (`app-core.js`) now call `cutAfterPoseUndo`, which has the wheel and the blade read the pose that came back.
+Found on the way: landing the piece re-syncs the card, which unticked the box just clicked (the handler now reads the tick first). Redo closes and reopens the Cut tool (nsoHelpers.teardown), as
+it does for every helper, so the card starts again after a Redo - left as it was.
+
+### Thirteenth round (2026-11-07): no plate line - a ball on the blade's top end; a 90 degree mitre button
+
+Asked for: the strip that marks where the blade's plane meets the plate removed ("it floats around during rotate"), a ball on the blade's top end in its place as the grab handle, and a 90 degree
+button under Square. `app-cut.js`: `cutBuildPlateLine` / `cutPlateLineWorld` / `cutPlaceLine` and `userData.plateLine` are deleted; `cutBuildBall` (a 2.4 mm sphere, no depth test, a cut handle) is built with the full
+and the sized blade and `cutPlaceBall` puts it on the top end from the cut frame's `upCut` (less its part along the plane's normal; the first axis across the plane when the plane lies flat) on every update. `app-core.js`:
+a press that reaches the ball before the piece behind it takes hold of the blade (the piece pick ignores helper objects, which made the ball a click on the piece); and a drag from the helper now starts from the point
+taken hold of (the ball's centre, which is on the plane) instead of a plane through the blade's centre - the first reading used to jump the blade (13 mm from the ball on an oblique view).
+`index.html` / `styles.css`: `btn-cut-miter-90` stacked under Square (`.cut-dialbtns`); `setCutMiter(90)`. Tests: `nso_wire_cut_blade_view_test` (its plate-line gates became ball gates: on the plane, on the top end,
+drawn through the piece, pickable, no plate line anywhere), `nso_wire_cut_grab_test` (a real mouse press on the ball from a diagonal camera takes hold without moving the blade, and a drag slides it),
+`nso_wire_cut_tip_test` / `nso_wire_cut_yaw_test` (they held the cut face to the plate line's direction and extent; that geometry is now `__planeTrace` in the tests, the app no longer draws it),
+`nso_cut_rotate_dial_drive_check` (the 90 button: layout, mitre 90, the blade's normal a quarter-turn on, Square back), `nso_wire_cut_redesign_test` (control order).
+
+### Fourteenth round (2026-11-07): the ball moves to the top corner, on a bar, in the blade's own colour
+
+Asked for (from a sketch): the ball out past the front corner of the blade's top edge, on a small bar to that corner, not floating; then, "an extension of the blade, same colour, not yellow". `cutBuildBall` makes
+a ball and a bar from the blade SHEET's material (colour, opacity 0.38, transparent, double-sided, no depth test) - transparent matters: an opaque ball is drawn before the translucent plate, which (no depth written) then
+paints over it from straight above (three camera angles in `nso_wire_cut_blade_view_test` found it). `cutPlaceBall` takes the blade rectangle's corners, keeps the ones furthest along `up` (the top edge's two ends when the
+blade stands square to the frame), picks the one toward the front and left of the home view (the world direction (-0.5, 0, 1): continuous in the blade's turn), runs the bar outward along the top edge from 0.6 mm
+inside the corner (`CUT_BALL_INSET_MM`) for `CUT_BALL_BAR_MM` + the ball's radius, and puts the ball at its end. A press on the bar grabs like one on the ball (`app-core.js`). The blade-view test now gates: ball on the
+plane at the height of the top edge, bar 0.6 into a top corner and ending at the ball, ball and bar the sheet's colour and translucency (not the frame's yellow), the front-left corner chosen, drawn through the piece.
+
+### Fifteenth round (2026-11-07): the tab - a flat bar, the ball on it, one yellow outline
+
+Asked for (from a sketch over a dark-background screenshot): the yellow outline of the blade carried straight out round the ball and its connector, the connector's edge aligned with the blade's, and a flat bar in place of the
+round tube - the fix for the dark ball being hard to see on the dark plate. `cutBuildBall` now builds three things: the ball (sphere, the sheet's material), a flat bar (a unit box scaled to length x 3 mm wide x 1 mm thick and
+turned onto the blade's plane by `cutPlaceBall`, the sheet's material) and an outline (`THREE.Line`, 35 points, the frame's yellow, drawn last so the dark fills do not dim it). `cutPlaceBall` still picks the front-left top
+corner, then lays the tab in the blade's plane from it: the bar's upper edge is the blade's top edge carried on outward (collinear), the ball is on the bar's centreline (H/2 below the top edge) at its end, and the outline is
+the top edge out to where the bar meets the ball, the long way round the ball, and back along the bar's lower edge to the blade's side edge. `nso_wire_cut_blade_view_test` gates it: outline starts on the corner and its first
+run is the blade's top edge carried on (cross product 0, same sense, level), the arc is on the ball's circle, it ends 3 mm down, the bar is a thin box with its top at the blade's top, the outline is the frame's colour and the fill
+the sheet's, drawn through the piece, front-left chosen; a ray at the ball or the bar hits a tab handle.
+
+### Sixteenth round (2026-11-07): Hide blade
+
+Asked for: a hide blade option in the Cut card, to turn pieces without the blade moving about; and, when it was first built to survive a re-open: it is a toggle for use in the card, the blade is out whenever the card opens.
+`chk-cut-hide-blade` at the top of the card (`index.html`); `state.cutHideBlade`, `cutSetHideBlade`, `cutApplyHide` (`app-cut.js`) set `.visible` on `state.cutHelper` and `state.cutPlateHelper` on every build / update, grey the Cut
+button (and say why in its title; `updateCutterUI`, `cutPlateSync` and `syncCutBladeUI` all honour it) and tick the box. `app-core.js`: while hidden the press handlers do not place or drag the blade (a click on a piece just picks it;
+the ball pre-empt and the helper drag branch are skipped - a hidden object still answers a ray, so it has to be switched off there). It is cleared by `openCutter` and by the card's closing (`cutWireCards`); an Undo leaves the
+tool, and so the toggle, as it was. (Redo shuts the whole Cut card for every tool, so it ends it like any close - found by driving the real Undo and Redo, after a same-tick close-and-reopen simulation gave a false result: the card's
+observer reads a closed card with the tool open as the user shutting it.) Tests: `nso_cut_rotate_dial_drive_check` (box, hidden, Cut off with reason, real click and drag on the piece place nothing, a press where the tab was takes no hold,
+the wheel still turns the piece, the whole-plate blade hides, an Undo keeps it, unticking restores and a click places again, shutting the card clears it, opening always shows the blade), `nso_wire_cut_redesign_test` (control order).

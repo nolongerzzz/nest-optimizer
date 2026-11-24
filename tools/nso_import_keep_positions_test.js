@@ -56,7 +56,7 @@ const core = fs.readFileSync(CORE_FILE, 'utf8');
 
 const LIFTED = [
   'getCurrentPlate', 'zUpToYUp', 'savedPlacements3MF', 'import3MF', 'addModelFromZUpGeometryAsync',
-  'addModelFromZUpGeometry', 'addModel', 'placeNewModel', 'placeModelMovable', 'buildPlacedObjects3MF',
+  'addModelFromZUpGeometry', 'addModel', 'placeNewModel', 'placeModelMovable', 'buildPlacedObjects3MF', 'nsoIndexForExport',
   'nsoPoseBelow', 'readSceneBlock', 'restoreSceneFrom3MF', 'restoreSceneObject', 'restoreScenePlate',
   'applyModelSceneState', 'applyPlacedOrientation', 'applyMeshRotation', 'clearPlaced', 'clearDisplayMeshes',
   'buildPlateSceneJson', 'capturePieceState', 'pieceBasis3MF', 'modelOfPlaced', 'geometryCenter',

@@ -545,7 +545,7 @@ async function NSO_connectRun(p) {
    for Keep separate); it is ONE undo step either way (supportSwap: the new
    piece off, every input back exactly as it was - model, placed record, mesh,
    pose). */
-function NSO_connectCommit(soupUp, models, shape) {
+function NSO_connectCommit(soupUp, models, shape, asName) {
   var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (var i = 0; i < soupUp.length; i++) { var k = i % 3; if (soupUp[i] < lo[k]) lo[k] = soupUp[i]; if (soupUp[i] > hi[k]) hi[k] = soupUp[i]; }
   var drop = new Set(models.map(function (m) { return m.id; })), removed = [];
@@ -573,7 +573,7 @@ function NSO_connectCommit(soupUp, models, shape) {
     name = models.map(function (m) { return m.name; }).filter(function (n, j, a) { return a.indexOf(n) === j; }).join(' + ');
     if (!/\(connected\)$/.test(name)) name += ' (connected)';
   } else {
-    name = 'Connector (' + shape + ')';
+    name = asName || ('Connector (' + shape + ')');
   }
   var geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(soupUp), 3));
@@ -723,14 +723,21 @@ if (typeof document !== 'undefined') {
     // away. A MutationObserver on `open` rather than a 'toggle' listener, for
     // the reason app-join.js's one-panel rule gives (it sees a programmatic
     // `.open = true` too, and runs before the next event).
+    // The card is DRAW now (docs/DRAW.md): the anchor picks live in its "Anchors on the plate"
+    // section, and are armed while the card AND that section are open.
     function wireCard(menu) {
       if (typeof MutationObserver !== 'function') return;
-      new MutationObserver(function () {
+      var sec = NSO_connectEl('connect-sec-classic');
+      function armed() { return menu.open && (!sec || sec.open); }
+      function follow() {
         var C = NSO_connectUI();
-        if (menu.open && !C.open) NSO_connectOpen();
-        else if (!menu.open && C.open) NSO_connectClose();
-      }).observe(menu, { attributes: true, attributeFilter: ['open'] });
-      if (menu.open && !NSO_connectUI().open) NSO_connectOpen();
+        if (armed() && !C.open) NSO_connectOpen();
+        else if (!armed() && C.open) NSO_connectClose();
+      }
+      var mo = new MutationObserver(follow);
+      mo.observe(menu, { attributes: true, attributeFilter: ['open'] });
+      if (sec) mo.observe(sec, { attributes: true, attributeFilter: ['open'] });
+      follow();
     }
     function wire() {
       var menu = NSO_connectEl('menu-connect');

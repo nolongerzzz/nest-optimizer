@@ -1,17 +1,21 @@
 # Cut: the sized blade, strands, and notches
 
-The Cut card's blade has three modes (the Blade row), and two switches above it.
-(A fourth, **Whole plate** - one level blade across every piece on the plate -
-is its own write-up: [CUT-PLATE.md](CUT-PLATE.md).)
+The Cut card's **Blade** block is the first thing in the card, under the Cut | Crop switch: a row of four buttons - **Chop**, **Dice**,
+**Notch**, **Plane** - and, on a row of its own under them as one thin full-width button, **Whole plate** (one level blade across every
+piece on the plate: its own write-up, [CUT-PLATE.md](CUT-PLATE.md)). The fields each blade shows (Dice's Width / Depth / Kerf, Whole
+plate's Height, Notch's, Follow strand's) open directly under the buttons. (Chop and Dice were "Full blade" and "Sized blade";
+the ids `btn-cut-blade-full` / `-sized` and the modes `full` / `sized` are unchanged.)
 
-- **Full blade** (the default, unchanged): a plane across the whole piece. It
+- **Plane**: shave an end off flat - see [Plane](#plane) below.
+- **Chop** (the default, unchanged): a plane across the whole piece. It
   splits everything in its path, all the way through, with no kerf. One piece
   becomes two that add back to the original.
-- **Sized blade**: a *box* - `Width` across the cut, `Depth` into the piece,
+- **Dice**: a *box* - `Width` across the cut, `Depth` into the piece,
   `Kerf` thick - that takes out only its own volume. Use it to cut **between**
   things (a blade narrower than the section leaves whatever else is in the
   full blade's path alone) and to cut **into** a face without going through.
-  With **Single strand** on (the default) it takes only the *strand under the
+  With **Follow strand** on (one box: it is also *take only the strand* - see
+  [CUT-FOLLOW.md](CUT-FOLLOW.md)) it takes only the *strand under the
   click*, even where its box holds several - see below.
 - **Notch**: click a strand (a cord, one turn of a spiral). The blade fits that
   strand and cuts a **nick** in from its edge, `Notch width` along the strand
@@ -27,17 +31,104 @@ within reach);
 the number box takes anything, and the slider's range grows to hold what it is
 given, so a slider never sits at its end while its box says something else.
 
-**Rotate piece** (a box at the top of the card) shows the rotate rings on the
-piece while Cut stays open. Turn is on; *Lean front/back* and *Lean side/side*
-appear as options. Drag a ring and the piece turns and the blade follows it. The
-arrow keys are not taken (Cut's dials use them; one press is answered once).
-Closing Cut clears the box and takes the rings with it.
+**Hide blade.** A box just under the Blade block (above the axes row and the wheels) hides the blade - the per-piece blade with its tab, and the
+whole-plate blade - so a piece can be turned or leaned without the blade moving about on screen. While it is hidden a
+click on a piece only picks it (the blade is not placed or dragged, and a press where the hidden tab was takes no hold),
+the Rotate piece wheel and everything else on the card work as usual, and **Cut is off** (greyed, with the reason in its
+tooltip): nobody should cut at a plane they cannot see. It is a toggle for use while the card is open, not a setting: an
+Undo keeps it, and nothing else does - shutting the card clears it, and the blade is out whenever the card opens.
+
+**The tab.** The blade carries a tab on the front-left end of its top edge, as the place to take hold of it: a flat bar
+running straight out from the blade with a ball on its end. A thin blade is hard to catch, and the tab is not: press the ball or
+the bar and drag, and the blade slides (the drag starts from where you took hold, so taking hold moves nothing). It is built
+onto the blade, an extension of it: the bar lies in the blade's plane, 3 mm wide and 1 mm thick, with its upper edge in line
+with the blade's top edge; the ball sits on the bar's centreline at its end; both are the blade sheet's own dark translucent
+colour; and ONE yellow outline - the frame's - runs on from the blade's top edge along the bar, round the ball and back along the
+bar's lower edge to the blade, which keeps the tab in view over the dark plate as the frame keeps the blade. "Top" is the plate
+vertical seen in the blade's own plane; "front-left" is the top corner toward the viewer and the left of the home view (a smooth
+choice: it does not flip as the blade turns). The tab stays on that corner through a mitre, a bevel and a turn of the piece; where
+the blade lies flat it stands on the first axis across the plane. It is drawn through the piece like the rest of the blade. On the
+Full blade a press that reaches the ball before the piece behind it takes hold of the blade; on the Sized blade and the Notch, where
+a click on the piece is how the blade is placed, a click that lands on the ball over the piece still places the blade, and the tab
+is a handle where it stands clear of the piece. A strip where the blade's plane met the plate used to do this job; it floated off
+the blade wherever the blade lay near-flat (a piece leaned past upright) and is gone.
+
+**The three wheels (Mitre, Rotate, Bevel) have their number IN the centre and their name at the wheel's top-left corner.** The centre
+reads out as the wheel turns (`30°`) and is also the number box: click it, type, Enter (Esc puts the reading back; Up / Down step
+1 degree, Shift 0.1). There is no box under any wheel and no hint text on the card.
+The **Bevel wheel is a half wheel**: the bevel only ever swings through -90 .. 90, so it is the top half of a dial, its flat edge the piece's own line
+(far end to the right). It sits in the same two columns as Mitre and Rotate - its wheel lines up with Mitre's, and its - / + and **Plumb** stand
+in Rotate's column, beside the wheel, lined up with Rotate's - / +.
+
+**Mitre buttons.** Under the Mitre wheel's - / +, side by side, **Square** sets the mitre to 0 and **90°** to 90 - the
+opposite blade direction, a quarter-turn about the vertical - without dragging the wheel or typing an angle. **Plumb** sits beside the
+Bevel wheel.
+
+**Rotate** (the Rotate piece wheel) is a wheel beside the Mitre wheel, for turning or leaning a piece close up. It
+replaces the rotate rings, which Cut no longer shows (they stood too far out of view on a small
+piece). Its number is the **centre of the wheel**: it reads out as the wheel turns, and a click in it
+selects it so you can type one (Enter, or leaving it, sets the piece; Esc puts the reading back; Up / Down
+step it a degree, Shift a tenth) - there is no separate box under the wheel. Three choices in one row above the wheels
+pick the axis, one at a time: **Horizontal** (the default: about
+the plate's vertical, clockwise seen from above), **Front/back** (tips the piece along its length,
+its ends going up and down) and **Side/side** (across it, one long edge up). They are the rotate
+rings' own three motions (the position lock is honoured, one Undo step per drag, typed value or
+run of presses).
+
+**It spins in place, about one line.** The piece pivots about its own centre, through the plate
+where it must, and does not jump: it is not stood on the plate after every step, and not after a
+pause or when a drag is let go either. It lands on the plate when you are done with the wheel -
+another axis ticked, a click anywhere outside the card, Cut pressed, the card closed. The line it
+turns about is picked once, when you start (a lean's is the footprint's along / across line as the
+piece then lay) and held: a piece tipping over changes its footprint (a near-square one swaps its
+long side), and a line named afresh at each step turned the piece about a different axis each time.
+
+**The reading is the true turn.** Horizontal: the heading (0 for a piece as loaded, 90 after a
+clockwise quarter turn). A lean: the tilt of the piece's upright from the vertical about that line -
+0 flat as it lay when you started, 90 on its edge, 120 past it, 180 upside down, signed - not
+re-based to the nearest upright face. After an Undo or a Redo the wheel reads the pose that came
+back. The wheel is a jog, not a pointer: pressing the rail does nothing until the pointer moves,
+then the piece follows the pointer's turn about the wheel, resting on a 45 degree tick it passes
+within 3. The centre takes a reading; the - / + buttons under the wheel step 1 degree (Shift 0.1, Alt 5,
+hold to repeat) and so do the arrow keys on the wheel. The blade goes with the piece. Each wheel has
+its - / + directly under it (the Mitre's with Square and 90° under those, Rotate's with the axis ticks). Real-browser check: `npm run rotate-dial:drive`.
 
 Files: `nso_notch.js` (the geometry, THREE-free, `npm run notch:test`),
 `app-cut.js` (`cutBladeSpec`, `cutBuildSizedBlade`, `cutNotchAt`, the card
 wiring), `app-core.js` (the click's point and face, the ring grab under Cut), `app-rotate-handles.js` (rings under Cut), the Cut card
 in `index.html`. Real-browser checks: `npm run notch:drive` (bars) and
 `npm run notch:strand-drive` (a spiral of cord).
+
+## The square blade, and Undo
+
+**Which way "square" runs.** The blade loads square across the piece's longest dimension as it lies, and the length is read off the footprint's narrowest
+rectangle (nso-bounds.js, `pieceFrame`). On a chunky, stepped footprint - a bracket whose legs differ in length - that rectangle can lie on a diagonal
+by a few percent of area, and the blade then ran across a piece whose every wall is square to its own axes (the owner's Desk Side Hanger loaded at
+29.7 degrees while the card said "square"). The Cut blade now also reads the piece's **side walls** (`pieceFrame(mesh, { walls: true })`, "WALLS ALONG
+THE BODY"): if at least 30% of the wall length runs along the body axes, within 2 degrees, and the box along those axes is no more than 30% bigger than
+the narrowest rectangle, the body axes are the frame and the blade is square to the walls. A bar modelled on a slant has its walls along the bar, so it
+still reads off its hull and the blade is square to the bar. Every other tool keeps the frame it had.
+
+**Undo of a cut keeps the card.** A cut made with the Cut card open (Chop or Plane) is undone with the card still open: the piece is back and selected,
+and the blade is where it stood - the same blade, place, mitre and bevel (`cutMemo` on the Undo entry, `cutRestoreAfterUndo`). A cut made with the card
+shut still closes it. Real-browser check: `npm run cut-square:drive`.
+
+## Plane
+
+**Plane** is Chop with one side thrown away: the blade is the same (slider, the mm box, mitre, bevel), but Cut takes the **nearer end** of
+the piece off at the plane, all the way across, caps the cut face flat, and keeps **one piece** - the same name, in the place it stood, no
+gap and no second piece. The readout says what it will do: `PLANE @ 0.2 mm - takes 0.2 mm off the low end, keeps 228.4 mm (Y)`. One Undo
+puts the piece back (one step per Plane).
+
+Chop and Dice keep 1 mm on each side of the blade (`MIN_CUT_SIDE_MM`): they make two pieces and neither may be a sliver. Plane makes one,
+so its blade may stand **0.1 mm** (the slider's grid step) from either end. That is what it is for: taking off a thin standing artifact -
+the 0.16 mm needles a thicken repair left on a piece's end faces, a rim of squashed first layer, a burr - without losing a millimetre of
+real piece. A mitre or a bevel slants the cut face. Which end comes off is not chosen: it is the nearer one (the low end at dead
+middle). The engine is Chop's own (`cutSplitAt`, app-cut.js, then `rawCut`: weld, clip, flat cap), so what is left is closed;
+`app-cut-plane.js` keeps the one side and replaces the piece. Real-browser check: `npm run cut-plane:drive`.
+
+Plane lands the blade on the 0.1 mm grid, so 0.2 mm from an end face that carries a 0.16 mm needle takes the needle and also the
+0.04 mm of real face under it; a plane exactly on a face needs a finer position than the slider offers.
 
 ## Why a box, not a thinner plane
 
@@ -62,7 +153,7 @@ the plane is "the" strand (distance is to the outline's segments, not its
 corners - a click mid-way along a long flat face is far from its own corners).
 It is outlined in yellow in the viewport and named in the readout ("1 of 6").
 
-- **Sized + Single strand**: what the blade's box holds is split into one solid
+- **Sized + Follow strand**: what the blade's box holds is split into one solid
   per strand (`decompose`); the one nearest the click is taken, the others stay.
 - **Notch**: the blade is made as wide as that strand's own section plus 0.5 mm
   each side, and starts at the strand's *own edge* on the side the click came
@@ -136,7 +227,8 @@ to parts' analysis (6 s).
 2. **Click the face** the blade should go into. It anchors there and goes in
    *against that face's normal*: a click on a top face comes down, on a side face
    comes in from the side. The readout says which. A face lying in the cut plane
-   has no sideways lean to read, so the blade comes down from above.
+   has no sideways lean to read, so the blade comes down from above - or, with
+   the blade lying flat, goes in through the section edge nearest the click.
 3. Slide it along the piece with the slider / arrows; angle it with the mitre and
    bevel. The blade is drawn as the box it will cut. (Clicking *inside* the
    blade's own box still drags the blade, as it always did; click the piece
@@ -167,6 +259,40 @@ from the click's depth ends up buried.
   does not reach the piece, a piece that is not a closed solid the kernel can
   cut, or a cut that would leave nothing.
 
+## Notch on a part with an inside, and From / To
+
+A channel, a U, a slot in a wall: the plane's section is one blob, but its
+bounding box is not the wall that was clicked. When the section is not convex
+the notch is fitted to the FACE under the click (nso_notch.js `faceRun`): it
+goes in from that face, as wide as the face runs; where the face ends in an
+inside corner the notch is carried through the fillet and stops flush with the
+wall it meets. Where it ends at an outside corner the notch goes THROUGH the
+corner - on while there is still material in its band (a rounded or chamfered
+mouth, up to 5 mm), out into air, then the 0.5 mm margin past - so no strip of
+the corner is left standing on the face as a step. Cords and bars (convex sections) are notched as before,
+across the whole strand.
+
+With the blade lying flat (mitre 90, bevel 90) a click on the TOP of a wall is
+a face in the blade's own plane: it does not move the blade (the slider sets
+the height), and the blade goes in through the section's edge nearest the
+click (`edgeEntry`) - near a wall's inner edge, the inside face.
+
+**From / To** (Notch fields, app-cut-notch-span.js) set the notch by its two
+ends: the blade goes to the middle and Notch width becomes the gap. With the
+blade flat they are heights up from the bottom of the piece; otherwise they
+are on the slider's scale. The slider steps in 0.1 mm; the notch carries the
+remainder, so the ends are exactly what was typed until the slider moves.
+Checked by `npm run notch:span:drive`.
+
+What a box holds can come apart into the material and a sliver of no volume
+where the box grazes the surface; the strand "nearest the click" is chosen among
+the parts with a real volume (it used to pick the sliver and report that the
+blade did not reach the piece). After a Notch, Sized or whole-plate cut the
+piece's white edge is drawn again on its new mesh: it stayed on the old one.
+
+The blade's handle (ball and bar) is drawn over everything, so a press where
+it is seen takes hold of the blade on every blade, never the face behind it.
+
 ## Not done (said plainly)
 
 - **No wall-thickness check.** A notch that stops 0.2 mm short of the far side is
@@ -180,7 +306,7 @@ from the click's depth ends up buried.
 - **Pockets.** A face *parallel* to the cut plane cannot be pocketed by Depth.
   Use Kerf as the pocket depth and slide the plane to the face.
 - **Curved faces** use the tangent plane at the click.
-- **Single strand** picks by the plane's section, so two strands that *touch*
+- **Follow strand** picks by the plane's section, so two strands that *touch*
   (one blob) are one strand.
 - **Mitre and bevel** are supported; bevel's removed volume is checked on a flat top face only.
 - **The kernel's own pinched edges** (above) are not repaired by the cut; the status line names them, and Check piece can repair them.

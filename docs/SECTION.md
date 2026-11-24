@@ -107,12 +107,12 @@ only the rows `NSO_sectionVerbs` says apply:
 
 | row | shown when | what it calls |
 |---|---|---|
-| **Length** / **Width** / **Height** `[ ] mm` | that axis has a clean constant-section band. A ring or rod: its one axis, under the same names (Height when it is its own Z) | `NSO_scaleAxisApply` → `NSO_extendRaw({ axis, length })`: material goes in or comes out inside the one band, every other coordinate untouched bit for bit, so walls, floor, holes, pockets and lips keep their size. Shorter shortens; past the band it refuses with `Shorten can remove up to N mm here` |
+| **Length** / **Width** / **Height** `[ ] mm` | every piece but a ring, rod or recognised shape (Length the long side of the footprint, Width the short side, Height off the plate). A ring or rod: its one axis, under the same names (Height when it is its own Z) | With a clean constant-section band that way: `NSO_scaleAxisApply` → `NSO_extendRaw({ axis, length })`: material goes in or comes out inside the one band, every other coordinate untouched bit for bit, so walls, floor, holes, pockets and lips keep their size. Shorter shortens; past the band it refuses with `Shorten can remove up to N mm here`. With none (a pill sliced in half, a cone, a blob, a leaned piece): a stretch along that axis alone, about the middle (`NSO_scaleAsItLies` → `NSO_scaleStretchRaw`) |
 | **Outer Ø** `[ ] bore kept` / **Bore Ø** `[ ] outer kept` / **Wall** `[ ] outer kept` | a ring | `nso_ring.js`, below. Pipe work: each row moves one face and its done line reports the other two (`Outer Ø done - Ø44.0 / bore Ø30.0 · wall 7.0 · height held`). Outer Ø's tooltip says where its old move went (below) |
 | **Diameter** `[ ] height kept` (the axis's own name) | a rod | `nso_ring.js` |
 | **Offset** `[ ] mm, wall kept` | every piece but a ring or rod, where Outer Ø, Bore Ø / Diameter and Length do its job between them. Elsewhere it is the only way to thicken a stepped piece evenly; see lid_strap below for where it is not even. A sentence under the row says so in the unit shown: `Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.` (`0.024 in` with inches shown) | `NSO_scaleOffsetRaw`, below — Fatten and Shrink, folded in |
 | **Whole ×** `[ ]` | always; reset to 1 on every refresh | `NSO_scaleSelectedModel({ factor })` |
-| **Longest** `[ ] mm` | unless a named field already shows the same number | `NSO_scaleSelectedModel({ axis: 'longest', targetMm })`, prefilled with the longest edge. Its done line's before figure is the solver's own `spanBeforeMm`, the edge it solved on, whichever axis that is |
+| **Longest** `[ ] mm` | unless a named field already shows the same number - so never beside Length / Width / Height, one of which is always the longest edge; a ring, rod or recognised shape can still show it | `NSO_scaleSelectedModel({ axis: 'longest', targetMm })`, prefilled with the longest edge. Its done line's before figure is the solver's own `spanBeforeMm`, the edge it solved on, whichever axis that is |
 | **Fit to plate** | always | `min(limit / size)` over the bed's three axes, from the same `nso_printer.js` fit the plate warning uses, applied as a uniform factor and stated. Already fits: says so, changes nothing |
 
 **Sliders and the preview before the bake.** Each row's slider and box are one
@@ -126,10 +126,14 @@ scene helper (`nso-helpers.js`, owner `scale-live`), never picked, packed or
 exported, and not an Undo step. **Set** (the button, or Enter in the field)
 bakes what the preview shows through `NSO_sculptCommitRaw` — one Undo step, the
 verb's own undo type — so what is baked is the previewed soup bit for bit.
-**Cancel**, Escape, selecting another piece, starting another field, the mm | in
-toggle and closing the card drop the preview. A refused value says why under the
-field in red and draws nothing; Set stays greyed until the value is one the piece
-takes. One field is staged at a time. Fit to plate stays a button and applies at
+**Cancel**, Escape, selecting another piece, the mm | in toggle and closing the
+card drop the preview. A refused value says why under its
+field in red and is left out of the preview (the other staged fields still draw;
+alone, it draws nothing); Set stays greyed until every staged value is one the
+piece takes. Every field stays staged: Length, then Width, then Height can all be
+adjusted before Set, each change re-runs all of them on the piece as it began
+(its own sizes, then Offset, then Longest, then Whole ×), and Set bakes the
+final state as one Undo step. Fit to plate stays a button and applies at
 once. `tools/nso_scale_live_drive_check.js` drives all of it.
 
 Every field repopulates whenever the selection, the selected piece's soup or its

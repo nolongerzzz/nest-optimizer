@@ -4,8 +4,9 @@
 > SELECT ticket, `docs/GSCOPE-SELECT.md`). Lift is worked on the plate; the sections
 > below that describe the read-only G-scope row are history.
 
-**Where Lift is worked (section 7):** on the plate, from the Subtract card's
-**Lift** verb (`app-lift-plate.js`). G-scope's row is **Features**, read-only:
+**Where Lift is worked (section 7):** on the plate, from the Crop card's
+**Lift** button (`app-lift-plate.js`; it was in the Subtract card until 2026-11-07,
+and **Detach flange** is part of it now, in its panel). G-scope's row is **Features**, read-only:
 it shows what Lift would find and nothing else. Sections 2 and 5's "In
 G-scope" describe the G-scope controls Lift had before; the engine they
 describe (`nso_lift.js`, `nso_lift_auto.js`, `nso_lift_curved.js`) is
@@ -475,7 +476,7 @@ Every other Lift 2 and Phase 1 gate is as it was.
 - A lifted piece keeps the curved back it came off with; flattening it for
   printing is not done.
 
-## 7. Lift on the plate - the Subtract card
+## 7. Lift on the plate - the Crop card
 
 Lift moved out of G-scope onto the plate. The engine is unchanged; this is
 only where and how it is driven. `app-lift-plate.js` (`window.NSO_LIFT_PLATE`),
@@ -485,9 +486,77 @@ only where and how it is driven. `app-lift-plate.js` (`window.NSO_LIFT_PLATE`),
 `tools/nso_lift_plate_drive_lib.js` (the page helpers the four Lift drives
 share).
 
+### The list (2026-11-07)
+
+Lift used to read the **top** and nothing else until a hover or a click on the right face told it where to look: a bump
+on a side wall, or on a curve, was "0 features found" until a click beside it, and a click on a non-feature was spent
+reading the face, not lifting. Opening Lift now **scans every surface of the piece once** and **lists** what is on each:
+
+- **the top** (as before), **each flat face that is a base** (`FACE_MIN_FRAC` of the piece's surface; the side walls),
+  and **each curved surface**. Every read is the one the cursor would have asked for, cached the same way, so nothing
+  is read twice; a piece over 150,000 triangles is read on its top only (a curved read takes seconds) and the card says so.
+- **The patch Lift leaves is the base, and a loose weave** (curved-surface lifts, `surfaceCut`). Two things it did on the sphere and
+  cone fixtures: the cone's patch lay 0.41 mm off the cone on average (0.88 at worst) and the sphere's was 4,422 triangles for 28
+  mm² (accurate, but four times denser than everything round it). (1) The fill pulls toward the real neighbours' corners by a term
+  that dies away over `relaxMm`; where the fit round the loop is excellent (rms under `pureFitMm`, 0.02 mm) the surface IS its fit,
+  so that term is turned right down (`pureRelaxMm`) and the patch is the base alone - on a cone's fan the neighbours' corners are
+  25 mm away and say nothing. A rough surface keeps `relaxMm` and the neighbours as before. (2) The lattice spacing is the size of
+  the triangles round the loop (the median mean-edge of the real neighbours across the root edges, up to `spacingHintMaxMm`), 1.6
+  times that on a smooth fit, instead of the loop's own edge length. Sphere: 4,422 -> about 250 triangles, 0.006 mm off the sphere;
+  cone: 64 triangles, 0.004 mm off the cone (`lift:list` 7). Lift's four node suites pass unchanged.
+- **On a wall of long strips the patch is strips too** (`stripMetric`, `fill`'s `strip` option). A cone or a cylinder out of a CAD
+  kernel is one long thin triangle pair per facet, foot to top, and Delaunay prefers fat triangles, so the patch left where a pin
+  stood was a hub of spokes (64 triangles on the cone, of which 9 lay along the strips; 60 on the cylinder, 4). Now, on a smooth
+  fit, the direction and proportions of the real triangles across the root edges are read (projected in the fill's frame): when
+  their long edges agree to 0.85 or better (axial mean) and the median is at least 4 times longer than high, the fill is made in
+  THAT metric - the Delaunay test's circles are measured with the strip direction shrunk by 1/aspect - and no points are put
+  inside, so the fill is a ladder between the rim's own corners that runs the way the wall does. It is kept only if the base under
+  every triangle's middle and edge middles is within `stripSagMm` (0.03 mm) of the chord; otherwise, or when the neighbours are
+  not strips (a sphere, a scan: aspect under 4, or no common direction), it is the even fill, unchanged. Cone: 58 triangles, all
+  along the strips, 0.005 mm off the cone; cylinder: 54, all along, 0.008 mm (a facet's own sag). One direction is used for the
+  whole hole, so a hole big enough that the strips visibly fan (a cone's pin of a few mm is nowhere near) reads as not agreeing
+  and takes the even fill. `lift:list` 7 gates it on the cone and cylinder; `lift:curved-surface` 6 gates it headless, with the
+  even fill (`deps.noStrips`) beside it.
+- **Highlighted the moment Lift opens**: every liftable feature on every surface the scan read is tinted and outlined in
+  blue (the one under the cursor, and gathered ones, are drawn over it in their own colours), including features on a surface
+  other than the one the card is on.
+- **A curved surface is read from a seed out beyond each small smooth patch, a few ways round, and the tightest read of the
+  feature is kept.** The engine grows its base region only while the normal turns under 12 degrees over 4 mm (`SURF.creaseDeg`,
+  `windowMm`), which a surface of 15 mm radius breaks all the time, so a seed hard against the bump's crease grows the base
+  lopsided and the part of the base it never reached is lumped in with the bump as "the feature" (a 301 mm² patch for a 56 mm²
+  dome - plain once the highlight was drawn). A seed 1.2 to 2.2 radii of the bump away (+2 mm) reads it as 62 mm². This is a
+  patch on how the scan seeds, not on the engine: a tight curve read from a click still has the limit.
+- (earlier wording) **A curved surface is read from beside each small smooth patch** - across the crease at the foot of a bump. The
+  surface engine takes whatever lies *outside* the region it grows from the seed to be the features, so a seed beside
+  a bump leaves the bump the only thing outside, while a seed far off leaves the whole rest of the surface outside it
+  and reads it as "the body" (`bigger`, 0 mm). This is why a click "slightly outside the feature" used to find it and a
+  click on it, or anywhere else, did not. Heights on a curved surface are not shown (they are measured against a plane
+  through the root, which means little on a curve - the cone's pin read 132 mm).
+- **The card starts on the surface that has the feature** (the top, when it has something on it), so the count is
+  never "0 features found" over a bump that is on a wall. When features are on more than one surface the count says
+  `3 features found on 2 surfaces`.
+- **The list** (`#lift-list`, in the panel under the count): one row per liftable feature on every surface - `A dot, 2.00
+  mm high, 16.0 mm² - on the +x face` - each with its own **Lift** button, which takes the card to that surface and lifts
+  the feature from it (one Undo). Moving the mouse over a row outlines its feature when it is on the surface shown; it
+  never changes the surface, and a row that appears under a cursor at rest is not "moved over".
+- `NSO_LIFT_PLATE.scan()`, `.list()`, `.liftRow(i)` and `.goSurface(key)` are the checks' handles. `lift:list` drives it on
+  `fixtures/crop-wall/` (block, sphere, cone, cylinder) and on the Barocke plate (22 features, all on the top, as before).
+
+**Still gates, not changed here** (the next step, once the list is what you want): hovering a face still makes it the
+face read; the cursor off the piece still goes back to the top; a click on a non-feature still reads the face under it
+instead of lifting; a click on a feature that is not `ok` from the face being read still reads the curved surface under
+it. Strip lifts the surface shown, not all of them. See "The verb" below.
+
 ### The verb
 
-**Subtract -> Lift.** Arming it on a selected piece runs detection once: the
+**Crop -> Lift.** The button runs the width of the card, like CROP; pressing it opens
+its panel in the card (the count of what was found, *How far out counts*, Strip, and
+Detach flange with its readout) and pressing it again folds the panel away and puts
+Lift down. Pressing Lift puts any Crop shape away, and picking a shape puts Lift
+away - both want the click on a piece - and shutting the Crop card folds Lift
+away too. A piece Lift left in the air can still be grabbed and dropped while the
+card is open (app-core's `startMoveDrag` makes that one exception to "close the
+cutter to move pieces"). Arming it on a selected piece runs detection once: the
 rolling ball of section 5 (`NSO_LiftAuto.analyse`, `{ curved: true }`, so a
 curved base is section 6's fill), looking straight down onto the piece - the
 world's up carried into its raw frame, raw +Z for a piece lying as it was

@@ -48,7 +48,7 @@
    the piece back). The angle is a setting, like Style: not an Undo step.
 
    GENERATE FOR PLATE. With two or more pieces on the plate the card offers
-   "Generate for plate" (#sup-plate). It is not a "nothing selected" state: it
+   "Generate for plate" (#sup-plate), and opens with it on (the default). It is not a "nothing selected" state: it
    is switched on, and it highlights every real (non-support) piece first, as a
    selection does, while detection runs on each of them; the readout says
    "N pieces \u00b7 M hanging areas at 35\u00b0". GENERATE then loops the build
@@ -129,7 +129,7 @@
 var NSO_SUPPORTS_CARD = (function () {
   'use strict';
 
-  var STYLES = { strut: 'Straight strut', tree: 'Tree', 'gecko-hand': 'Gecko-hand' };
+  var STYLES = { strut: 'Straight strut', tree: 'Tree', 'gecko-hand': 'Gecko Hands' };   /* the TYPES of support (the card's Type row) */
   /* The outline of an area: faint white while it will be built, grey once it
      is left out, red when the plate could not reach all of it. */
   var OUTLINE = { on: 0xffffff, off: 0x7b8494, red: 0xff2d2d };
@@ -191,7 +191,7 @@ var NSO_SUPPORTS_CARD = (function () {
   var PHASE_SPAN = { planning: [0, 50], building: [50, 100] };
   /* The planner's files, in index.html's order: what the build worker loads. */
   var ENGINE = ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
-    'nso_support_tree.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
+    'nso_support_tree.js', 'nso_support_flow.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
   /* What the build asks of NSO_SupportGridpack.parts: every tip that meets the
      part ends in a flat cap under the interface sheet (nso_support_interface.js,
      sheet(): 2 transition and 2 interface layers at 0.84 mm, each a loop
@@ -210,19 +210,30 @@ var NSO_SUPPORTS_CARD = (function () {
   /* The sheet's line pitch and its interface layers are the build's own: DENSE is Bambu's (support_interface_spacing 0.1: lines
      0.46 mm apart, and 3 interface layers over the 2 of transition, as the reference slice lays every head); OPEN is the 0.84 mm
      and 2 + 2 layers the first prints were made with. */
-  function oneTrunkOn(o) { return S.mode === 'auto' && !!o.one && o.style === 'tree'; }
+  /* the card's Top interface layers (0 - 3, as Bambu's): the count the slicer types interface under the part; else the build's own */
+  function ifaceLayersOf(o, dflt) { var n = o ? o.ifaceLayers : null; return n != null && isFinite(n) && n >= 0 ? n : dflt; }
+  /* THE PRINT CARD (docs/PRINT-CARD.md "One planner"): Assisted and Custom grow the Tree type with the planner Auto does - the flow tree,
+     from the user's spots or tips - so every mode acts on the same tree. */
+  function flowFed(o) { return printCard() && S.mode !== 'auto' && !!o && o.style === 'tree' && columnRule() && !!window.NSO_SupportFlow; }
+  function oneTrunkOn(o) { return (S.mode === 'auto' && !!o.one && o.style === 'tree') || flowFed(o); }
   function partsOptsOf(o) {
     /* Dense belongs to the one-trunk build: its sheet is planned over the thinned tips the reference's is. A hand-placed row of three
        tips (Custom) did not form a sheet at 0.47 mm that it forms at 0.84 (support:custom), so the other builds stay Open. */
     var SI = window.NSO_SupportInterface, dense = !!o && o.dense !== false && oneTrunkOn(o);
-    var out = dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetLayerMm: SI.SHEET.denseSheetLayerMm, sheetRegionSlopes: true, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
+    var out = dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: ifaceLayersOf(o, SI.SHEET.denseInterfaceLayers), sheetLayerMm: SI.SHEET.denseSheetLayerMm, sheetRegionSlopes: true, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
     /* THE PLATFORM is the tree's own (the owner's: raft is a support type of its own; the platform under a flat face - the interface and the transition
        laid from each footprint and its height, layer by layer - is the original branch / transition / interface, and was only tied to the Raft box).
        Auto (the one-trunk tree) always lays it. The box now gates only the builds that are not Auto: off, their sheet is built from the tips alone, as it
        was before the region plate (docs/SUPPORT-FOOTPRINT.md section 9). */
     if (o && o.raft === false && !oneTrunkOn(o)) { out.sheetRegionPlate = false; out.sheetSlabPlate = false; out.sheetRegionFlare = false; }
+    /* THE COLUMN RULE (the slicer's interface: column, docs/SUPPORT-GATE.md) lays the interface and the transition itself, off the part's own
+       layers: the generator builds the tree alone - its tips up to the part, cut at the gap by the slicer, the stack laid on them - and no sheet,
+       caps or plate of its own (left under the slicer's stack they printed as a block of Support between the tree and the interface). The sheet's
+       layer height and interface count stay on the support (meta), so the slicer cuts it on Bambu's grid and types 3 interface layers. */
+    if (columnRule()) { out.interface = false; out.trunkGrowth = true; out.columnRule = true; out.interfaceLayers = ifaceLayersOf(o, out.interfaceLayers != null ? out.interfaceLayers : 2); }
     return out;
   }
+  function columnRule() { return typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' && window.nsoSupportInterfaceRule() === 'column'; }
   /* The card's state when the picked piece has no beacons at all. Detection
      only asks what hangs in air; a tall, thin piece that may sway as it
      prints is a different question, not asked yet, and the words say so. */
@@ -354,11 +365,12 @@ var NSO_SUPPORTS_CARD = (function () {
     var p = placedOf(S.hostId), m = modelOf(S.hostId);
     if (!p || !m) return null;
     var occ = others(S.hostId);
-    var key = poseKey(p) + '#' + occ.map(poseKey).join('#') + '#' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0) + '@' + S.angle;
+    var key = poseKey(p) + '#' + occ.map(poseKey).join('#') + '#' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0) + '@' + S.angle + '@' + bridgeNow();
     if (S.det && S.det.key === key) return S.det;
     var soup = worldUp(p.mesh), sk = skipListFor(m, p, soup);
     /* beaconInsetMm: a spot stands at least this far in from the edge of the surface it holds (docs/SUPPORT-FOOTPRINT.md) */
     var SBm = window.NSO_SupportBeacons, opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup), beaconInsetMm: SBm && SBm.INSET_PRODUCT_MM || 0, beaconSeedMm: SBm && SBm.SEED_PITCH_PRODUCT_MM || 0, beaconBridgeMinMm: SBm && SBm.BRIDGE_MIN_PRODUCT_MM || 0 };
+    if (Math.abs(bridgeNow() - BRIDGE_DEFAULT) > 1e-9) opts.bridgeMm = bridgeNow();     /* Max bridge length: the span the detector calls a bridge (its own 5 mm when the row is left alone) */
     /* A BIG piece is read in a worker (detection is 10 s of JS on the vase, and
        the card used to freeze the page for all of it on opening). The card
        says "measuring…" and redraws when the read comes back. */
@@ -404,7 +416,7 @@ var NSO_SUPPORTS_CARD = (function () {
     return m.nsoSupportEdits;
   }
   function memOf(id) {
-    if (!S.mem[id]) S.mem[id] = { unreach: {}, built: false, members: [], zonesEmpty: [], builtKnobs: '' };
+    if (!S.mem[id]) S.mem[id] = { unreach: {}, selfHeld: {}, built: false, members: [], zonesEmpty: [], builtKnobs: '' };
     return S.mem[id];
   }
   /* What the user fed in, on the piece: tips and toggled-off spots in its own
@@ -581,7 +593,8 @@ var NSO_SUPPORTS_CARD = (function () {
     });
     var un = memOf(S.hostId).unreach, lost = {}, out = {};
     Object.keys(un).forEach(function (r) { un[r].forEach(function (k) { lost[k] = true; }); });
-    eff.beacons.forEach(function (b) { out[b.key] = b.off ? 'off' : holds[b.key] || (lost[b.key] ? 'unreachable' : 'planned'); });
+    var selfHeld = memOf(S.hostId).selfHeld || {};      /* a spot on a step the part holds (no overhang at the threshold angle): held, by the part */
+    eff.beacons.forEach(function (b) { out[b.key] = b.off ? 'off' : holds[b.key] || (selfHeld[b.key] ? 'held' : (lost[b.key] ? 'unreachable' : 'planned')); });
     return out;
   }
   /* What one area is, over everything on the piece: HELD when every one of its
@@ -908,6 +921,7 @@ var NSO_SUPPORTS_CARD = (function () {
      the percent is the plate's. */
   function progressLine() {
     var pg = S.prog, run = S.run, pre = run ? 'Piece ' + run.k + ' of ' + run.n + ' \u00b7 ' : '';
+    if (pg && pg.phase === 'slicing') return S.sliceStage || 'Slicing the plate \u00b7 ' + S.elapsed + ' s';     /* the Slice card's own stage line, seconds in it */
     if (!pg) return pre + buildingLine();
     var word = PHASE_WORD[pg.phase];
     return pre + (percentOf(pg) == null ? word + ' \u00b7 ' + S.elapsed + ' s'
@@ -963,15 +977,16 @@ var NSO_SUPPORTS_CARD = (function () {
     if (head) { head.textContent = text; head.classList.toggle('is-bad', bad); head.classList.toggle('is-stale', stale); }
     var en = function (id, on) { var e = $(id); if (e) e.disabled = !on || !!S.busy || SL.busy; };
     var go = $('btn-sup-all');
-    if (go) { go.textContent = cs === 'building' ? buildingLine() : cs === 'built' ? 'Regenerate' : 'Generate'; go.classList.toggle('is-stale', stale); }
-    en('btn-sup-all', (cs === 'idle' || cs === 'built') && (wide ? !!(W && W.totals.areas > 0) : a && a.areas > 0));
+    if (go) { go.textContent = cs === 'building' ? buildingLine() : printCard() ? 'Slice' : cs === 'built' ? 'Regenerate' : 'Generate'; go.classList.toggle('is-stale', stale && !printCard()); }
+    en('btn-sup-all', printCard() || styleNone() ? !!(state.placed && state.placed.length) : (cs === 'idle' || cs === 'built') && (wide ? !!(W && W.totals.areas > 0) : a && a.areas > 0));
+    printSync();
     var none = $('btn-sup-none'), rm = $('btn-sup-remove');
     var wasBuilt = hasHost && memOf(S.hostId).built && (cs === 'built' || cs === 'building');
     if (none) none.hidden = !wasBuilt;          // REMOVE ALL and REMOVE stay per piece: not on the plate's card
     if (rm) rm.hidden = !wasBuilt;
     en('btn-sup-none', cs === 'built' && !wide);
     en('btn-sup-remove', cs === 'built' && !wide && S.selSupport != null && !!modelOf(S.selSupport));
-    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-one', 'sup-interface', 'sup-brim', 'sup-raft'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
+    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-small', 'sup-one', 'sup-interface', 'sup-brim', 'sup-raft', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip', 'sup-preset', 'sup-preset-save', 'sup-on'].concat(Object.keys(ADV_IDS).map(function (k) { return ADV_IDS[k][0]; })).forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
     var note = $('sup-angle-note');
     if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + BAMBU_ANGLE + '\u00b0';
     var ang = $('sup-angle');
@@ -991,7 +1006,7 @@ var NSO_SUPPORTS_CARD = (function () {
   function syncTune(cs, stale) {
     var sec = $('sup-tune');
     if (!sec) return;
-    sec.hidden = S.mode !== 'custom';
+    sec.hidden = S.mode !== 'custom' || flowFed({ style: ($('sup-style') || {}).value });   /* Tune's numbers are the lattice planner's: the flow tree's are Tree settings and Tree planner */
     KNOBS.forEach(function (K) {
       var e = $(K.id);
       if (!e) return;
@@ -1028,7 +1043,10 @@ var NSO_SUPPORTS_CARD = (function () {
       if (b) { b.classList.toggle('is-on', S.mode === k); b.setAttribute('aria-pressed', S.mode === k ? 'true' : 'false'); b.disabled = !!S.busy; }
     });
     var tools = $('sup-tools');
-    if (tools) tools.hidden = !fed || S.wide;                    // the tools work on one piece's points: not on the plate
+    /* the Tree type's flow tree takes spots and tips, and lands where it can: no landing circles and no members to erase (docs/PRINT-CARD.md) */
+    var flowT = flowFed({ style: ($('sup-style') || {}).value });
+    if (flowT && S.tool !== 'tips') S.tool = 'tips';
+    if (tools) tools.hidden = !fed || S.wide || flowT;           // the tools work on one piece's points: not on the plate
     var canErase = fed && hasHost && eraseReady();
     Object.keys(TOOLS).forEach(function (k) {
       var b = $('sup-tool-' + k);
@@ -1193,13 +1211,202 @@ var NSO_SUPPORTS_CARD = (function () {
 
   /* ------------------------------------------------------------ building */
 
+  /* the card's Tree settings (Bambu's names): branch distance, diameter, angle, diameter angle, tip diameter - each its default when blank */
+  var TREE_KNOB_IDS = { branchDistanceMm: ['sup-tree-distance', 5], branchDiameterMm: ['sup-tree-diameter', 2], branchAngleDeg: ['sup-tree-angle', 45],
+                        branchDiameterAngleDeg: ['sup-tree-dangle', 5], tipDiameterMm: ['sup-tree-tip', 0.8] };
+  function treeKnobsOf() {
+    var out = {};
+    Object.keys(TREE_KNOB_IDS).forEach(function (k) { var e = $(TREE_KNOB_IDS[k][0]), v = e ? parseFloat(e.value) : NaN; out[k] = isFinite(v) && v >= 0 ? v : TREE_KNOB_IDS[k][1]; });
+    return out;
+  }
+  /* ADVANCED: the flow tree's own numbers (nso_support_flow.js DEFAULTS, nso_support_gridpack.js FLOW), each a field with its default. Only a
+     value that differs from its default is sent, so a card left alone builds exactly as the defaults do. */
+  var ADV_IDS = { tipCover: ['sup-adv-cover', 0.44], tipDropMm: ['sup-adv-tipdrop', 2.8], gather: ['sup-adv-gather', 0.25], reach: ['sup-adv-reach', 0.95],
+                  rootFloorMm: ['sup-adv-floor', 2.4], flareMm: ['sup-adv-flare', 2], flareTan: ['sup-adv-flaretan', 0.45] };
+  /* ...and the rows of Bambu's Advanced that shape the tree (index.html #sup-bambu-sec; the slicer reads them all - app-print.js): Initial layer
+     expansion is the pad's reach past a foot (-1: automatic), Bottom Z distance the gap under a foot on the part, the xy distance the tree's
+     clearance (planned a tenth further off than the slicer cuts), Max bridge length the span the detector calls a bridge. Only a row that
+     differs from its default is sent. */
+  var BAMBU_TREE = { padGrowMm: ['slice-set-sup-expand', -1], bottomGapMm: ['slice-set-sup-bottomz', 0.2], xyMm: ['slice-set-sup-xy', 0.35] };
+  var BRIDGE_ID = 'slice-set-sup-bridge', BRIDGE_DEFAULT = 5, XY_PLAN_EXTRA_MM = 0.1;
+  function bridgeNow() { var e = $(BRIDGE_ID), v = e ? parseFloat(e.value) : NaN; return isFinite(v) && v >= 0 ? v : BRIDGE_DEFAULT; }
+  function advKnobsOf() {
+    var out = {}, n = 0;
+    Object.keys(ADV_IDS).forEach(function (k) {
+      var e = $(ADV_IDS[k][0]), v = e ? parseFloat(e.value) : NaN;
+      if (isFinite(v) && v >= 0 && Math.abs(v - ADV_IDS[k][1]) > 1e-9) { out[k] = v; n++; }
+    });
+    Object.keys(BAMBU_TREE).forEach(function (k) {
+      var e = $(BAMBU_TREE[k][0]), v = e ? parseFloat(e.value) : NaN;
+      if (!isFinite(v) || Math.abs(v - BAMBU_TREE[k][1]) <= 1e-9 || v < 0) return;
+      out[k] = k === 'xyMm' ? v + XY_PLAN_EXTRA_MM : v; n++;
+    });
+    return n ? out : null;
+  }
+  function advSync() {
+    var k = advKnobsOf(), note = $('sup-adv-note'), n = k ? Object.keys(k).filter(function (x) { return !!ADV_IDS[x]; }).length : 0;
+    if (note) note.textContent = n ? n + ' changed from the defaults' : '';
+    var df = $('sup-adv-defaults'); if (df) df.disabled = !n;
+  }
+  function advDefaults() { Object.keys(ADV_IDS).forEach(function (k) { var e = $(ADV_IDS[k][0]); if (e) e.value = String(ADV_IDS[k][1]); }); advSync(); presetTouched(); }
+
+  /* SAVED SETTINGS: every lever of the card under a name, in this browser (localStorage), so what printed well is kept and put back in one pick.
+     A saved setting is { id: value } over PRESET_FIELDS - the card's own controls, by their ids; putting one back sets each control and tells it
+     so (input + change), as a hand on the control would. Nothing rebuilds: Generate does. */
+  var PRESET_KEY = 'nso.supports.settings.v1', PRESET_LAST = 'nso.supports.settings.last';
+  var PRESET_FIELDS = ['sup-on', 'sup-angle', 'sup-style', 'sup-size', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip',
+    'sup-rest', 'sup-small', 'sup-interface', 'slice-set-iface-angle', 'slice-set-raft', 'slice-set-raft-gap',
+    /* the Print card's slice rows: quality, strength, adhesion, the filament (not the printer or its nozzle: a saved setting goes with any printer) */
+    'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-surface', 'slice-set-brim',
+    'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band',
+    /* tuning: the bridge's speed and flow, the filament's flow ratio, retraction and z-hop (docs/FILAMENTS.md "Bridges and stringing") */
+    'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-hang-speed', 'slice-set-bridge-temp', 'slice-set-bridge-temp-from', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-retract-before', 'slice-set-zhop',
+    /* Bambu's Advanced rows */
+    'slice-set-sup-density', 'slice-set-sup-expand', 'slice-set-sup-walls', 'slice-set-sup-topz', 'slice-set-sup-bottomz', 'slice-set-sup-base', 'slice-set-sup-base-spacing',
+    'slice-set-sup-angle', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion', 'slice-set-sup-xy', 'slice-set-sup-zover',
+    'slice-set-sup-first-gap', 'slice-set-sup-bridge', 'slice-set-sup-indep',
+    /* the wall generator and Arachne's levers (Quality) */
+    'slice-set-wall-gen', 'slice-set-wall-angle', 'slice-set-wall-filter', 'slice-set-wall-translen', 'slice-set-wall-dist', 'slice-set-min-wall', 'slice-set-min-feature',
+    /* the top / bottom shells (Strength) */
+    'slice-set-top-layers', 'slice-set-top-thick', 'slice-set-bot-layers', 'slice-set-bot-thick']
+    .concat(Object.keys(ADV_IDS).map(function (k) { return ADV_IDS[k][0]; }));
+  function store() { try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch (err) { return null; } }
+  /* BUILT IN: the numbers NSO sliced supports with before the rows started at the printer profile's (docs/PRINT-CARD.md "Starting values").
+     Listed with the saved ones, not to be deleted or overwritten; it sets only the rows it names. */
+  var PRESET_BUILTIN = { 'NSO classic': { 'slice-set-sup-topz': '0.18', 'slice-set-sup-density': '100', 'slice-set-sup-bridge': '5' } };
+  function presetsAll() { var all = presetsRead(), out = {}; Object.keys(PRESET_BUILTIN).forEach(function (n) { out[n] = PRESET_BUILTIN[n]; }); Object.keys(all).forEach(function (n) { if (!PRESET_BUILTIN[n]) out[n] = all[n]; }); return out; }
+  function presetsRead() { var st = store(); if (!st) return {}; try { var o = JSON.parse(st.getItem(PRESET_KEY) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (err) { return {}; } }
+  function presetsWrite(all) { var st = store(); if (!st) return false; try { st.setItem(PRESET_KEY, JSON.stringify(all)); return true; } catch (err) { return false; } }
+  function presetNow() {
+    var out = {};
+    PRESET_FIELDS.forEach(function (id) { var e = $(id); if (!e) return; out[id] = e.type === 'checkbox' ? !!e.checked : String(e.value); });
+    return out;
+  }
+  function presetApply(vals) {
+    if (!vals || S.busy) return false;
+    PRESET_FIELDS.forEach(function (id) {
+      var e = $(id);
+      if (!e || vals[id] === undefined) return;
+      if (e.type === 'checkbox') e.checked = !!vals[id]; else e.value = String(vals[id]);
+      if (id === 'sup-angle') setAngle(vals[id], true);                    /* the angle is the card's state as well as its field */
+      ['input', 'change'].forEach(function (ev) { try { e.dispatchEvent(new Event(ev, { bubbles: true })); } catch (err) { /* a page without Event: the value is set */ } });
+    });
+    advSync(); sync();
+    return true;
+  }
+  function presetList(pick) {
+    var sel = $('sup-preset'); if (!sel || !sel.options) return;
+    var all = presetsAll(), names = Object.keys(all).sort(function (a, b) { return a.localeCompare(b); });
+    while (sel.options.length > 1) sel.remove(1);
+    names.forEach(function (n) { var op = document.createElement('option'); op.value = n; op.textContent = n; sel.appendChild(op); });
+    sel.value = pick && all[pick] ? pick : '';
+    var del = $('sup-preset-delete'); if (del) del.disabled = !sel.value || !!PRESET_BUILTIN[sel.value];
+  }
+  /* a control moved by hand after a pick: the card no longer shows the saved setting, and says so */
+  var presetQuiet = false;
+  function presetTouched() { if (presetQuiet) return; var sel = $('sup-preset'); if (sel && sel.value) { sel.value = ''; var del = $('sup-preset-delete'); if (del) del.disabled = true; } }
+  function presetPick(name) {
+    var all = presetsAll();
+    if (!name || !all[name]) { presetList(''); return false; }
+    presetQuiet = true;
+    var ok = presetApply(all[name]);
+    presetQuiet = false;
+    presetList(ok ? name : '');
+    var st = store(); if (st && ok) { try { st.setItem(PRESET_LAST, name); } catch (err) { /* full */ } }
+    return ok;
+  }
+  function presetSave(name) {
+    name = String(name == null ? '' : name).trim().slice(0, 60);
+    if (!name) return false;
+    if (PRESET_BUILTIN[name]) { if (typeof setStatus === 'function') setStatus('"' + name + '" is built in: save under another name.'); return false; }
+    var all = presetsRead(); all[name] = presetNow();
+    if (!presetsWrite(all)) { if (typeof setStatus === 'function') setStatus('Could not save the settings: this browser keeps no storage for the page.'); return false; }
+    presetList(name);
+    var st = store(); if (st) { try { st.setItem(PRESET_LAST, name); } catch (err) { /* full */ } }
+    if (typeof setStatus === 'function') setStatus('Supports settings saved as "' + name + '".');
+    return true;
+  }
+  function presetDelete(name) {
+    var all = presetsRead();
+    if (!name || !all[name]) return false;
+    delete all[name]; presetsWrite(all); presetList('');
+    return true;
+  }
+  function presetExport() {
+    var text = JSON.stringify({ what: 'nso-supports-settings', version: 1, settings: presetsRead() }, null, 1);
+    try {
+      var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = 'nso-supports-settings.json';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    } catch (err) { /* no download in this page */ }
+    return text;
+  }
+  function presetImport(text) {
+    var o; try { o = JSON.parse(text); } catch (err) { o = null; }
+    var src = o && o.what === 'nso-supports-settings' && o.settings && typeof o.settings === 'object' ? o.settings : null;
+    if (!src) { if (typeof setStatus === 'function') setStatus('That file holds no saved supports settings.'); return 0; }
+    var all = presetsRead(), n = 0;
+    Object.keys(src).forEach(function (name) {
+      var v = src[name], keep = {};
+      if (!v || typeof v !== 'object') return;
+      PRESET_FIELDS.forEach(function (id) { if (typeof v[id] === 'string' || typeof v[id] === 'boolean') keep[id] = v[id]; });   /* only this card's own controls, as text or a tick */
+      all[String(name).slice(0, 60)] = keep; n++;
+    });
+    presetsWrite(all); presetList('');
+    if (typeof setStatus === 'function') setStatus(n + ' saved supports setting(s) read.');
+    return n;
+  }
+
+  /* the Print card's own rows: the supports' settings grey out with the box unticked; the Printer row is the Plate panel's picker, shown here too */
+  function printSync() {
+    if (!printCard()) return;
+    var body = $('print-sup-body'), on = supportsOn();
+    if (body) { body.classList.toggle('is-off', !on); if (on) body.removeAttribute('inert'); else body.setAttribute('inert', ''); }
+    var box = $('sup-on'); if (box) box.disabled = !!S.busy || SL.busy;
+    var mine = $('print-printer'), theirs = $('plate-select');
+    if (mine && theirs && theirs.options) {
+      if (mine.options.length !== theirs.options.length) {
+        while (mine.options.length) mine.remove(0);
+        for (var i = 0; i < theirs.options.length; i++) { var op = document.createElement('option'); op.value = theirs.options[i].value; op.textContent = theirs.options[i].textContent; mine.appendChild(op); }
+      }
+      if (mine.value !== theirs.value) mine.value = theirs.value;
+      mine.disabled = !!S.busy || SL.busy;
+    }
+  }
+  /* SETTINGS ARE THE PLATE'S (app-beds.js: up to six plates, one active): every row of the card as the plate left it, kept by the plate's id
+     and put back when the plate is the active one again. A plate the card has not been on starts with the rows as they stand. */
+  var BEDSET = { at: null, by: {} };
+  function bedKey() {
+    var B = window.NSO_BEDS, list = null;
+    try { list = B && typeof B.info === 'function' && B.count() > 1 ? B.info() : null; } catch (err) { list = null; }
+    if (!list) return 'one';
+    for (var i = 0; i < list.length; i++) if (list[i].active) return 'bed' + list[i].id;
+    return 'one';
+  }
+  function bedSync() {
+    if (!printCard() || S.busy || SL.busy) return;
+    var id = bedKey();
+    if (BEDSET.at === id) return;
+    var sel = $('sup-preset');
+    if (BEDSET.at != null) BEDSET.by[BEDSET.at] = { vals: presetNow(), name: sel ? sel.value : '' };
+    var first = BEDSET.at == null;
+    BEDSET.at = id;
+    var mine = BEDSET.by[id];
+    S.printSig = null;
+    if (!mine || first) return;
+    presetQuiet = true;
+    try { presetApply(mine.vals); } finally { presetQuiet = false; }
+    presetList(mine.name);
+  }
+
   function cardOpts() {
     var st = $('sup-style'), sz = $('sup-size'), rs = $('sup-rest');
     var style = st && STYLES[st.value] ? st.value : 'tree';
     var size = sz ? parseFloat(sz.value) : NaN;
-    var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim'), rf = $('sup-raft');
-    return { brim: !br || !!br.checked, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
-      one: !one || !!one.checked, dense: !it || it.value !== 'open' };
+    var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim'), rf = $('sup-raft'), sm = $('sup-small');
+    /* the Print card has ONE brim row (the Slice settings' Brim: auto / every part / off): a part on supports gets its ring unless that row says off */
+    var brimSel = $('slice-set-brim'), brimOn = printCard() ? !(brimSel && brimSel.value === 'none') : (!br || !!br.checked);
+    return { brim: brimOn, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), noHorns: !!(sm && sm.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
+      one: !one || !!one.checked || (!!(one.parentNode && one.parentNode.hidden) && one.dataset.testOff !== '1'), dense: true, ifaceLayers: it && it.value !== '' && isFinite(parseInt(it.value, 10)) ? parseInt(it.value, 10) : null, treeKnobs: treeKnobsOf(), flowKnobs: advKnobsOf() };   /* hidden: always one-trunk */
   }
 
   /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for
@@ -1313,7 +1520,16 @@ var NSO_SUPPORTS_CARD = (function () {
   function groupAreas(regs, o) {
     var GP = window.NSO_SupportGridpack;
     if (!oneTrunkOn(o) || !GP || typeof GP.oneTrunkGroups !== 'function') return regs.map(function (r) { return [r]; });
-    var groups = GP.oneTrunkGroups(regs.map(function (r) { return { id: r.id, pts: r.beacons.filter(function (b) { return !b.off; }) }; }));
+    /* THE FLOW TREE (nso_support_flow.js) grows a piece's whole tree at once - every area's tips go down together and join where they meet: one plan, one support a piece */
+    if (columnRule() && window.NSO_SupportFlow && regs.length) {
+      /* ...handed back a support to each group of areas that stand apart (a head's areas one support, a head 20 mm off another: the slicer works a
+         support's layer heights out from its own stacks), and ONE support where areas stand side by side (nso_support_gridpack.js flowShells) */
+      var all = regs.slice();
+      all.solidGroups = regs.map(function (r) { return [r.id]; });
+      return [all];
+    }
+    /* under the column rule a head's areas at any height are one tree (its shoulders' horns join the trunk under its overhang): no height window */
+    var groups = GP.oneTrunkGroups(regs.map(function (r) { return { id: r.id, pts: r.beacons.filter(function (b) { return !b.off; }) }; }), columnRule() ? { zWindowMm: 1e9, reachByHeight: true, plateZ: S.det && S.det.minZ != null ? S.det.minZ : 0 } : undefined);
     return groups.map(function (g) { return g.map(function (i) { return regs[i]; }); });
   }
   /* One area through the planner: the PLANNING step. Resolves { result } when
@@ -1328,14 +1544,14 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.mode === 'auto') return null;
     var F = feedOf(m), feed = { mode: S.mode, landingZones: F.zones.map(function (z) { return { x: z.x, y: z.y, r: z.r }; }), excluded: F.erased.slice() };
     if (S.mode === 'custom') {
-      feed.tips = beacons.filter(function (b) { return !b.off; }).map(function (b) { return { x: b.x, y: b.y, z: b.z, key: b.key, regionId: rid }; });
+      feed.tips = beacons.filter(function (b) { return !b.off; }).map(function (b) { return { x: b.x, y: b.y, z: b.z, key: b.key, regionId: b.rid != null ? b.rid : rid }; });
       if (knobs) feed.knobs = Object.assign({}, knobs);       // Tune: only the fields that are not at their default
     } else {
       feed.beaconsOff = beacons.filter(function (b) { return b.off && !b.erased; }).map(function (b) { return b.id; });
     }
     return feed;
   }
-  function planArea(job, D, rid, beacons, o, onProgress, feed, legacy) {
+  function planArea(job, D, rid, beacons, o, onProgress, feed, legacy, solidGroups) {
     var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: b.rid != null ? b.rid : rid, key: b.key }; });
     var opts = Object.assign({}, D.opts, { beacons: bs, style: o.style, restOnModel: o.rest });
     if (boxesNow().length) opts.occluders = occludersOf(D);       // a Supports Blocker is an obstacle, as another piece is
@@ -1343,10 +1559,15 @@ var NSO_SUPPORTS_CARD = (function () {
        docs/SUPPORT-ONE-TRUNK.md). Straight struts are one post a spot by definition, the gecko hand is the lattice's, and a support
        that may rest on the part has legs the one-trunk crown does not make (it stands on the plate only): with "may rest" the one-trunk
        build runs first, and the spots it could not reach (legacy) are planned again alone, with the lattice that may rest on the part. */
-    if (!feed && !legacy && oneTrunkOn(o)) opts.oneTrunk = true;
+    if (!legacy && oneTrunkOn(o) && (!feed || flowFed(o))) opts.oneTrunk = true;
     if (feed) opts.feed = feed;
     if (feed && feed.mode === 'custom') delete opts.beacons;         // Custom plans its tips alone: no beacon list goes with them
     if (o.sideMm != null) opts.sideMm = o.sideMm;
+    if (columnRule()) opts.columnRule = true;                      /* the slicer lays the interface: the planner stands no tip on a step it would not call an overhang */
+    if (columnRule() && o.noHorns) opts.noHorns = true;            /* Exclude small overhangs: no horn to a step's edge; the part holds it */
+    if (solidGroups) opts.solidGroups = solidGroups;               /* the flow tree's supports: one a group of areas (groupAreas) */
+    if (columnRule() && o.flowKnobs) opts.flowKnobs = o.flowKnobs;  /* Advanced: the flow tree's own numbers, those that differ from their defaults */
+    if (columnRule() && o.treeKnobs) opts.treeKnobs = o.treeKnobs;  /* the Tree settings: Bambu's law and spacing (nso_support_gridpack.js columnCrownOf) */
     return planAway(job, D.soup, opts, onProgress).then(function (t) {
       if (!t || typeof t !== 'object') throw new Error('the planner gave no plan');
       var keyOf = function (id) { return t.beacons && t.beacons[id] ? t.beacons[id].key : null; };
@@ -1378,11 +1599,26 @@ var NSO_SUPPORTS_CARD = (function () {
         if (sd.holds[cv.byKey] && !sd.holds[cv.key]) { sd.holds[cv.key] = sd.holds[cv.byKey]; sd.keys.push(cv.key); }
       });
     });
+    /* THIN TIPS (plan.oneTrunk.thin, docs/SUPPORT-ONE-TRUNK.md item 25): a ledge no strut fits is held by a thin column the planner drew - it
+       goes with the area's first support (a shell of its own in it), or is the area's support when nothing else was built */
+    ((a.t.oneTrunk && a.t.oneTrunk.thin) || []).forEach(function (tc) {
+      if (!tc.soup || !tc.soup.length) return;
+      var sd = solids[0];
+      if (!sd) { sd = { soup: new Float32Array(0), keys: [], holds: {}, landing: 'plate', regionIds: [a.rid], feet: [], thinOnly: true }; solids.push(sd); }
+      var joined = new Float32Array(sd.soup.length + tc.soup.length);
+      joined.set(sd.soup, 0); joined.set(tc.soup, sd.soup.length);
+      sd.soup = joined;
+      sd.holds[tc.key] = tc.rest ? 'rest' : 'held'; sd.keys.push(tc.key);
+    });
+    /* a plan with no tips (every spot on a step, or on a ledge): its supports are thin columns only */
+    if (a.t.oneTrunk && !a.t.oneTrunk.tips) solids.forEach(function (sd) { if (!sd.brim) sd.thinOnly = true; });
+    /* ...a spot on a step narrower than a layer's overhang at the threshold angle is no overhang: the part holds it (plan.oneTrunk.selfHeld) */
+    var selfHeld = ((a.t.oneTrunk && a.t.oneTrunk.selfHeld) || []).map(function (sh) { return sh.key; });     /* kept by the card (memOf().selfHeld): held whether or not a support was built */
     /* ...and a spot on the plate's first layers (the low edge of a tipped part) is held by the plate: said held, with the first support */
     ((a.t.oneTrunk && a.t.oneTrunk.onPlate) || []).forEach(function (op) {
       if (solids.length && !solids[0].holds[op.key]) { solids[0].holds[op.key] = 'held'; solids[0].keys.push(op.key); }
     });
-    return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, sideMm: a.t.sideMm, plateZ: a.t.plateZ, reason: a.t.reason,
+    return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, selfHeld: selfHeld, sideMm: a.t.sideMm, plateZ: a.t.plateZ, reason: a.t.reason,
       members: u.members || [], zonesEmpty: a.t.zonesEmpty || null };
   }
 
@@ -1478,13 +1714,13 @@ var NSO_SUPPORTS_CARD = (function () {
   function snapshot() {
     var m = modelOf(S.hostId), hostId = S.hostId;
     var ops = editsOf(m).ops.slice(), serial = editsOf(m).serial;
-    var unreach = JSON.parse(JSON.stringify(memOf(hostId).unreach)), built = memOf(hostId).built;
+    var unreach = JSON.parse(JSON.stringify(memOf(hostId).unreach)), selfHeld = Object.assign({}, memOf(hostId).selfHeld || {}), built = memOf(hostId).built;
     var feed = feedCopy(m.nsoSupportFeed), members = memOf(hostId).members, zonesEmpty = memOf(hostId).zonesEmpty, builtKnobs = memOf(hostId).builtKnobs;
     return function () {
       var mm = modelOf(hostId);
       if (mm) mm.nsoSupportEdits = { ops: ops.slice(), serial: serial };
       if (mm) mm.nsoSupportFeed = feedCopy(feed) || undefined;
-      memOf(hostId).unreach = JSON.parse(JSON.stringify(unreach));
+      memOf(hostId).unreach = JSON.parse(JSON.stringify(unreach)); memOf(hostId).selfHeld = Object.assign({}, selfHeld);
       memOf(hostId).members = members; memOf(hostId).zonesEmpty = zonesEmpty;
       memOf(hostId).built = built; memOf(hostId).builtKnobs = builtKnobs;
       S.sel = null; S.hover = null;
@@ -1559,7 +1795,7 @@ var NSO_SUPPORTS_CARD = (function () {
       pr = r;
       if (job.dead) return null;
       pr.s = settleResults(pr.areas, pr.builtOf, D);
-      return pr.s.ok ? brimStep(c, pr.s.results) : null;
+      return pr.s.ok ? brimStep(c, pr.s.results).then(function () { return sliceStep(J, [{ c: c, results: pr.s.results }], removeIds); }) : null;
     });
 
     /* The one place the plate changes. Synchronous from the first removal to
@@ -1585,7 +1821,7 @@ var NSO_SUPPORTS_CARD = (function () {
       return { ok: true, added: added, removed: removed.map(function (x) { return x.placed.sourceId; }) };
     }
 
-    return finishJob(J, chain.then(commit), afterCommit, function (res) {
+    return finishJob(J, chain.then(commit).then(adoptSlice), afterCommit, function (res) {
       return { ok: true, added: res.added, removed: res.removed,
         stats: areaStats(S.eff, statesFor(S.eff)), line: ($('sup-count') || {}).textContent || '' };
     }).then(function (r) {
@@ -1654,6 +1890,8 @@ var NSO_SUPPORTS_CARD = (function () {
     return { job: job, heard: heard, pause: pause, arm: arm, guard: guard };
   }
   function endJob(job) {
+    /* a build stopped while the plate was being sliced (sliceStep) stops the slice too */
+    if (job.slicing && !job.dead) { job.slicing = false; var PRc = window.NSO_Print && window.NSO_Print.card; if (PRc && PRc.cancel) PRc.cancel(); }
     job.dead = true;
     clearTimeout(job.timer); clearTimeout(job.ceiling); clearInterval(job.clock);
     stopWorker(job);
@@ -1725,10 +1963,10 @@ var NSO_SUPPORTS_CARD = (function () {
              build's, summed over the areas. */
           J.heard();
           note(job, m && m.phase === 'planning' ? { phase: 'planning', done: at + m.done, total: spots, own: mine, ownDone: m.done } : m, sent);
-        }, feedFor(hm, beacons, rg.id, o.knobs)).then(function (a) {
+        }, feedFor(hm, beacons, rg.id, o.knobs), false, grp.solidGroups || null).then(function (a) {
           areas.push(a);
           /* MAY REST ON THE PART: the one-trunk build stands on the plate only; what it could not reach is asked of the lattice that may rest on the part */
-          var left = o.rest && oneTrunkOn(o) && a.t && a.unreach ? beacons.filter(function (b) { return !b.off && a.unreach.indexOf(b.key) >= 0; }) : [];
+          var left = o.rest && oneTrunkOn(o) && a.t && !a.t.flow && a.unreach ? beacons.filter(function (b) { return !b.off && a.unreach.indexOf(b.key) >= 0; }) : [];
           if (!left.length) return J.pause() || new Promise(function (go) { setTimeout(go, 0); });
           return planArea(job, D, rg.id, left, o, null, null, true).then(function (a2) {
             if (a2 && a2.t) {
@@ -1773,9 +2011,163 @@ var NSO_SUPPORTS_CARD = (function () {
      the piece's first result, flagged brim: placed as a plate piece of its own (named "- brim", never counted as a support) and sliced
      as role 'brim'. Resolves the words the card says, or null when there is nothing to say; never rejects: a build without a brim is
      still a build. c: { D, o }, results: settleResults'. */
+  /* THE SUPPORT, AS IT PRINTS (the owner's: "the interfaces have not been showing up on the generator ... generate and slice in the same motion, so
+     the imagery and rendering is aligned"). Under the column rule the card builds the tree alone and the slicer lays the interface (docs/SUPPORT-GATE.md
+     4): right after the build the slicer cuts each support (NSO_Slicer, columnStackOnly - the rule run, no paths) and the support is drawn from what it
+     prints, layer by layer: the tree cut where the part blocks it, the stack on it, the cups under it - what G-scope will show and the printer will lay.
+     The slice cuts the tree it was built as (sliceSoupOf: the same cut, so the same layers - the slicer cutting the drawing again grew a few of them, a
+     support's small holes filled and its cups laid again). Never rejects: a support the slicer gave nothing for keeps the tree it was built as. */
+  /* What a plate piece is sliced as: its world soup (`positions`, Z-up, as the plate reader gives it), or - a support drawn as it prints - the tree it
+     was built as, moved as far as the drawing has been moved since (the first corner of each, the same corner). Shared with the print module and
+     G-scope's Slice (window.nsoSupportSliceSoup). */
+  function sliceSoupOf(m, positions) {
+    var sup = m && m.nsoSupport;
+    if (!sup || !sup.built || !sup.shownV0 || !positions || positions.length < 3) return positions;
+    var dx = positions[0] - sup.shownV0[0], dy = positions[1] - sup.shownV0[1], dz = positions[2] - sup.shownV0[2], b = sup.built, out = new Float32Array(b.length);
+    for (var i = 0; i < b.length; i += 3) { out[i] = b[i] + dx; out[i + 1] = b[i + 1] + dy; out[i + 2] = b[i + 2] + dz; }
+    return out;
+  }
+  window.nsoSupportSliceSoup = sliceSoupOf;
+  /* A layer's piece as a plate a layer thick: its outline triangulated by three.js's earcut (THREE.ShapeUtils, robust to the slicer's outlines -
+     the planner's ear clipper gave up on whole pieces, 32 mm2 of the Oblique's stack, and the plate showed a layer missing: a split), else the planner's.
+     Top faces up, walls out. Null when nothing triangulates. */
+  function prismOf(poly, z0, z1, GP) {
+    var n = poly.length;
+    if (n < 3) return null;
+    var tri = null;
+    if (typeof THREE !== 'undefined' && THREE.ShapeUtils && typeof THREE.ShapeUtils.triangulateShape === 'function' && THREE.Vector2) {
+      try { tri = THREE.ShapeUtils.triangulateShape(poly.map(function (p) { return new THREE.Vector2(p[0], p[1]); }), []); } catch (err) { tri = null; }
+      if (tri && !tri.length) tri = null;
+    }
+    if (!tri) return GP && typeof GP._prismSoup === 'function' ? GP._prismSoup(poly, z0, z1) : null;
+    var a2 = 0; for (var q = 0; q < n; q++) { var u = poly[q], v = poly[(q + 1) % n]; a2 += u[0] * v[1] - v[0] * u[1]; }
+    var ccw = a2 > 0, out = new Float32Array((tri.length * 2 + n * 2) * 9), w = 0;
+    var put = function (a, b, c) { out[w++] = a[0]; out[w++] = a[1]; out[w++] = a[2]; out[w++] = b[0]; out[w++] = b[1]; out[w++] = b[2]; out[w++] = c[0]; out[w++] = c[1]; out[w++] = c[2]; };
+    tri.forEach(function (t) {
+      var A = poly[t[0]], B = poly[t[1]], C = poly[t[2]];
+      if ((B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]) < 0) { var X = B; B = C; C = X; }     /* each top triangle counter-clockwise: up */
+      put([A[0], A[1], z1], [B[0], B[1], z1], [C[0], C[1], z1]);
+      put([A[0], A[1], z0], [C[0], C[1], z0], [B[0], B[1], z0]);
+    });
+    for (var k = 0; k < n; k++) {
+      var p0 = poly[ccw ? k : (k + 1) % n], p1 = poly[ccw ? (k + 1) % n : k];
+      put([p0[0], p0[1], z0], [p1[0], p1[1], z0], [p1[0], p1[1], z1]);
+      put([p0[0], p0[1], z0], [p1[0], p1[1], z1], [p0[0], p0[1], z1]);
+    }
+    return out;
+  }
+  /* A PRISM THAT COVERS ITS OUTLINE (the owner's 2x Oblique on the A1 mini: a band across both trees on the plate, the layer at z 19.4 drawn with a
+     fifth of its sides - the slice printed it whole): a triangulation whose top does not cover the outline's area is taken for a failed one, and the
+     prism is built again by the ear clipper, then by the slicer's own kernel (Manifold's cross-section, extruded), which takes any outline */
+  function topAreaOf(soup, z1) {
+    var a = 0;
+    for (var i = 0; i + 8 < soup.length; i += 9) {
+      if (Math.abs(soup[i + 2] - z1) > 1e-6 || Math.abs(soup[i + 5] - z1) > 1e-6 || Math.abs(soup[i + 8] - z1) > 1e-6) continue;
+      a += Math.abs((soup[i + 3] - soup[i]) * (soup[i + 7] - soup[i + 1]) - (soup[i + 4] - soup[i + 1]) * (soup[i + 6] - soup[i])) / 2;
+    }
+    return a;
+  }
+  function prismChecked(poly, z0, z1, GP, wasm) {
+    if (!poly || poly.length < 3) return null;
+    var a2 = 0; for (var q = 0; q < poly.length; q++) { var u = poly[q], v = poly[(q + 1) % poly.length]; a2 += u[0] * v[1] - v[0] * u[1]; }
+    var A = Math.abs(a2) / 2, ok = function (ps) { return ps && ps.length && Math.abs(topAreaOf(ps, z1) - A) <= 0.01 * A + 0.01; };
+    var ps = prismOf(poly, z0, z1, GP);
+    if (ok(ps)) return ps;
+    var ps2 = GP && typeof GP._prismSoup === 'function' ? GP._prismSoup(poly, z0, z1) : null;
+    if (ok(ps2)) return ps2;
+    if (wasm && wasm.CrossSection) {
+      var cs = null, man = null;
+      try {
+        cs = new wasm.CrossSection([a2 > 0 ? poly : poly.slice().reverse()], 'Positive');
+        man = cs.extrude(z1 - z0);
+        var mesh = man.getMesh(), np = mesh.numProp, V = mesh.vertProperties, Tv = mesh.triVerts, out = new Float32Array(Tv.length * 3);
+        for (var t = 0; t < Tv.length; t++) { out[t * 3] = V[Tv[t] * np]; out[t * 3 + 1] = V[Tv[t] * np + 1]; out[t * 3 + 2] = V[Tv[t] * np + 2] + z0; }
+        if (out.length) { S.prismKernel = (S.prismKernel || 0) + 1; return out; }
+      } catch (e) { /* the kernel could not either */ } finally { try { if (man) man.delete(); if (cs) cs.delete(); } catch (e2) { /* freed */ } }
+    }
+    return ps && ps.length ? ps : ps2;
+  }
+  /* the gate's settings: the drawing's slice when no printer is picked (the node harness, support:gate) */
+  var STACK_SLICE = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28, supportInterfaceRule: 'column' };
+  /* GENERATE IS THE SLICE (the owner: "if generate is performing a slice, have it complete the job and hand off preview to G-scope"). Once
+     every piece's supports are built - before the plate is touched - the plate is sliced ONCE by the Slice card (NSO_Print.card.slice: its
+     printer's profile, its settings, the raft) as it will stand: its pieces, less the supports being replaced, and the new supports under keys
+     of their own. The slicer hands back each support as it prints (nso_slicer.js o.columnStacks) and each is drawn from that; the file is the
+     Slice card's result, which Preview opens in G-scope as it is. No second slice. Cancel stops it as it stops the build. Without a printer
+     picked (or the print module) the supports are drawn as built and the card says why nothing was sliced. */
+  function sliceStep(J, built, removeIds) {
+    var PR = window.NSO_Print && window.NSO_Print.card, GP = window.NSO_SupportGridpack;
+    S.sliceIds = {}; S.sliced = null; S.sliceWhy = null; sliceLine('', false);
+    if (!PR || typeof PR.slice !== 'function' || typeof PR.readPieces !== 'function') return Promise.resolve(null);
+    var job = J.job, pieces = null;
+    try { pieces = PR.readPieces(); } catch (err) { console.error('[supports card] plate', err); }
+    if (!pieces) return Promise.resolve(null);
+    var gone = {};
+    (removeIds || []).forEach(function (id) { gone[id] = true; });
+    pieces = pieces.filter(function (p) { return !gone[p.sourceId]; });
+    var SI = window.NSO_SupportInterface, sheetSet = SI && SI.SHEET && SI.SHEET.slicerSettings ? Object.assign({}, SI.SHEET.slicerSettings) : null, n = 0, byKey = {};
+    built.forEach(function (b) {
+      var po = partsOptsOf(b.c.o), m = 0;
+      b.results.forEach(function (r) {
+        if (!r.ok) return;
+        (r.solids || []).forEach(function (sd) {
+          if (!sd.soup || !sd.soup.length) return;
+          sd.sliceKey = 'new:' + (++n); byKey[sd.sliceKey] = sd;
+          /* the name the plate gives it (placeResults takes this one): the file, G-scope's readout and the plate say the same */
+          sd.pieceName = sd.brim ? b.c.hm.name + ' - brim' : b.c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++m) + ' (' + STYLES[b.c.o.style] + ')';
+          pieces.push({ name: sd.pieceName, soup: sd.soup, sourceId: sd.sliceKey, support: true, brim: !!sd.brim,
+                        hostSourceId: b.c.hostId, interfaceLayers: po.interfaceLayers != null ? po.interfaceLayers : 2, sheetLayerMm: po.sheetLayerMm || 0, nonSolid: false,
+                        settings: sd.brim ? { wall_generator: 'classic', detect_thin_wall: '0', wall_loops: '10', sparse_infill_density: '0%', top_shell_layers: '0', bottom_shell_layers: '1' } : sheetSet });
+        });
+      });
+    });
+    /* the slice runs in the Slice card's worker: the build's watchdog and ceiling are for the planner, and Cancel (job.stop) stops this too */
+    clearTimeout(job.timer); clearTimeout(job.ceiling);
+    S.run = null; S.prog = { phase: 'slicing' }; job.slicing = true; paintBar(); sync();
+    var SLk = window.NSO_Slicer, kernelP = SLk && typeof SLk.loadKernel === 'function' ? SLk.loadKernel({}).catch(function () { return null; }) : Promise.resolve(null);
+    return PR.slice({ pieces: pieces, stacks: true, onStage: function (t) { if (!job.dead) { S.sliceStage = t; paintBar(); } } }).then(function (r) {
+      return kernelP.then(function (wasm) { return [r, wasm]; });
+    }).then(function (rw) {
+      var r = rw[0], wasm = rw[1];
+      job.slicing = false; S.sliceStage = null;
+      if (job.dead) return null;
+      S.sliced = r;
+      if (!r || !r.ok) { S.sliceWhy = r ? r.reason : 'the slice did not run'; return null; }
+      S.sliceWhy = null;
+      var drawn = 0;
+      (r.stacks || []).forEach(function (st) {
+        var sd = byKey[st.key];
+        if (!sd || sd.brim) return;
+        var parts = [];
+        st.layers.forEach(function (L) {
+          /* a layer the slicer prints no line on (a horn's tip, a hair over its last printed layer) is not drawn */
+          if (L.printed === false) return;
+          L.S.forEach(function (poly) { var ps = prismChecked(poly, L.z0, L.z1, GP, wasm); if (ps && ps.length) parts.push(ps); else S.prismMissed = (S.prismMissed || 0) + 1; });
+        });
+        if (!parts.length) return;
+        var len = 0; parts.forEach(function (ps) { len += ps.length; });
+        var soup = new Float32Array(len), w = 0;
+        parts.forEach(function (ps) { soup.set(ps, w); w += ps.length; });
+        sd.built = sd.soup; sd.soup = soup; sd.asPrinted = true; sd.drawnFrom = 'plate'; drawn++;
+      });
+      return { drawn: drawn };
+    });
+  }
+  /* The plate's new supports are placed: the slice is the plate's (NSO_Print.card.adopt), fresh for Preview and Export. */
+  function adoptSlice(res) {
+    var PR = window.NSO_Print && window.NSO_Print.card;
+    if (res && res.ok && S.sliced && S.sliced.ok && PR && typeof PR.adopt === 'function') {
+      PR.adopt(S.sliceIds || {});
+      sliceLine('Sliced: ' + S.sliced.line + '. Preview opens it.', false);
+    }
+    if (res && res.ok) res.sliced = !!(S.sliced && S.sliced.ok);
+    return res;
+  }
+  function raftLayersSet() { var r = $('slice-set-raft'); var n = r ? parseInt(r.value, 10) : 0; return isFinite(n) && n > 0 ? n : 0; }
   function brimStep(c, results) {
     var SL = window.NSO_Slicer;
-    if (!c.o.brim || !SL || typeof SL.brimFor !== 'function' || typeof SL.loadKernel !== 'function') return Promise.resolve(null);
+    /* a raft is the plate's hold: no brim with it (the slicer prints none) */
+    if (!c.o.brim || raftLayersSet() > 0 || !SL || typeof SL.brimFor !== 'function' || typeof SL.loadKernel !== 'function') return Promise.resolve(null);
     var live = results.filter(function (r) { return r.ok && r.solids.length; });
     if (!live.length) return Promise.resolve(null);
     var avoid = [].concat.apply([], live.map(function (r) { return r.solids.map(function (sd) { return sd.soup; }); })).concat((c.D.opts && c.D.opts.occluders) || []);
@@ -1796,6 +2188,29 @@ var NSO_SUPPORTS_CARD = (function () {
     });
     var failed = results.filter(function (r) { return !r.ok; });
     if (failed.length) return { ok: false, reason: failed[0].reason || 'the planner refused' };
+    /* ONE SUPPORT A PIECE: an area whose only support is thin columns (a horn on a shoulder, planned in an area of its own) goes into the
+       piece's first support of another area - the slicer lays one support on one grid, as Bambu's tree is one object (a support of its own
+       sliced on its own grid interleaved its layers with the tree's). Under the column rule; the sheet build is left as it was */
+    var hosts = [];
+    var boxOf = function (q) { var b = [Infinity, Infinity, -Infinity, -Infinity]; for (var i = 0; i < q.length; i += 3) { if (q[i] < b[0]) b[0] = q[i]; if (q[i] > b[2]) b[2] = q[i]; if (q[i + 1] < b[1]) b[1] = q[i + 1]; if (q[i + 1] > b[3]) b[3] = q[i + 1]; } return b; };
+    if (columnRule()) results.forEach(function (r) { (r.solids || []).forEach(function (sd) { if (!sd.thinOnly && !sd.brim && sd.soup && sd.soup.length) hosts.push({ sd: sd, box: boxOf(sd.soup) }); }); });
+    /* the support nearest it in plan (the six heads as one piece have a support each: a horn goes with its own head's) */
+    var hostFor = function (sd) {
+      var b = boxOf(sd.soup), best = null, bd = Infinity;
+      hosts.forEach(function (h) { var dx = Math.max(0, h.box[0] - b[2], b[0] - h.box[2]), dy = Math.max(0, h.box[1] - b[3], b[1] - h.box[3]), d = Math.hypot(dx, dy); if (d < bd) { bd = d; best = h.sd; } });
+      return best;
+    };
+    if (hosts.length) results.forEach(function (r) {
+      r.solids = (r.solids || []).filter(function (sd) {
+        if (!sd.thinOnly || !sd.soup || !sd.soup.length) return true;
+        var host = hostFor(sd);
+        var joined = new Float32Array(host.soup.length + sd.soup.length);
+        joined.set(host.soup, 0); joined.set(sd.soup, host.soup.length); host.soup = joined;
+        sd.keys.forEach(function (k) { if (!host.holds[k]) { host.holds[k] = sd.holds[k]; host.keys.push(k); } });
+        (sd.regionIds || []).forEach(function (rid) { if (host.regionIds && host.regionIds.indexOf(rid) < 0) host.regionIds.push(rid); });
+        return false;
+      });
+    });
     try { results = shareFeet(results, D); } catch (err) { return { ok: false, reason: (err && err.message) || String(err) }; }
     return { ok: true, results: results };
   }
@@ -1804,7 +2219,8 @@ var NSO_SUPPORTS_CARD = (function () {
      does not land (the caller puts everything back). c: { hostId, hm, host, D, o }. */
   function placeResults(c, results, added) {
     var mem = memOf(c.hostId), o = c.o, n = 0;
-    mem.unreach = {};
+    mem.unreach = {}; mem.selfHeld = {};
+    results.forEach(function (r) { (r.selfHeld || []).forEach(function (k) { mem.selfHeld[k] = true; }); });
     /* a fed build names its members (the eraser's targets), and which
        circles nothing landed in (empty in every area that was planned) */
     mem.members = S.mode === 'auto' ? [] : [].concat.apply([], results.map(function (r) { return r.members || []; }));
@@ -1818,11 +2234,15 @@ var NSO_SUPPORTS_CARD = (function () {
         var meta = { card: true, hostSourceId: c.hostId, hostName: c.hm.name, regionId: r.rid, style: o.style,
           sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: S.angle, mode: S.mode, keys: sd.keys, holds: sd.holds, landing: sd.landing };
         if (sd.brim) meta.brim = true;
+        /* a support drawn as it prints (stackStep) keeps the tree it was built as: that is what the slicer cuts (sliceSoupOf), the drawing is its slice */
+        if (sd.asPrinted && sd.built) { meta.built = sd.built; meta.shownV0 = [sd.soup[0], sd.soup[1], sd.soup[2]]; meta.drawnFrom = sd.drawnFrom; }   /* drawnFrom: 'plate' - the Slice card's options; 'gate' - no printer picked */
         meta.sheetLayerMm = partsOptsOf(o).sheetLayerMm || 0;               /* a Dense sheet's layers are this thick: the slicer cuts the supports on their own layer grid then */
-        meta.interfaceLayers = partsOptsOf(o).interfaceLayers || 2;      /* how many interface layers its sheet has: the slicer reads a 3-layer sheet as one */
-        var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
+        meta.interfaceLayers = partsOptsOf(o).interfaceLayers != null ? partsOptsOf(o).interfaceLayers : 2;      /* how many interface layers its sheet has: the slicer reads a 3-layer sheet as one */
+        var nm = sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')';
+        var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.pieceName || nm);
         if (!pl.ok) throw new Error(pl.reason);
         added.push(pl.id);
+        if (sd.sliceKey && S.sliceIds) S.sliceIds[sd.sliceKey] = pl.id;              /* the plate slice (sliceStep) knew it by this key: adoptSlice */
       }
     }
   }
@@ -1893,6 +2313,14 @@ var NSO_SUPPORTS_CARD = (function () {
       });
     });
 
+    /* ...then the plate sliced ONCE, every piece's new supports in it: they are drawn from that slice, and it is the slice Preview opens */
+    chain = chain.then(function () {
+      if (job.dead || !built.length) return null;
+      var rm = [];
+      built.forEach(function (b) { rm = rm.concat(b.c.removeIds); });
+      return sliceStep(J, built, rm);
+    });
+
     /* The one place the plate changes: every piece's old supports off, every piece's new ones on, one Undo step. */
     function commit() {
       if (job.dead) return { ok: false, reason: 'the build was stopped' };
@@ -1923,7 +2351,7 @@ var NSO_SUPPORTS_CARD = (function () {
       return { ok: true, added: added, removed: removed.map(function (x) { return x.placed.sourceId; }) };
     }
 
-    return finishJob(J, chain.then(commit), afterCommitWide, function (res) {
+    return finishJob(J, chain.then(commit).then(adoptSlice), afterCommitWide, function (res) {
       var W2 = S.wideView || wideRead(), by = {};
       W2.pieces.forEach(function (r) { by[r.id] = r; });
       var pieces = S.wideIds.map(function (id) {
@@ -2023,7 +2451,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var undo = snapshot();
     var removed = removePieces(ids);
     if (reset) {
-      mem.unreach = {}; mem.built = false; mem.members = []; mem.zonesEmpty = []; mem.builtKnobs = '';
+      mem.unreach = {}; mem.selfHeld = {}; mem.built = false; mem.members = []; mem.zonesEmpty = []; mem.builtKnobs = '';
       var mh = modelOf(S.hostId);
       if (mh) mh.nsoSupportFeed = undefined;                         // the card's reset: the user's points, circles and erasures go too
       if (S.tool === 'erase') S.tool = 'tips';
@@ -2035,7 +2463,101 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true, removed: ids.slice() };
   }
 
+  /* THE PRINT CARD (docs/PRINT-CARD.md). The card is the Print card when it has the Supports box (#sup-on): Slice is its one build button, it
+     works on the whole plate, and supports are an option of the slice - ticked, they are built first; unticked, the plate's come off and the
+     pieces are sliced alone. Without the box (a page of the old shape, the tests' cards) the card is the Supports card it was. */
+  function printCard() { return !!$('sup-on'); }
+  function supportsOn() { var b = $('sup-on'); if (b) return !!b.checked; var st = $('sup-style'); return !(st && st.value === 'none'); }
+  function styleNone() { return !supportsOn(); }
+  /* STYLE NONE: no supports are built - Generate slices the plate as it stands (the raft, if it has layers, under it), ready for Preview */
+  function sliceOnly() {
+    var P = window.NSO_Print && window.NSO_Print.card;
+    if (SL.busy || S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
+    if (!P || !P.slice) { sliceLine('The slicer did not load - check console.', true); return Promise.resolve({ ok: false, reason: 'no slicer' }); }
+    S.sliceWhy = null; SL.busy = true; sync(); sliceLine('Slicing the plate', false);
+    return P.slice({ onStage: function (t) { if (SL.busy) sliceLine(t, false); } }).then(function (r) {
+      SL.busy = false; SL.last = r;
+      if (r.ok) sliceLine((supportsOn() ? 'Sliced: ' : 'Sliced, no supports built: ') + r.line + '. Preview opens it.', false);
+      else sliceLine(r.reason, !r.cancelled);
+      sync();
+      return r;
+    });
+  }
+  /* EVERY SUPPORT OFF THE PLATE, one Undo (the Print card's Slice with Supports unticked) */
+  function plateTakeOff() {
+    if (S.busy) return { ok: false, reason: 'busy' };
+    var ids = [], undos = [];
+    realIds().forEach(function (id) {
+      asHost(id, function () {
+        var mine = supportsOf(id).map(function (m) { return m.id; });
+        if (!mine.length) return;
+        undos.push(snapshot());
+        ids = ids.concat(mine);
+        var mem = memOf(id); mem.unreach = {}; mem.selfHeld = {}; mem.built = false; mem.members = []; mem.zonesEmpty = []; mem.builtKnobs = '';
+      });
+    });
+    S.printSig = null;
+    if (!ids.length) return { ok: true, removed: [] };
+    var removed = removePieces(ids);
+    pushUndo({ type: 'supportSwap', removed: removed, addedIds: [], label: 'Undo: the plate\'s supports restored', onUndone: function () { undos.forEach(function (fn) { fn(); }); } });
+    S.msg = null; S.selSupport = null;
+    afterCommit();
+    return { ok: true, removed: ids };
+  }
+  /* what the plate's supports are built by: the settings that shape them and every piece as it stands (its pose, its edits, its supports). The
+     same after a build as before the next Slice: nothing to build again - the plate is sliced as it is */
+  function printSig() {
+    var o = cardOpts();
+    return JSON.stringify([S.angle, S.mode, o.style, o.sideMm, o.rest, o.noHorns, o.ifaceLayers, o.treeKnobs, o.flowKnobs, o.knobs, o.brim, bridgeNow(),
+      realIds().map(function (id) { return asHost(id, hostSignature); })]);
+  }
+  /* SLICE, the Print card's one button: the plate as the card says it. Supports unticked: the plate's supports come off and it is sliced bare.
+     Ticked: the supports are built for every piece on the plate (each with its own left-out areas, tips and blockers) - unless nothing they are
+     built by has changed since the last build - and the plate is sliced with them (the build ends with the slice). */
+  function printSlice(pre) {
+    if (S.busy || SL.busy) return Promise.resolve({ ok: false, reason: 'busy' });
+    var ids = realIds();
+    if (!ids.length) { S.msg = { text: 'Nothing on the plate to slice.', bad: true }; sync(); return Promise.resolve({ ok: false, reason: 'empty plate' }); }
+    if (!supportsOn()) { plateTakeOff(); return sliceOnly(); }
+    if (S.printSig && S.printSig === printSig()) return sliceOnly();
+    var done = function (r) {
+      if (r && r.ok) { S.printSig = printSig(); return r; }
+      /* nothing hangs on the plate (or every area is left out): there is nothing to build, and the plate is sliced as it is */
+      if (r && (r.reason === 'nothing to build' || r.reason === 'nothing needs holding')) { S.msg = null; return sliceOnly(); }
+      return r;
+    };
+    var badKnob = S.mode === 'custom' ? knobBad() : null;
+    if (badKnob) { S.msg = { text: badKnob, bad: true, knob: true }; sync(); return Promise.resolve({ ok: false, reason: badKnob }); }
+    if (ids.length >= 2) {
+      if (!S.wide) {
+        if (state.selectedIndex >= 0 && typeof selectPlaced === 'function') selectPlaced(-1);
+        var w = setWide(true);
+        if (!w.ok) return Promise.resolve(w);
+      }
+      /* the pieces are read as the plate option comes on: a big one in a worker - Slice waits for the read */
+      return new Promise(function (go) {
+        var t0 = Date.now();
+        (function wait() {
+          var W = wideRead();
+          if (W.pending && Date.now() - t0 < 120000) { setTimeout(wait, 50); return; }
+          go(buildWide().then(done));
+        })();
+      });
+    }
+    if (S.hostId !== ids[0]) pick(ids[0]);
+    return new Promise(function (go) {
+      var t0 = Date.now();
+      (function wait() {
+        if (detect() === PENDING && Date.now() - t0 < 120000) { setTimeout(wait, 50); return; }
+        S.eff = effective();
+        if (S.eff.error || !S.eff.beacons.length) { refresh(); go(done({ ok: false, reason: S.eff.error || 'nothing needs holding' })); return; }
+        go(build(pre).then(done));
+      })();
+    });
+  }
   function generate(pre) {
+    if (printCard()) return printSlice(pre);
+    if (styleNone()) return sliceOnly();
     if (S.wide) return generateWide();
     if (S.hostId == null) return Promise.resolve({ ok: false, reason: 'no piece' });
     var badKnob = S.mode === 'custom' ? knobBad() : null;
@@ -2806,28 +3328,25 @@ var NSO_SUPPORTS_CARD = (function () {
 
   /* ---------------------------------------------- the plate option, lit */
 
-  var LIT = { color: 0xdc2626, intensity: 0.55 };      // a selection's own look (selectPlaced)
-
-  /* Every real piece lit as a selection is: the red tint and the white outline. The outline is the app's own
-     (refreshOutline, which draws for the selected piece only, so each piece is "selected" for the call and none is when
-     it returns), kept in the piece's own p.outline slot - the one slot clearSelectionOutline, selectPlaced, the undo
-     restore (nsoDropOutline) and refreshOutline already strip, so one outline per piece and nothing left behind. */
+  /* Every real piece lit as a selection is: the selected piece's rose body and white outline, the very look a Select
+     all group wears (app-core.js nsoPaintSelLook, through state.litSel). The outline is the app's own (refreshOutline,
+     which draws for any piece nsoLooksSelected says is lit), kept in the piece's own p.outline slot - the one slot
+     clearSelectionOutline, selectPlaced, the undo restore (nsoDropOutline) and refreshOutline already strip, so one
+     outline per piece and nothing left behind. */
   function light() {
     unlight();
     if (typeof clearSelectionOutline === 'function') clearSelectionOutline();
     state.selectedIndex = -1;
     S.lit = [];
-    state.placed.forEach(function (p, i) {
-      if (!p || !p.mesh || isSupport(p.sourceId)) return;
-      p.mesh.material.emissive = new THREE.Color(LIT.color);
-      p.mesh.material.emissiveIntensity = LIT.intensity;
-      state.selectedIndex = i;
+    var pieces = state.placed.filter(function (p) { return p && p.mesh && !isSupport(p.sourceId); });
+    state.litSel = pieces;
+    pieces.forEach(function (p) {
       if (typeof refreshOutline === 'function') refreshOutline(p, { now: true });     // on screen before it returns, as it was
       S.lit.push({ p: p, line: p.outline || null });
     });
-    state.selectedIndex = -1;
     if (typeof updateAdjustUI === 'function') updateAdjustUI();
     if (typeof renderModelList === 'function') renderModelList();
+    if (typeof nsoPaintSelLook === 'function') nsoPaintSelLook();         // last: the colour, over whatever the list repainted
     if (typeof nsoInputMode !== 'undefined' && nsoInputMode) setTimeout(function () { nsoInputMode.refresh(); }, 0);
   }
   /* Take back exactly what light() put up: an outline still ours comes off and is disposed; a piece the user has since
@@ -2835,19 +3354,23 @@ var NSO_SUPPORTS_CARD = (function () {
   function unlight() {
     var lit = S.lit || [];
     S.lit = [];
+    var mine = state.litSel && lit.length && state.litSel.indexOf(lit[0].p) >= 0;
+    if (mine || !lit.length) state.litSel = null;
     lit.forEach(function (e) {
       var p = e.p;
-      if (e.line && p.outline === e.line) {
+      var still = typeof nsoLooksSelected === 'function' && nsoLooksSelected(p);
+      if (e.line && p.outline === e.line && !still) {
         if (p.mesh) p.mesh.remove(e.line);
         if (e.line.geometry) e.line.geometry.dispose();
         if (e.line.material) e.line.material.dispose();
         p.outline = null;
       }
-      if (p.mesh && p.mesh.material && state.placed[state.selectedIndex] !== p) {
+      if (p.mesh && p.mesh.material && !still) {
         p.mesh.material.emissive = new THREE.Color(0x000000);
         p.mesh.material.emissiveIntensity = 0;
       }
     });
+    if (lit.length && typeof paintJoinHighlights === 'function') paintJoinHighlights();   // the plain look back, the selection's kept
   }
   /* The highlight IS the option: while it stands the option is on. Anything that takes it down - a piece picked, added
      or removed, an Undo that restores the plate - ends the option with it. */
@@ -2913,6 +3436,10 @@ var NSO_SUPPORTS_CARD = (function () {
 
   function tick() {
     if (!S.open) return;
+    bedSync();
+    /* the Printer row is the Plate panel's choice: changed there (or by anything else), it follows at once - not at the card's next redraw */
+    var ppr = $('print-printer'), pls = $('plate-select');
+    if (ppr && pls && ppr.value !== pls.value) printSync();
     var menu = $('menu-supports');
     if (menu && !menu.open) { close(); return; }
     if (!S.busy) {
@@ -2938,8 +3465,10 @@ var NSO_SUPPORTS_CARD = (function () {
   function open() {
     if (S.open) return;
     S.open = true; S.hostId = null; S.selSupport = null; S.msg = null; S.det = null; S.dets = {}; S.occ = {};
-    var w = wanted();
-    if (w != null) pick(w); else refresh();
+    /* GENERATE FOR PLATE is the default (the owner's): with two or more pieces on the plate the card opens on all of them; a click on a piece
+       (or the box) still takes it to that one piece */
+    if (realIds().length >= 2) { refresh(); setWide(true); }
+    else { var w = wanted(); if (w != null) pick(w); else refresh(); }
     S.raf = requestAnimationFrame(tick);
   }
   function close() {
@@ -2978,10 +3507,10 @@ var NSO_SUPPORTS_CARD = (function () {
 
   /* ------------------------------------------------------ slice and preview */
 
-  /* SLICE AND PREVIEW, the card's last button: the Slice card's own slice of the plate (every piece, supports included, for the plate's
-     printer - app-print.js), then its own Preview in G-scope. Nothing here slices or opens anything itself, and the Slice card is as it
-     was; this is the shortest way from the supports just built to the layers they print as. The card says how far it has got on a
-     line under the button (the Slice card's stage line, word for word), and Cancel stops the slice. */
+  /* PREVIEW, under Generate. Generate slices the plate once (sliceStep) and that slice waits in the Slice card: Preview opens it in G-scope as it
+     is. Only when there is none for the plate as it stands now (nothing generated yet, a piece moved, a setting changed) does Preview slice
+     first - the Slice card's own slice of the plate, every piece, supports included. Cancel, beside Generate, stops a build, the slice it
+     ends with, or this one. The card says how far a slice has got on the line under the buttons (the Slice card's stage line, word for word). */
   var SL = { busy: false, last: null };
   function sliceLine(text, bad) {
     var el = $('sup-slice-line');
@@ -2992,14 +3521,23 @@ var NSO_SUPPORTS_CARD = (function () {
   }
   function syncSlice() {
     var go = $('btn-sup-slice'), cx = $('btn-sup-slice-cancel');
-    if (go) { go.disabled = SL.busy || !!S.busy; go.textContent = SL.busy ? 'Slicing\u2026' : 'Slice and Preview'; }
-    if (cx) cx.hidden = !SL.busy;
+    if (go) { go.disabled = SL.busy || !!S.busy; go.textContent = SL.busy ? 'Slicing\u2026' : 'Preview'; }
+    if (cx) cx.hidden = !(SL.busy || S.busy);
+    if (!SL.busy && !S.busy && S.sliceWhy) sliceLine('Not sliced: ' + S.sliceWhy, true);
   }
   function sliceAndPreview() {
     var P = window.NSO_Print && window.NSO_Print.card;
     if (SL.busy) return Promise.resolve({ ok: false, reason: 'busy' });
-    if (S.busy) { sliceLine('Wait for the build to end, then slice.', true); return Promise.resolve({ ok: false, reason: 'building' }); }
+    if (S.busy) { sliceLine('Wait for the build to end, then preview.', true); return Promise.resolve({ ok: false, reason: 'building' }); }
     if (!P || !P.sliceAndPreview) { sliceLine('The slicer did not load - check console.', true); return Promise.resolve({ ok: false, reason: 'no slicer' }); }
+    S.sliceWhy = null;
+    /* the slice Generate made, if it is still the plate's: straight to G-scope */
+    if (typeof P.fresh === 'function' && P.fresh() && typeof P.previewInGscope === 'function') {
+      var opened = P.previewInGscope();
+      if (opened) { sliceLine('', false); var m0 = $('menu-supports'); if (m0 && m0.open) m0.open = false; }
+      else sliceLine('G-scope did not open the slice - check console.', true);
+      return Promise.resolve({ ok: !!opened, reason: opened ? '' : 'G-scope did not open the slice', previewed: !!opened, sliced: false });
+    }
     SL.busy = true; sync(); sliceLine('Slicing the plate', false);
     return P.sliceAndPreview({ onStage: function (t) { if (SL.busy) sliceLine(t, false); } }).then(function (r) {
       SL.busy = false; SL.last = r;
@@ -3013,6 +3551,7 @@ var NSO_SUPPORTS_CARD = (function () {
     });
   }
   function cancelSlice() {
+    if (S.busy) { cancel(); return; }                          // the build, and the slice it ends with
     var P = window.NSO_Print && window.NSO_Print.card;
     if (SL.busy && P && P.cancel) P.cancel();
   }
@@ -3092,7 +3631,20 @@ var NSO_SUPPORTS_CARD = (function () {
     menu.dataset.nsoWired = '1';
     menu.addEventListener('toggle', function () { if (menu.open) open(); else close(); });
     var on = function (id, ev, fn) { var e = $(id); if (e) e.addEventListener(ev, fn); };
+    /* the one-trunk box is hidden (the tree is always one-trunk in Auto): a browser restoring the card's form state after the card's controls moved
+       restored it unchecked, and Tree built the lattice's straight posts - 'unreachable 6', no tree (the owner's plate). It is set, not restored. */
+    var oneBox = $('sup-one'); if (oneBox) oneBox.checked = true;
     on('btn-sup-all', 'click', function () { generate(); });
+    on('sup-style', 'change', function () { sync(); });
+    on('sup-on', 'change', function () { S.printSig = null; sync(); });      /* the Print card's Supports box */
+    on('print-printer', 'change', function () {
+      var mine = $('print-printer'), theirs = $('plate-select');
+      if (!mine || !theirs || theirs.value === mine.value) return;
+      theirs.value = mine.value;
+      try { theirs.dispatchEvent(new Event('change', { bubbles: true })); } catch (err) { /* the Plate panel's own handler takes it */ }
+      sync();
+    });
+    on('slice-set-brim', 'change', function () { S.printSig = null; });
     on('btn-sup-none', 'click', function () { removeAll(); });
     on('btn-sup-remove', 'click', function () { removeSelected(); });
     on('sup-plate', 'change', function () { setWide($('sup-plate').checked, { pick: true }); syncPlate(); });
@@ -3100,6 +3652,45 @@ var NSO_SUPPORTS_CARD = (function () {
     on('sup-angle', 'change', function () { setAngle($('sup-angle').value, true); });
     KNOBS.forEach(function (K) { on(K.id, 'input', function () { setKnob(K.key, $(K.id).value); }); });
     on('sup-tune-defaults', 'click', function () { tuneDefaults(); });
+    /* Advanced, and the saved settings */
+    Object.keys(ADV_IDS).forEach(function (k) { on(ADV_IDS[k][0], 'input', function () { advSync(); }); });
+    on('sup-adv-defaults', 'click', function () { advDefaults(); });
+    /* Max bridge length changes what hangs: the areas are read again, as on a new angle */
+    on(BRIDGE_ID, 'change', function () { if (S.busy) return; S.det = null; S.dets = {}; refresh(); });
+    PRESET_FIELDS.forEach(function (id) { on(id, 'input', presetTouched); on(id, 'change', presetTouched); });
+    on('sup-preset', 'change', function () { var v = $('sup-preset').value; if (v) presetPick(v); else presetList(''); });
+    on('sup-preset-save', 'click', function () {
+      var sel = $('sup-preset'), was = sel && sel.value ? sel.value : '';
+      var name = typeof window.prompt === 'function' ? window.prompt('Save these supports settings as:', was || 'My settings') : was;
+      if (name != null) presetSave(name);
+    });
+    on('sup-preset-delete', 'click', function () { var sel = $('sup-preset'); if (sel && sel.value) presetDelete(sel.value); });
+    on('sup-preset-export', 'click', function () { presetExport(); });
+    on('sup-preset-import', 'click', function () { var fi = $('sup-preset-file'); if (fi) fi.click(); });
+    on('sup-preset-file', 'change', function () {
+      var fi = $('sup-preset-file'), file = fi && fi.files && fi.files[0];
+      if (!file || typeof FileReader === 'undefined') return;
+      var rd = new FileReader(); rd.onload = function () { presetImport(String(rd.result || '')); fi.value = ''; }; rd.readAsText(file);
+    });
+    presetList('');
+    advSync();
+    /* the Slice rows are put back to the printer profile's values when the page opens, when the template arrives and when the printer changes
+       (app-print.js seedSettings): the saved setting the card shows lays its own back over them. The Slice section's Reset is the owner asking
+       for the profile's: the card then shows no saved setting. */
+    window.nsoSliceRowsSeeded = function (reset) {
+      var sel = $('sup-preset'), name = sel && sel.value;
+      if (!name) return;
+      if (reset) { presetTouched(); return; }
+      var all = presetsAll(), vals = all[name];
+      if (!vals) return;
+      var only = {};
+      /* ...the angle with them: the Print card's one angle is a slice row too (the profile's 30 was just laid over it) */
+      PRESET_FIELDS.forEach(function (id) { if ((/^slice-set-/.test(id) || id === 'sup-angle') && vals[id] !== undefined) only[id] = vals[id]; });
+      presetQuiet = true;
+      try { presetApply(only); } finally { presetQuiet = false; }
+    };
+    /* the settings last saved or picked come back with the page: what worked is what the card opens with */
+    (function () { var st = store(), last = null; try { last = st ? st.getItem(PRESET_LAST) : null; } catch (err) { last = null; } if (last && presetsAll()[last]) presetPick(last); })();
     Object.keys(MODES).forEach(function (k) { on('sup-mode-' + k, 'click', function () { setMode(k); }); });
     Object.keys(TOOLS).forEach(function (k) { on('sup-tool-' + k, 'click', function () { setTool(k); }); });
     window.addEventListener('pointerdown', onDown, true);
@@ -3271,6 +3862,10 @@ var NSO_SUPPORTS_CARD = (function () {
         eraseLayer: S.eraseLayer ? S.eraseLayer.children.length : 0, eraseReady: S.hostId != null && eraseReady()
       };
     },
+    /** The saved settings (docs/SUPPORTS-CARD.md "Saved settings"): now() the card's levers as { id: value }, apply(vals), save(name), pick(name),
+        remove(name), names(), exportText(), importText(text) -> how many read; advanced() the Advanced numbers that differ from their defaults. */
+    settings: { fields: PRESET_FIELDS.slice(), now: presetNow, apply: presetApply, save: presetSave, pick: presetPick, remove: presetDelete,
+                names: function () { return Object.keys(presetsRead()).sort(); }, builtIn: function () { return Object.keys(PRESET_BUILTIN).sort(); }, exportText: presetExport, importText: presetImport, advanced: advKnobsOf },
     /** Forget every host's tips, toggles, circles and erasures (what CLEAR PLATE does). */
     forgetAll: forgetAll,
     /** Forget only these pieces (ids): what CLEAR PLATE does when other plates stand beside the one cleared. */

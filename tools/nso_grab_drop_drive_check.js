@@ -40,6 +40,7 @@ const { writeSTL } = require('./nso_stl_io.js');
 const FX = require('./nso_lift_plate_fixtures.js');
 const L = require('./nso_lift_plate_drive_lib.js');
 const { rawTriNear, status, plateState, ctrlZ, waitRead, selectRow, frameOn } = L;
+L.setClearOfCard(true);    // Lift is in the Crop card, which stands over the left of the view
 const C = L.makeCheck(), check = C.check;
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-grab-drop-drive-'));

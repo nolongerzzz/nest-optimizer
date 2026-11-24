@@ -153,9 +153,14 @@ withApp(async (page, logs) => {
   const hullId = await loadSTL(page, HULL_STL);
   const SRC = await raw(page, hullId);
   check('the hinge hull came in through Import', SRC.length / 9 === 720, SRC.length / 9 + ' triangles');
-  const c1 = await armOn(page, hullId);
+  const cStart = await armOn(page, hullId);
+  const fStart = await faceNow(page);
+  check('opening Lift starts on the surface that has the feature - the +Y wall, "1 feature found" - not on a top that reads 0',
+    cStart === '1 feature found \u2014 a line with 1 captured part' && !!fStart && fStart.n.join() === '0,1,0', cStart + ' ' + JSON.stringify(fStart));
+  await page.evaluate(() => NSO_LIFT_PLATE.goSurface(null));          // this section is about the top: the card is put on it
+  const c1 = (await card(page)).count;
   const det1 = await detNow(page);
-  check('the top face (the default) reads 0 features', c1 === '0 features found' && det1.ok && (await faceNow(page)) === null, c1);
+  check('the top face reads 0 features', c1 === '0 features found' && det1.ok && (await faceNow(page)) === null, c1);
   check('...in the words it always had: 0 found, the one thing found is the hull\'s own edge', /^0 features found on feature-hull_hinge standing out more than 0\.42 mm\. 1 can't be lifted/.test(await readout(page)), await readout(page));
   const u1 = (await plateState(page)).undo;
 
@@ -170,7 +175,7 @@ withApp(async (page, logs) => {
   const f2 = await faceNow(page), c2 = await card(page), d2 = await detNow(page), r2 = await readout(page);
   check('the base face is now the +Y wall: normal (0, 1, 0), the 4544 mm² of it', !!f2 && f2.n.join() === '0,1,0' && f2.area === 4544, JSON.stringify(f2));
   check('the card follows: "1 feature found", and what comes with it (the leaf the knuckle holds)', c2.count === '1 feature found \u2014 a line with 1 captured part' && c2.panel, c2.count);
-  check('...the first read of that face, not the cache', d2.ok && d2.cached === false, d2.ms + ' ms');
+  check('...its read is the cache\'s: the scan read this face when Lift opened', d2.ok && d2.cached === true, d2.ms + ' ms');
   check('...the read-out says it in words: one line, the knuckle a line with its captured leaf, nothing refused',
     /^1 feature found on feature-hull_hinge standing out more than 0\.42 mm: line ×1 \+ 1 captured part\./.test(r2) && !/can't be lifted/.test(r2) && !/\n/.test(r2), r2);
   const k2 = await kids(page);
@@ -284,6 +289,7 @@ withApp(async (page, logs) => {
   /* ============================================================== 6. Strip */
   console.log('\n=== 6. Strip strips the face that is read ===');
   await armOn(page, hullId);
+  await page.evaluate(() => NSO_LIFT_PLATE.goSurface(null));
   await frameDir(page, hullId, WALL_VIEW);
   check('on the top face Strip has nothing: it is off', (await card(page)).stripDisabled && (await card(page)).count === '0 features found');
   await moveTo(page, wv.x, wv.y);

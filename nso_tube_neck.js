@@ -86,6 +86,12 @@
 //   - a Smooth neck too short for its Δr (its bends tighter than t/2), a
 //     Funnel too short (its taper past 75°).
 //
+// A SOLID ROD (opts.rod: Shape → Cylinders, NSO_rodNeckRaw): the axis is read
+// off its closed, round end instead (NSO_tnRodEnd), its one face is its
+// outside (Walls Outside only), the waist held to 2 nozzle widths across, and
+// a step at an end scales the end disc with its ring rather than relaying a
+// ring between two faces (NSO_tnScaleDisc). docs/TUBE-EDGE.md, "Cylinders".
+//
 // PAINT SCOPE: WHOLE-PIECE - the caller's (app-tube-edge.js), as Tube edge's.
 
 var NSO_TN_SAG_MM = 0.01;            // chord sag on every curved face of the neck
@@ -122,9 +128,13 @@ function NSO_tubeNeckRead(soup, opts) {
   if (!soup || soup.length < 9 || soup.length % 9) { res.reason = 'not a triangle soup'; return res; }
   res.soup = soup;
   var f32 = (soup instanceof Float32Array) ? soup : new Float32Array(soup);
-  var er = NSO_tubeEdgeRead(f32, {});
+  var rod = !!(opts && opts.rod);
+  res.rod = rod;
+  var er = rod ? NSO_tnRodEnd(f32) : NSO_tubeEdgeRead(f32, {});
   if (!er.ok) {
-    res.reason = 'Neck reads the tube\'s axis off an open, circular end, and ' + er.reason.replace(/\. Flare and Roll work on .*$/, '').replace(/^that end/, 'the end');
+    res.reason = rod ? er.reason
+      : 'Neck reads the tube\'s axis off an open, circular end, and ' + er.reason.replace(/\. Flare and Roll work on .*$/, '').replace(/^that end/, 'the end') +
+        (/is closed - a flat Ø/.test(er.reason) ? ' - a solid rod or cylinder is necked from Shape → Cylinders' : '');
     return res;
   }
   var end = er.end, W = er.weld, C = end.center, a = end.axis, P = W.P;
@@ -150,9 +160,47 @@ function NSO_tubeNeckRead(soup, opts) {
     TNR[t] = el > 1e-12 ? (Nx * ex + Ny * ey + Nz * ez) / el : 0;
   }
   res.weld = W; res.VH = VH; res.VR = VR; res.TH0 = TH0; res.TH1 = TH1; res.TNA = TNA; res.TNR = TNR;
-  res.tube = { center: C, axis: a, frame: NSO_teFrame(a), hMin: hMin, hMax: hMax, lengthMm: hMax - hMin, endRo: end.Ro, endRi: end.Ri };
+  res.tube = { center: C, axis: a, frame: NSO_teFrame(a), hMin: hMin, hMax: hMax, lengthMm: hMax - hMin, endRo: end.Ro, endRi: rod ? 0 : end.Ri, rod: rod };
   res.ok = true;
-  res.reason = 'tube ' + NSO_tnFmt(hMax - hMin) + ' mm long, Ø' + NSO_tnFmt(2 * end.Ro) + ' at its end';
+  res.reason = (rod ? 'rod ' : 'tube ') + NSO_tnFmt(hMax - hMin) + ' mm long, Ø' + NSO_tnFmt(2 * end.Ro) + ' at its end';
+  return res;
+}
+
+/* A SOLID ROD's axis (Cylinders → Neck): read off its closed, circular end -
+   a flat disc square to the axis, one round outline, nothing through it.
+   Tube edge's own face reader (NSO_teFaces / NSO_teClassFace, its 'closed'
+   kind) does the work; the end standing highest (its centre's raw Z) is
+   taken, the bigger face on a tie - Tube edge's pick for an open end.
+   Returns { ok, reason, weld, end: { center, axis (outward), Ro } }. */
+function NSO_tnRodEnd(f32) {
+  var res = { ok: false, reason: '' };
+  if (typeof NSO_sectionClassLoop !== 'function') {
+    res.reason = 'nso_section.js must be loaded - the rod\'s end is read with its circle fit and carries no copy of it';
+    return res;
+  }
+  var W = NSO_teWeld(f32);
+  res.weld = W;
+  if (!(NSO_teVolume(f32, [0, 0, 0]) > 0)) { res.reason = 'the piece is wound inside out (its volume reads negative) - Repair it first'; return res; }
+  var FF = NSO_teFaces(W), closed = [], open = 0, flat = 0;
+  FF.faces.forEach(function (F) {
+    var c = NSO_teClassFace(W, F, FF.region);
+    if (c.kind === 'closed' && c.center) closed.push(c);
+    else if (c.kind === 'open') open++;
+    else if (c.kind === 'flat') flat++;
+  });
+  if (!closed.length) {
+    res.reason = 'Cylinders → Neck reads the rod\'s axis off a flat, circular end, and this piece has none' +
+      (open ? ' - its round end is open (a ring round a bore): a tube is necked from Tube edge → Neck'
+            : flat ? ' - its flat end' + (flat > 1 ? 's are' : ' is') + ' not round' : ' - no flat end face at all');
+    return res;
+  }
+  var best = null;
+  closed.forEach(function (c) {
+    if (!best || c.center[2] > best.center[2] + 1e-9 || (Math.abs(c.center[2] - best.center[2]) <= 1e-9 && c.face.tris.length > best.face.tris.length)) best = c;
+  });
+  res.ok = true;
+  res.end = { center: best.center, axis: best.face.n, Ro: best.Ro, Ri: 0, face: best.face.tris, frame: best.frame };
+  res.reason = 'closed end Ø' + NSO_tnFmt(2 * best.Ro);
   return res;
 }
 
@@ -204,27 +252,35 @@ function NSO_tnBand(rd, ha, hb) {
     out.reason = 'the wall is not straight from ' + NSO_tnIn(q2) + ' to ' + NSO_tnIn(p) + ' mm in from the end, where this neck would go (' +
       NSO_tnIn(hb) + ' to ' + NSO_tnIn(ha) + ' mm)' + (vary.length ? ': ' + vary.join('; ') : '') +
       ' - a neck already there, or the piece\'s own shape. Necks may not overlap, and a neck ' +
-      'is made on a straight stretch of tube: move it ' + NSO_tnFmt(move) + ' mm or more along the tube, or shorten it';
+      'is made on a straight stretch of ' + (rd.rod ? 'rod' : 'tube') + ': move it ' + NSO_tnFmt(move) + ' mm or more along the ' + (rd.rod ? 'rod' : 'tube') + ', or shorten it';
     return out;
   }
-  if (!outer.length || !inner.length) {
-    out.reason = 'there is no ' + (outer.length ? 'bore' : 'outside wall') + ' across the band - Neck works on a tube, a wall round a bore';
+  if (rd.rod) {
+    if (inner.length) {
+      out.reason = 'there is a bore inside the rod across the band - it is a tube there, and a tube is necked from Tube edge → Neck';
+      return out;
+    }
+    if (!outer.length) { out.reason = 'there is no outside wall across the band'; return out; }
+  } else if (!outer.length || !inner.length) {
+    out.reason = 'there is no ' + (outer.length ? 'bore' : 'outside wall') + ' across the band - Neck works on a tube, a wall round a bore' +
+      (outer.length ? ' (a solid rod is necked from Shape → Cylinders)' : '');
     return out;
   }
   // one cylinder each: every vertex within the tolerance of the face's mean radius
-  var SO = NSO_tnRadii(rd, outer), SI = NSO_tnRadii(rd, inner), off = [];
+  var SO = NSO_tnRadii(rd, outer), SI = rd.rod ? null : NSO_tnRadii(rd, inner), off = [];
   out.radii = { outer: SO, inner: SI };
-  [['outside', SO], ['bore', SI]].forEach(function (f) {
+  [['outside', SO], ['bore', SI]].filter(function (f) { return !!f[1]; }).forEach(function (f) {
     var S = f[1], tol = NSO_tnRadiusTol(S.mean);
     S.tolMm = tol;
     if (S.dev > tol) off.push((NSO_tnSpread(f[0], S) || 'its ' + f[0] + ' varies') + ' (' + NSO_tnFmt(S.dev, 3) + ' mm off its mean radius; one tube holds every vertex within ' +
       NSO_tnFmt(tol, 3) + ' mm of it)');
   });
   if (off.length) {
-    out.reason = 'the wall is not one tube across the band - ' + off.join('; ') + '. Neck works on a straight stretch of one tube';
+    var noun = rd.rod ? 'rod' : 'tube';
+    out.reason = 'the ' + (rd.rod ? 'outside' : 'wall') + ' is not one ' + noun + ' across the band - ' + off.join('; ') + '. Neck works on a straight stretch of one ' + noun;
     return out;
   }
-  var Ro = SO.mean, Ri = SI.mean;
+  var Ro = SO.mean, Ri = rd.rod ? 0 : SI.mean;
   if (!(Ro > Ri)) { out.reason = 'internal: the bore reads wider than the outside'; return out; }
   out.ok = true; out.outerTris = outer; out.innerTris = inner; out.Ro = Ro; out.Ri = Ri; out.wallMm = Ro - Ri;
   return out;
@@ -531,13 +587,15 @@ function NSO_tubeNeckRaw(soup, opts) {
   opts = opts || {};
   var res = { ok: false, reason: '', tris: soup, verb: 'neck' };
   var f32in = (soup instanceof Float32Array) ? soup : new Float32Array(soup);
-  var rd = opts.read && opts.read.ok && opts.read.soup === soup ? opts.read : NSO_tubeNeckRead(f32in, opts);
-  res.read = rd;
+  var rod = !!opts.rod;
+  var rd = opts.read && opts.read.ok && opts.read.soup === soup && !!opts.read.rod === rod ? opts.read : NSO_tubeNeckRead(f32in, opts);
+  res.read = rd; res.rod = rod;
   if (!rd.ok) { res.reason = rd.reason; return res; }
   var tube = rd.tube, W = rd.weld, C = tube.center, a = tube.axis, nozzle = NSO_teNozzle(opts);
   res.nozzleMm = nozzle; res.tube = tube;
 
-  var L = +opts.length, dr = +opts.dr, prof = opts.profile === 'funnel' ? 'funnel' : 'smooth', walls = NSO_teWalls(opts);
+  // A ROD has one face, its outside: Walls is Outside only, whatever was asked
+  var L = +opts.length, dr = +opts.dr, prof = opts.profile === 'funnel' ? 'funnel' : 'smooth', walls = rod ? 'outside' : NSO_teWalls(opts);
   if (!walls) { res.reason = 'Walls is Both, Outside only or Bore only'; return res; }
   res.walls = walls;
   if (opts.length == null || opts.length === '' || !(L > 0) || !isFinite(L)) { res.reason = 'enter the neck\'s length in mm, more than 0'; return res; }
@@ -555,7 +613,7 @@ function NSO_tubeNeckRaw(soup, opts) {
   // moved face is stepped out to the end ring (a counterbore, a spigot)
   if (walls !== 'both' && h0 >= tube.hMin - 1e-4 && h0 <= tube.hMax + 1e-4 && (hb >= tube.hMax - 1e-6 || ha <= tube.hMin + 1e-6)) {
     if (!(L < tube.lengthMm - 1e-6)) {
-      res.reason = 'a ' + NSO_tnFmt(L, 1) + ' mm step from the end is as long as the tube or longer (it is ' + NSO_tnFmt(tube.lengthMm) + ' mm long) - shorten it';
+      res.reason = 'a ' + NSO_tnFmt(L, 1) + ' mm step from the end is as long as the ' + (rod ? 'rod' : 'tube') + ' or longer (it is ' + NSO_tnFmt(tube.lengthMm) + ' mm long) - shorten it';
       return res;
     }
     atEnd = hb >= tube.hMax - 1e-6 ? 'top' : 'bottom';
@@ -565,12 +623,12 @@ function NSO_tubeNeckRaw(soup, opts) {
   res.band = { h0: h0, ha: ha, hb: hb, lengthMm: L, atMm: -h0, atEnd: atEnd };
 
   if (ha < tube.hMin - 1e-6 || hb > tube.hMax + 1e-6) {
-    res.reason = 'a ' + NSO_tnFmt(L, 1) + ' mm neck centred ' + NSO_tnIn(h0) + ' mm in would run past the end of the tube (it is ' +
+    res.reason = 'a ' + NSO_tnFmt(L, 1) + ' mm neck centred ' + NSO_tnIn(h0) + ' mm in would run past the end of the ' + (rod ? 'rod' : 'tube') + ' (it is ' +
       NSO_tnFmt(tube.lengthMm) + ' mm long) - centre it at least ' + NSO_tnFmt(L / 2) + ' mm in from either end, or shorten it';
     return res;
   }
   if (atEnd) {
-    var E0 = NSO_tnEndFace(rd, atEnd === 'top' ? tube.hMax : tube.hMin, null);
+    var E0 = rod ? NSO_tnRodEndFace(rd, atEnd === 'top' ? tube.hMax : tube.hMin, null) : NSO_tnEndFace(rd, atEnd === 'top' ? tube.hMax : tube.hMin, null);
     if (!E0.ok) {
       res.reason = E0.reason + '. To move the wall short of that end, centre the neck more than ' + NSO_tnFmt(L / 2) + ' mm in from it';
       return res;
@@ -593,9 +651,24 @@ function NSO_tubeNeckRaw(soup, opts) {
     return res;
   }
 
-  // one face: the wall it leaves, against the floor (nso_thickness.js)
+  // a rod: the waist (or a spigot) may narrow it to no less than 2 nozzle
+  // widths across - the bore's limit, for the rod itself
+  if (rod && dr < 0 && 2 * (Ro + dr) < boreMin - 1e-5) {
+    var mostR = Ro - boreMin / 2;
+    res.reason = 'a pinch of ' + NSO_tnFmt(-dr) + ' mm would take the Ø' + NSO_tnFmt(2 * Ro) + ' rod to ' +
+      (Ro + dr > 0 ? 'Ø' + NSO_tnFmt(2 * (Ro + dr)) : 'nothing') + (atEnd ? ' at the end' : ' at the waist') + ', under the limit of Ø' + NSO_tnFmt(boreMin) + ' (' +
+      NSO_TN_BORE_NOZZLES + ' nozzle widths at a ' + NSO_tnFmt(nozzle, 1) + ' mm nozzle). This rod pinches by ' + NSO_tnFmt(Math.max(0, mostR)) + ' mm at most';
+    res.maxPinchMm = Math.max(0, mostR);
+    return res;
+  }
+
+  // one face: the wall it leaves, against the floor (nso_thickness.js). A
+  // rod has no wall to thin: its one face moves against the axis, above
   var one = null;
-  if (walls !== 'both') {
+  if (rod) {
+    one = { ok: true, wallMm: Ro + dr, floorMm: boreMin / 2 };
+    res.oneFace = one;
+  } else if (walls !== 'both') {
     one = NSO_teOneFaceWall(walls, t, dr, nozzle, atEnd ? ' at the end' : ' at the waist');
     res.oneFace = one;
     if (!one.ok) { res.reason = one.reason; return res; }
@@ -604,7 +677,7 @@ function NSO_tubeNeckRaw(soup, opts) {
   var pr = one ? NSO_tnProfileOne(band, ha, hb, dr, L, prof, walls, atEnd) : NSO_tnProfile(band, ha, hb, dr, L, prof);
   res.profile = pr;
   if (!pr.ok) { res.reason = pr.reason; return res; }
-  var wall = NSO_tnWallCheck(pr.O, pr.I, t);
+  var wall = rod ? NSO_tnRodRadii(pr.O) : NSO_tnWallCheck(pr.O, pr.I, t);
   var wLo = one ? Math.min(t, one.wallMm) : t, wHi = one ? Math.max(t, one.wallMm) : t;
   res.wall = { minMm: wall.lo, maxMm: wall.hi, stations: wall.n, wantMm: one ? one.wallMm : t };
   if (one) { res.wall.ringMm = t; res.wall.floorMm = one.floorMm; }
@@ -621,14 +694,27 @@ function NSO_tubeNeckRaw(soup, opts) {
   var faces = [];
   if (RO) faces.push({ tris: band.outerTris, rings: RO, R: Ro, M: pr.O });
   if (RI) faces.push({ tris: band.innerTris, rings: RI, R: Ri, M: pr.I });
+  var srcSoup = f32in;
   if (atEnd) {
-    var hE = atEnd === 'top' ? tube.hMax : tube.hMin, F1 = faces[0];
-    var EF = NSO_tnEndFace(rd, hE, atEnd === 'top' ? F1.rings.upper : F1.rings.lower);
-    if (!EF.ok) { res.reason = EF.reason; return res; }
-    F1.end = { at: atEnd, dr: dr, tris: EF.tris, keep: EF.keep, normal: atEnd === 'top' ? 1 : -1 };
+    var hE = atEnd === 'top' ? tube.hMax : tube.hMin, F1 = faces[0], endRing = atEnd === 'top' ? F1.rings.upper : F1.rings.lower;
+    if (rod) {
+      // A ROD'S END is a disc, not a ring between two faces: it stays, every
+      // vertex of it carried out along its own radial line in proportion to
+      // its radius (the end ring by dr exactly, the centre not at all), so
+      // the disc is the old one scaled about the axis and welds to the moved
+      // ring bit for bit (the same NSO_tnMoveRing arithmetic on both sides)
+      var ED = NSO_tnRodEndFace(rd, hE, endRing);
+      if (!ED.ok) { res.reason = ED.reason; return res; }
+      srcSoup = NSO_tnScaleDisc(f32in, rd, ED.tris, endRing.v, Ro, dr);
+      F1.end = { at: atEnd, dr: dr, tris: [], keep: null, normal: atEnd === 'top' ? 1 : -1 };
+    } else {
+      var EF = NSO_tnEndFace(rd, hE, endRing);
+      if (!EF.ok) { res.reason = EF.reason; return res; }
+      F1.end = { at: atEnd, dr: dr, tris: EF.tris, keep: EF.keep, normal: atEnd === 'top' ? 1 : -1 };
+    }
   }
 
-  var built = NSO_tnBuild(f32in, rd, faces, ha, hb);
+  var built = NSO_tnBuild(srcSoup, rd, faces, ha, hb);
   if (!built.ok) { res.reason = built.reason; return res; }
   var out = built.tris;
   res.counts = { trisIn: W.n, trisOut: out.length / 9, removed: built.removed, added: built.added };
@@ -668,13 +754,23 @@ function NSO_tubeNeckRaw(soup, opts) {
 
   res.ok = true;
   res.tris = out;
-  res.wallMm = t;
+  res.wallMm = rod ? null : t;
   res.dr = dr; res.lengthMm = L; res.profileName = prof;
   res.waistBoreDiaMm = 2 * pr.waistBoreR;
   res.waistOuterDiaMm = 2 * pr.waistOuterR;
   res.meridian = { outer: pr.O, inner: pr.I };
   res.reason = NSO_tubeNeckDescribe(res);
   return res;
+}
+
+/* CYLINDERS → NECK: the same neck on a solid rod - its outside moves by dr
+   over the band (Outside only, with nothing inside to keep), the axis read
+   off its closed, round end. NSO_tubeNeckRaw with opts.rod. */
+function NSO_rodNeckRaw(soup, opts) {
+  var o = {};
+  for (var k in (opts || {})) o[k] = opts[k];
+  o.rod = true;
+  return NSO_tubeNeckRaw(soup, o);
 }
 
 /* The new faces: on each, the band's triangles out; the lower ring's
@@ -734,7 +830,7 @@ function NSO_tnBuild(soup, rd, faces, ha, hb) {
     F.tris.forEach(function (t) { if (!skip[t]) { skip[t] = 1; removed++; } });
     planned += 2 * n * (rings.length - 1) + n + up.length;
     var endPlan = null;
-    if (E) {
+    if (E && E.keep) {
       // the end face comes out and is laid again, between the moved ring
       // and the end's other ring (its vertices bit for bit)
       E.tris.forEach(function (t) { if (!skip[t]) { skip[t] = 1; removed++; } });
@@ -832,9 +928,82 @@ function NSO_tnMoveRing(rd, ids, d) {
   return Q;
 }
 
+/* A rod's end, for a step there: its flat disc (every triangle at that
+   height, square to the axis) bounded by ONE loop - the outside face's end
+   ring itself when `ring` is given (null: only that the end is such a disc).
+   Returns { ok, reason, tris }. */
+function NSO_tnRodEndFace(rd, hE, ring) {
+  var W = rd.weld, res = { ok: false, reason: '' }, tris = [];
+  for (var t = 0; t < W.n; t++) {
+    if (W.degen[t]) continue;
+    if (rd.TH0[t] >= hE - NSO_TN_RING_TOL_MM && rd.TH1[t] <= hE + NSO_TN_RING_TOL_MM && Math.abs(rd.TNA[t]) > 0.999) tris.push(t);
+  }
+  var words = ' - a step at the end of a rod is cut into its flat, round end';
+  if (!tris.length) { res.reason = 'there is no flat face at that end' + words; return res; }
+  var inSet = new Set(tris), bnd = new Set(), bad = 0, edges = 0;
+  tris.forEach(function (q) {
+    for (var k = 0; k < 3; k++) {
+      var u = NSO_teAcross(W, q * 3 + k);
+      if (u >= 0 && inSet.has(u)) continue;
+      if (u < 0) { bad++; continue; }
+      bnd.add(W.vid[q * 3 + k]); edges++;
+    }
+  });
+  if (bad) { res.reason = 'the end there has open or shared edges - Repair it first'; return res; }
+  if (ring) {
+    var mine = new Set(ring.v);
+    if (edges !== mine.size || bnd.size !== mine.size || !ring.v.every(function (v) { return bnd.has(v); })) {
+      res.reason = 'the end there is not one disc bounded by the rod\'s outside (a bore, a boss or a second outline meets it)' + words;
+      return res;
+    }
+  }
+  res.ok = true; res.tris = tris;
+  return res;
+}
+
+/* The soup with a rod's end disc scaled about the axis: each vertex of the
+   disc's triangles moved along its own radial line by dr x (its radius /
+   R) - the end ring's vertices by dr exactly, through NSO_tnMoveRing, so
+   they land on the very floats the moved ring is built from. */
+function NSO_tnScaleDisc(f32, rd, tris, ringIds, R, dr) {
+  var W = rd.weld, out = new Float32Array(f32), onRing = new Set(ringIds), moved = new Map();
+  tris.forEach(function (t) {
+    for (var k = 0; k < 3; k++) {
+      var v = W.vid[t * 3 + k], q = moved.get(v);
+      if (!q) {
+        var r = rd.VR[v];
+        q = onRing.has(v) ? NSO_tnMoveRing(rd, [v], dr)
+          : r > 1e-9 ? NSO_tnMoveRing(rd, [v], dr * r / R)
+          : new Float32Array([W.P[v * 3], W.P[v * 3 + 1], W.P[v * 3 + 2]]);
+        moved.set(v, q);
+      }
+      out[t * 9 + k * 3] = q[0]; out[t * 9 + k * 3 + 1] = q[1]; out[t * 9 + k * 3 + 2] = q[2];
+    }
+  });
+  return out;
+}
+
+/* A rod's outside, against its axis: the least and most radius on the moved
+   face's meridian - what Neck's wall check reads for a tube. */
+function NSO_tnRodRadii(O) {
+  var lo = Infinity, hi = -Infinity;
+  O.forEach(function (q) { if (q[0] < lo) lo = q[0]; if (q[0] > hi) hi = q[0]; });
+  return { lo: lo, hi: hi, n: O.length };
+}
+
 /* One line: what was done, the numbers that matter. */
 function NSO_tubeNeckDescribe(r) {
   var b = r.band, pinch = r.dr < 0;
+  if (r.rod) {
+    // "Rod pinch −4.00 mm: Ø30.84 → Ø22.84 at the waist, smooth over 23.0 mm, centred 19.00 mm in"
+    // "Rod spigot: Ø30.84 → Ø26.84, stepped 10.0 mm in from the end, square shoulder"
+    if (b.atEnd) {
+      return 'Rod ' + (pinch ? 'spigot' : 'collar') + ': Ø' + NSO_tnFmt(2 * b.Ro) + ' → Ø' + NSO_tnFmt(2 * (b.Ro + r.dr)) + ', stepped ' +
+        NSO_tnFmt(r.lengthMm, 1) + ' mm in from the ' + (b.atEnd === 'top' ? 'end' : 'far end') + ', square shoulder';
+    }
+    return 'Rod ' + (pinch ? 'pinch ' : 'bulge ') + NSO_tnSigned(r.dr) + ' mm: Ø' + NSO_tnFmt(2 * b.Ro) + ' → Ø' + NSO_tnFmt(r.waistOuterDiaMm) +
+      ' at the waist, ' + r.profileName + ' over ' + NSO_tnFmt(r.lengthMm, 1) + ' mm, centred ' + NSO_tnIn(b.h0) + ' mm in';
+  }
   if (r.walls && r.walls !== 'both') {
     // "Bore only: Ø30.47 → Ø33.47, outside kept Ø40.62, wall 5.08 → 3.58 · ..."
     var bo = r.walls === 'bore', R0 = bo ? b.Ri : b.Ro, Rk = bo ? b.Ro : b.Ri;
@@ -852,5 +1021,5 @@ function NSO_tubeNeckDescribe(r) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { NSO_tubeNeckRead: NSO_tubeNeckRead, NSO_tubeNeckRaw: NSO_tubeNeckRaw, NSO_tubeNeckDescribe: NSO_tubeNeckDescribe };
+  module.exports = { NSO_tubeNeckRead: NSO_tubeNeckRead, NSO_tubeNeckRaw: NSO_tubeNeckRaw, NSO_tubeNeckDescribe: NSO_tubeNeckDescribe, NSO_rodNeckRaw: NSO_rodNeckRaw };
 }

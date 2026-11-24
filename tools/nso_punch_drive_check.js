@@ -21,6 +21,8 @@
         PUNCH off, and PUNCH forced anyway cuts nothing
     9b. a TAPPED hole: M5 from the Thread select; the Ø field shows 5.4 read-only; PUNCH
         cuts the thread (crests and roots measured in the piece), one Undo restores it
+    9c. a filter sheet: Grid, Ø1.2 at pitch 2, Stagger, Fill face (Trim at edge) - ~800
+        holes in one merged ghost, one PUNCH, every sampled hole open, one Undo
     10. Escape disarms; Carve armed over Punch puts Punch away; no page errors */
 
 const fs = require('fs');
@@ -128,7 +130,7 @@ withApp(async (page, logs) => {
   const mid = [(top.lo[0] + top.hi[0]) / 2, (top.lo[1] + top.hi[1]) / 2, top.hi[2]];
 
   console.log('\n=== 1. arm, click a face -> one ghost ===');
-  await page.click('#btn-punch');
+  await page.click('#menu-punch > summary');          // the Punch card is the switch
   await page.waitForFunction(() => nsoPunchState().open, null, { timeout: 5000 });
   await lookDown(page);
   await click(page, await screenOf(page, mid));
@@ -297,15 +299,52 @@ withApp(async (page, logs) => {
     check('None puts the plain Ø field back, typable', !back.dis && back.left, JSON.stringify(back));
   }
 
+  console.log('\n=== 9c. a filter sheet: Grid, Stagger, Fill face (Trim at edge), one PUNCH ===');
+  {
+    await click(page, await screenOf(page, mid));
+    await page.click('#punch-pattern-row [data-pattern="grid"]');
+    await setField(page, '#inp-punch-dia', 1.2);
+    await setField(page, '#inp-punch-pitch', 2);
+    await page.check('#chk-punch-stagger');
+    await page.click('#btn-punch-fill');
+    await frames(page, 2);
+    st = await S(page);
+    const f = await page.evaluate(() => ({ rows: +document.getElementById('inp-punch-rows').value, cols: +document.getElementById('inp-punch-cols').value,
+      trim: document.getElementById('chk-punch-trim').checked, kids: state.punch.ghost ? state.punch.ghost.children.length : 0,
+      anchor: document.querySelector('#punch-anchor-row [aria-pressed="true"]').getAttribute('data-anchor') }));
+    // ±30 mm from the middle: cols 2 * ceil((30 + 1) / 2) + 1 = 33, rows 2 * ceil(30 / 1.732) + 1 = 37
+    check('Fill face sets 37 rows x 33 cols about the click, Centre, Trim at edge on', f.rows === 37 && f.cols === 33 && f.trim && f.anchor === 'centre', JSON.stringify(f));
+    check('the plan is ok: the overhang and the edge band are left out, the rest kept', st.ok && st.holes.length > 700 && st.holes.length + st.dropped === 37 * 33 &&
+      /264 of 1221 are off the face or within 0.8 mm of its edge and left out; punching 957 holes/.test(st.readout), st.holes.length + ' kept · ' + st.readout);
+    check('the ghost is a handful of draw calls, not one per hole', f.kids < 10 && st.ghosts === st.holes.length, f.kids + ' objects for ' + st.ghosts + ' holes');
+    const xs = st.holes.slice().sort((a, b) => a.n - b.n), byRow = {};
+    xs.forEach(H => { const r = Math.floor((H.n - 1) / 33); (byRow[r] = byRow[r] || []).push(H.centre[0]); });
+    const r0 = Math.min(...byRow[18]), r1 = Math.min(...byRow[19]);
+    check('staggered: the next row starts half a pitch along (1.0 mm), rows 1.732 apart', Math.abs(Math.abs(r1 - r0) - 1) < 1e-3, (r1 - r0).toFixed(4));
+    const sample = st.holes.filter((_, k) => k % 50 === 0);
+    const d0 = await undoDepth(page), fp0 = await fingerprint(page);
+    await page.click('#btn-punch-go');
+    await page.waitForFunction(d => state.undoStack.length > d && !nsoPunchState().busy, d0, { timeout: 120000 }).catch(() => {});
+    check('PUNCH cut the sheet in one Undo step', (await undoDepth(page)) === d0 + 1, await page.evaluate(() => document.getElementById('status').textContent));
+    const thru = await raysThrough(page, sample);
+    check('a ray down each sampled hole meets nothing: ' + sample.length + ' holes open', thru.every(n => n === 0), thru.join(','));
+    await page.click('#btn-undo');
+    await frames(page, 3);
+    check('one Undo puts the slab back', (await undoDepth(page)) === d0 && (await fingerprint(page)) === fp0);
+    await page.uncheck('#chk-punch-stagger'); await page.uncheck('#chk-punch-trim');
+    await setField(page, '#inp-punch-dia', 3); await setField(page, '#inp-punch-pitch', 8);
+    await page.click('#punch-pattern-row [data-pattern="none"]');
+  }
+
   console.log('\n=== 10. Escape disarms ===');
   await page.evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
   await page.keyboard.press('Escape');
   await frames(page, 2);
   st = await S(page);
-  const pressed = await page.evaluate(() => document.getElementById('btn-punch').getAttribute('aria-pressed'));
-  check('Escape puts Punch away: no card, no ghost', !st.open && st.ghosts === 0 && pressed === 'false' &&
+  const pressed = await page.evaluate(() => document.getElementById('menu-punch').open);
+  check('Escape puts Punch away: no card, no ghost', !st.open && st.ghosts === 0 && pressed === false &&
     await page.evaluate(() => document.getElementById('punch-card').hidden));
-  await page.click('#btn-punch');
+  await page.click('#menu-punch > summary');
   await page.waitForFunction(() => nsoPunchState().open, null, { timeout: 5000 });
   await page.click('#btn-carve');
   await frames(page, 3);

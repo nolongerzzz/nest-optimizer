@@ -29,7 +29,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, toggleCrop, ROOT } = require('./nso_app_harness');
 const L = require('./nso_big_mesh_lib');
 
 const argv = process.argv.slice(2);
@@ -196,7 +196,7 @@ function pageKit() {
     const sid = await page.evaluate(() => state.models[state.models.length - 1].id);
     check('the piece is on the plate with all of its triangles', (await page.evaluate(i => state.models.find(m => m.id === i).rawTris.length / 9, sid)) === TRIS);
     await page.evaluate(i => { selectPlaced(state.placed.findIndex(q => q.sourceId === i)); }, sid);
-    await page.click('#menu-crop > summary');
+    await toggleCrop(page);
     await page.waitForTimeout(300);
 
     const settled = ms => page.waitForFunction(() => {

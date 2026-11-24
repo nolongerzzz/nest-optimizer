@@ -18,7 +18,10 @@
                                 landed on, grown across creases shallower than
                                 THICKEN_SMOOTH_DEG (the engine's own idea of
                                 "one surface"): a box's face, a cylinder's whole
-                                side. Click it again, or Whole piece, for the
+                                side. On a sheet whose edges are rounded (no
+                                crease anywhere between its two faces) just the
+                                face clicked - its rims are held (growWall).
+                                Click it again, or Whole piece, for the
                                 whole piece. None picked is the whole piece.
      Set                        thickenSelectedModel(mode, mm, { mayMove }) -
                                 the SAME function the buttons used to call, with
@@ -61,6 +64,7 @@
   var CLICK_PX = 5, CLICK_MS = 600;
   var SLIDER_MAX_WHOLE = 8;       // mm: the whole piece (the slider's own max in index.html)
   var SLIDER_MAX_WALL_CAP = 200;  // mm: a picked wall may run to the piece's size, never past this
+  var SHEET_PAIRED_FRAC = 0.6;    // a smooth surface this much paired across a wall (by area) is a sheet's two sides
 
   var on = false, mode = 'out';
   var m = null, soupRef = null, geoRef = null, usingRaw = false, mesh = null;
@@ -177,33 +181,277 @@
       if (!fn.ok[f]) continue;
       for (var k = 0; k < 3; k++) { var v = ix.tri[f * 3 + k]; (vertFaces[v] || (vertFaces[v] = [])).push(f); }
     }
-    topo = { soupRef: soupRef, nf: nf, tri: ix.tri, fn: fn, outer: outer, vertFaces: vertFaces };
+    /* edge neighbours (a face's up-to-three faces across its edges), for the
+       curvature walk: a corner can be shared by hundreds of cap triangles */
+    var edgeOf = new Map(), adj = new Int32Array(nf * 3).fill(-1);
+    for (var e = 0; e < nf; e++) {
+      if (!fn.ok[e]) continue;
+      for (var j = 0; j < 3; j++) {
+        var a = ix.tri[e * 3 + j], b = ix.tri[e * 3 + (j + 1) % 3], key = a < b ? a * nv + b : b * nv + a;
+        var other = edgeOf.get(key);
+        if (other === undefined) edgeOf.set(key, e * 3 + j);
+        else if (other >= 0) { adj[e * 3 + j] = (other / 3) | 0; adj[other] = e; edgeOf.set(key, -1); }
+      }
+    }
+    topo = { soupRef: soupRef, nf: nf, pos: ix.pos, tri: ix.tri, fn: fn, outer: outer, vertFaces: vertFaces,
+             adj: adj, partner: new Int32Array(nf).fill(-2) };
     return topo;
   }
 
   /* The clicked triangle grown across creases shallower than the engine's own
      THICKEN_SMOOTH_DEG, through shared corners as _thickenClassifyOuter walks
      them. A box face is its coplanar patch (the next face is 90 degrees away);
-     a cylinder's side is the whole side. */
+     a cylinder's side is the whole side.
+
+     THE BACK OF A SHEET (a wall with rounded edges, a plate filleted all
+     round): the crease rule alone finds no edge between its two faces - the
+     surface turns 180 degrees round the rim a degree or two at a time - so a
+     click on the front took the back as well, and "one wall" was the whole
+     piece. So the smooth surface is split into the two sides of the wall:
+     every face is paired with the face straight across the material from it
+     (partnerOf), and the click's side is grown nearest-first over the surface
+     while each face it takes hands its partner to the other side. The rim
+     between them belongs to neither and is held (see the patches below). A
+     surface that is not mostly pairs - a cylinder, a sphere, a box face, a
+     chunky smooth part - is all one wall, as before. */
   function growWall(seed) {
-    var T = topology();
+    var T = topology(), n = T.fn.n;
     var cosSmooth = Math.cos((typeof THICKEN_SMOOTH_DEG === 'number' ? THICKEN_SMOOTH_DEG : 45) * Math.PI / 180);
-    var may = new Uint8Array(T.nf), stack = [seed], count = 0;
-    may[seed] = 1;
-    while (stack.length) {
-      var f = stack.pop(); count++;
-      var nx = T.fn.n[f * 3], ny = T.fn.n[f * 3 + 1], nz = T.fn.n[f * 3 + 2];
+    function smooth(f, g) { return n[f * 3] * n[g * 3] + n[f * 3 + 1] * n[g * 3 + 1] + n[f * 3 + 2] * n[g * 3 + 2] > cosSmooth; }
+    function eachNeighbour(f, fnc) {
       for (var k = 0; k < 3; k++) {
         var list = T.vertFaces[T.tri[f * 3 + k]];
-        for (var i = 0; i < list.length; i++) {
-          var g = list[i];
-          if (may[g]) continue;
-          if (nx * T.fn.n[g * 3] + ny * T.fn.n[g * 3 + 1] + nz * T.fn.n[g * 3 + 2] > cosSmooth) { may[g] = 1; stack.push(g); }
-        }
+        for (var i = 0; i < list.length; i++) if (list[i] !== f && smooth(f, list[i])) fnc(list[i]);
       }
     }
-    return { mayMove: may, count: count, seed: seed };
+    /* the smooth surface the click is on */
+    var R = new Uint8Array(T.nf), stack = [seed], members = [];
+    R[seed] = 1;
+    while (stack.length) {
+      var f = stack.pop(); members.push(f);
+      eachNeighbour(f, function (g) { if (!R[g]) { R[g] = 1; stack.push(g); } });
+    }
+    /* partners both ways: f's ray may land on h while h's lands beside f */
+    var across = new Array(T.nf);
+    for (var w = 0; w < members.length; w++) {
+      var mf0 = members[w], pf = partnerOf(T, mf0);
+      if (pf < 0 || !R[pf]) continue;
+      (across[mf0] || (across[mf0] = [])).push(pf);
+      (across[pf] || (across[pf] = [])).push(mf0);
+    }
+    function pairOf(f) { return across[f] ? across[f][0] : -1; }
+
+    /* a click on the rim itself is on neither side: start from the nearest
+       face that has one */
+    var start = seed;
+    if (pairOf(seed) < 0) {
+      var near = nearest(T, seed, R, eachNeighbour, function (g) { return pairOf(g) >= 0; });
+      if (near >= 0) start = near;
+    }
+    /* Only a surface that IS two sides of a wall is split: most of it (by
+       area) has a face across from it. A chunky smooth part has a few chance
+       pairs (a ray that happens to cross a narrow neck) - splitting it on
+       those would break one surface into scraps. A sheet is over 90 percent
+       pairs; such a part is under a third. */
+    var areaAll = 0, areaPaired = 0;
+    for (var z = 0; z < members.length; z++) {
+      areaAll += T.fn.area[members[z]];
+      if (pairOf(members[z]) >= 0) areaPaired += T.fn.area[members[z]];
+    }
+    if (pairOf(start) < 0 || areaPaired < SHEET_PAIRED_FRAC * areaAll) {
+      return { mayMove: R, count: members.length, seed: seed, split: false };   // one wall, as before
+    }
+
+    var SIDE = 1, BACK = 2, label = new Uint8Array(T.nf), done = new Uint8Array(T.nf);
+    var dist = new Float64Array(T.nf).fill(Infinity), heap = new Heap();
+    function offer(g, d, l) { if (!done[g] && d < dist[g]) { dist[g] = d; label[g] = l; heap.push(g, d); } }
+    offer(start, 0, SIDE);
+    while (heap.size()) {
+      var e = heap.pop(), h = e.f;
+      if (done[h] || e.d > dist[h]) continue;
+      done[h] = 1;
+      var ps = across[h];
+      if (ps) for (var pi = 0; pi < ps.length; pi++) offer(ps[pi], dist[h], label[h] === SIDE ? BACK : SIDE);
+      eachNeighbour(h, function (g) { offer(g, dist[h] + centroidGap(T, h, g), label[h]); });
+    }
+    /* The faces with no partner come in patches: a corner of one side
+       tighter than the wall is thick (a fillet in a step) is bounded by that
+       side alone and moves with it; a rim joins the two sides and is HELD -
+       the side stops where it runs tangent into the rim, a crease the engine
+       resolves (the rim's edge moves half the offset), where a cut down the
+       rim's middle leaves two faces a few degrees apart with different
+       targets, and the solve throws the corners between them across the
+       piece. Which side a patch goes to never depends on where the click was. */
+    var patch = new Int32Array(T.nf).fill(-1), touches = [];
+    for (var q = 0; q < members.length; q++) {
+      var r0 = members[q];
+      if (patch[r0] >= 0 || pairOf(r0) >= 0) continue;
+      var id = touches.length, ps2 = [r0], tch = 0;
+      patch[r0] = id;
+      while (ps2.length) {
+        var u = ps2.pop();
+        eachNeighbour(u, function (g) {
+          if (pairOf(g) >= 0) { tch |= label[g]; return; }
+          if (patch[g] < 0) { patch[g] = id; ps2.push(g); }
+        });
+      }
+      touches.push(tch);
+    }
+    var may = new Uint8Array(T.nf), count = 0;
+    for (var m = 0; m < members.length; m++) {
+      var mm = members[m], side = patch[mm] < 0 ? label[mm] : touches[patch[mm]];
+      if (side === SIDE) { may[mm] = 1; count++; }
+    }
+    return { mayMove: may, count: count, seed: seed, split: true };
   }
+
+  /* Nearest face of R (over the surface) that passes test, or -1. */
+  function nearest(T, from, R, eachNeighbour, test) {
+    var dist = new Float64Array(T.nf).fill(Infinity), done = new Uint8Array(T.nf), heap = new Heap();
+    dist[from] = 0; heap.push(from, 0);
+    while (heap.size()) {
+      var e = heap.pop(), f = e.f;
+      if (done[f] || e.d > dist[f]) continue;
+      done[f] = 1;
+      if (test(f)) return f;
+      eachNeighbour(f, function (g) {
+        if (!R[g]) return;
+        var d = dist[f] + centroidGap(T, f, g);
+        if (d < dist[g]) { dist[g] = d; heap.push(g, d); }
+      });
+    }
+    return -1;
+  }
+
+  /* The face straight across the material from f, when f is one side of a
+     wall: the ray from f into the piece lands on a face that looks the other
+     way, d deep, and the surface turns less than 0.8 rad within 3d/4 of f. A
+     cylinder's or a sphere's far side is 2R deep and its surface turns more
+     than a radian within 1.5R, so a round side has no partner and stays one
+     wall; a sheet's back is a thickness deep on a surface that bends far more
+     gently, so it does. Under the depth, so only the faces within half a
+     millimetre or so of a 2 mm sheet's rim see the rim's bend. A ray
+     that cuts a corner and lands on the same side's skin round a bend finds
+     a face looking across, not back, and is no partner either. -1 for none. */
+  function partnerOf(T, f) {
+    if (T.partner[f] !== -2) return T.partner[f];
+    var res = -1, hit = T.fn.ok[f] ? rayInto(T, f) : null;
+    if (hit) {
+      var n = T.fn.n, f3 = f * 3, h3 = hit.face * 3;
+      if (n[f3] * n[h3] + n[f3 + 1] * n[h3 + 1] + n[f3 + 2] * n[h3 + 2] < -0.7 &&
+          !bendsWithin(T, f, hit.t * 0.75, 0.8)) res = hit.face;
+    }
+    T.partner[f] = res;
+    return res;
+  }
+
+  function centroids(T) {
+    if (T.cen) return T.cen;
+    var p = T.pos, c = new Float64Array(T.nf * 3);
+    for (var f = 0; f < T.nf; f++) {
+      var a = T.tri[f * 3] * 3, b = T.tri[f * 3 + 1] * 3, d = T.tri[f * 3 + 2] * 3;
+      c[f * 3] = (p[a] + p[b] + p[d]) / 3; c[f * 3 + 1] = (p[a + 1] + p[b + 1] + p[d + 1]) / 3; c[f * 3 + 2] = (p[a + 2] + p[b + 2] + p[d + 2]) / 3;
+    }
+    return (T.cen = c);
+  }
+  function centroid(T, f) { var c = centroids(T); return [c[f * 3], c[f * 3 + 1], c[f * 3 + 2]]; }
+  function centroidGap(T, f, g) {
+    var c = centroids(T), dx = c[f * 3] - c[g * 3], dy = c[f * 3 + 1] - c[g * 3 + 1], dz = c[f * 3 + 2] - c[g * 3 + 2];
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+  /* Does the surface turn more than maxTurn radians within `span` of f?
+     Walked over the same smooth surface, nearest first, with each step
+     measured ACROSS the shared edge (centroid to edge line, edge line to
+     centroid): the distance along the edge does not count, so a strip the
+     full height of a wall is one narrow step, not a third of its height. A
+     one-ring estimate would be noise on a fine mesh (a profile swept in
+     strips 0.04 mm wide puts a degree of twist between a quad's two
+     triangles). Stops as soon as the turn is passed, so a sphere is decided
+     at its first ring. */
+  function bendsWithin(T, f, span, maxTurn) {
+    var cosSmooth = Math.cos((typeof THICKEN_SMOOTH_DEG === 'number' ? THICKEN_SMOOTH_DEG : 45) * Math.PI / 180);
+    var n = T.fn.n, cen = centroids(T), p = T.pos, cosMax = Math.cos(maxTurn);
+    var dist = new Map([[f, 0]]), heap = new Heap(), visits = 0;
+    function toLine(c, a, b) {                   // distance from centroid c to the line through vertices a, b
+      var ex = p[b] - p[a], ey = p[b + 1] - p[a + 1], ez = p[b + 2] - p[a + 2];
+      var wx = cen[c] - p[a], wy = cen[c + 1] - p[a + 1], wz = cen[c + 2] - p[a + 2];
+      var cx = ey * wz - ez * wy, cy = ez * wx - ex * wz, cz = ex * wy - ey * wx;
+      var el = Math.sqrt(ex * ex + ey * ey + ez * ez);
+      return el > 0 ? Math.sqrt(cx * cx + cy * cy + cz * cz) / el : 0;
+    }
+    heap.push(f, 0);
+    while (heap.size() && visits < 4000) {
+      var e = heap.pop(), h = e.f;
+      if (e.d > dist.get(h)) continue;
+      visits++;
+      for (var k = 0; k < 3; k++) {
+        var g = T.adj[h * 3 + k];
+        if (g < 0) continue;
+        if (n[h * 3] * n[g * 3] + n[h * 3 + 1] * n[g * 3 + 1] + n[h * 3 + 2] * n[g * 3 + 2] <= cosSmooth) continue;
+        var a = T.tri[h * 3 + k] * 3, b = T.tri[h * 3 + (k + 1) % 3] * 3;
+        var d = e.d + toLine(h * 3, a, b) + toLine(g * 3, a, b);
+        if (d > span) continue;
+        var was = dist.get(g);
+        if (was !== undefined && was <= d) continue;
+        if (n[f * 3] * n[g * 3] + n[f * 3 + 1] * n[g * 3 + 1] + n[f * 3 + 2] * n[g * 3 + 2] < cosMax) return true;
+        dist.set(g, d); heap.push(g, d);
+      }
+    }
+    return false;
+  }
+
+  /* First face the ray from f's centroid straight into the material meets. */
+  function rayInto(T, f) {
+    var s = T.fn.signedVolume < 0 ? -1 : 1, o = centroid(T, f);
+    var dx = -T.fn.n[f * 3] * s, dy = -T.fn.n[f * 3 + 1] * s, dz = -T.fn.n[f * 3 + 2] * s;
+    var cand = null;
+    if (typeof NSO_BVH !== 'undefined' && NSO_BVH && NSO_BVH.indexFor) {
+      var ix = NSO_BVH.indexFor(soupRef, false, 0);
+      if (ix) cand = NSO_BVH.rayCandidates(ix, o[0], o[1], o[2], dx, dy, dz, Infinity, T.rayBuf || (T.rayBuf = []));
+    }
+    var p = T.pos, best = null, n = cand ? cand.length : T.nf;
+    for (var i = 0; i < n; i++) {
+      var g = cand ? cand[i] : i;
+      if (g === f || !T.fn.ok[g]) continue;
+      var a = T.tri[g * 3] * 3, b = T.tri[g * 3 + 1] * 3, c = T.tri[g * 3 + 2] * 3;
+      var e1x = p[b] - p[a], e1y = p[b + 1] - p[a + 1], e1z = p[b + 2] - p[a + 2];
+      var e2x = p[c] - p[a], e2y = p[c + 1] - p[a + 1], e2z = p[c + 2] - p[a + 2];
+      var hx = dy * e2z - dz * e2y, hy = dz * e2x - dx * e2z, hz = dx * e2y - dy * e2x;
+      var det = e1x * hx + e1y * hy + e1z * hz;
+      if (Math.abs(det) < 1e-12) continue;
+      var inv = 1 / det, sx = o[0] - p[a], sy = o[1] - p[a + 1], sz = o[2] - p[a + 2];
+      var u = (sx * hx + sy * hy + sz * hz) * inv;
+      if (u < 0 || u > 1) continue;
+      var qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+      var v = (dx * qx + dy * qy + dz * qz) * inv;
+      if (v < 0 || u + v > 1) continue;
+      var t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+      if (t > 1e-6 && (!best || t < best.t)) best = { face: g, t: t };
+    }
+    return best;
+  }
+
+  /* A binary min-heap of { f, d } on d. */
+  function Heap() { this.a = []; }
+  Heap.prototype.size = function () { return this.a.length; };
+  Heap.prototype.push = function (f, d) {
+    var a = this.a, x = { f: f, d: d }, i = a.length; a.push(x);
+    while (i > 0) { var p = (i - 1) >> 1; if (a[p].d <= d) break; a[i] = a[p]; i = p; }
+    a[i] = x;
+  };
+  Heap.prototype.pop = function () {
+    var a = this.a, top = a[0], x = a.pop(), n = a.length, i = 0;
+    if (!n) return top;
+    for (;;) {
+      var l = 2 * i + 1, r = l + 1, m = i, dm = x.d;
+      if (l < n && a[l].d < dm) { m = l; dm = a[l].d; }
+      if (r < n && a[r].d < dm) m = r;
+      if (m === i) break;
+      a[i] = a[m]; i = m;
+    }
+    a[i] = x;
+    return top;
+  };
 
   /* Pick the wall under a click. Every layer the ray crosses is a candidate:
      Thicken in wants the pocket wall behind the outside skin, so the first

@@ -314,7 +314,7 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { document.getElementById('menu-fittings').open = true; });
   await until(page, s => s.ghosts === 1);
   // the page keeps one panel open: opening Fasteners shuts Fittings, and the ghost passes to Fasteners - never two on the plate
-  await page.evaluate(() => { document.getElementById('menu-fasteners').open = true; });
+  await page.evaluate(() => { document.getElementById('menu-fasteners').open = true; nsoFasteners.select('bolt'); });   // Fasteners shows a ghost only once a tile is clicked
   await page.waitForFunction(() => nsoFasteners.state().ghosts === 1 && nsoFittings.state().ghosts === 0, null, { timeout: 8000 });
   check('opening Fasteners shuts Fittings (one panel at a time) and takes the ghost: ONE ghost on the plate, owned by Fasteners', (await page.evaluate(() => state.scene.children.filter(c => c.userData && c.userData.nsoPiecePreview).length)) === 1 && (await page.evaluate(() => nsoPiecePreview.state().owner)) === 'fasteners' && !(await FX(page)).open);
   await page.evaluate(() => { document.getElementById('menu-fasteners').open = false; });

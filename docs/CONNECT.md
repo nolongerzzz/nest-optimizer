@@ -1,5 +1,8 @@
 # Connect
 
+> The card is **DRAW** now ([DRAW.md](DRAW.md)): the Draw editor and Draw > Connect come first; everything below is its
+> "Anchors on the plate" section, id for id, armed while that section is open.
+
 A column card between Crop and Join. Bridge (in Add) stays the quick gap-fill,
 where the two picks decide the shape. Connect is the builder: the two picks are
 only WHERE, the card decides WHAT runs between them, and the result can be a

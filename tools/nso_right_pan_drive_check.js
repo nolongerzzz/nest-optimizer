@@ -9,7 +9,11 @@
    (OrbitControls RIGHT: PAN); one that does not is the click it always was -
    select the piece under the pointer and open the context menu. The pan is
    measured, not eyeballed: a point at the controls' target depth must land
-   exactly where the pointer took it, whatever the orbit angle.
+   exactly where the pointer took it, whatever the orbit angle. Since the
+   re-seat (app-core.js reseatOrbitTarget, tools/nso_orbit_reseat_test.js)
+   the press first slides the target along the view line to the depth of
+   what is under the pointer, so that depth is read at the press - and the
+   press itself must not move the camera.
 
    Screenshots go to outDir (default tools/right-pan-out, a gitignored scratch
    folder like the other checks' *-out folders). The pieces are the
@@ -104,6 +108,30 @@ withApp(async (page, logs) => {
     await settle();
   };
   const rightDrag = (x0, y0, dx, dy, steps) => drag('right', x0, y0, dx, dy, steps);
+  /* A right-drag read at the press: `atPress(cam)` runs with the button down
+     and nothing moved yet (the re-seat has run) and returns { d: [dx, dy] };
+     the drag then goes on. Returns { before, pressed, info }. */
+  const rightDragRead = async (x0, y0, atPress, steps) => {
+    steps = steps || 20;
+    const before = await settle();
+    await page.mouse.move(x0, y0);
+    await page.mouse.down({ button: 'right' });
+    const pressed = await N(() => window.__p.cam());
+    const info = await atPress(pressed);
+    const d = info.d;
+    for (let i = 1; i <= steps; i++) await page.mouse.move(x0 + d[0] * i / steps, y0 + d[1] * i / steps);
+    await page.mouse.up({ button: 'right' });
+    await settle();
+    return { before, pressed, info };
+  };
+  // the press moved no camera: same position and orientation, the target on the same view line
+  const pressHeld = (a, b) => {
+    const da = a.tgt.map((x, i) => x - a.pos[i]), db = b.tgt.map((x, i) => x - b.pos[i]);
+    const la = Math.hypot(...da), lb = Math.hypot(...db);
+    const line = Math.hypot(...da.map((x, i) => x / la - db[i] / lb));
+    return { ok: sameQuat(a.quat, b.quat) && Math.hypot(...a.pos.map((x, i) => x - b.pos[i])) < 1e-9 && line < 1e-9,
+             detail: 'target depth ' + la.toFixed(3) + ' -> ' + lb.toFixed(3) + ' mm' };
+  };
   const undo0 = await N(() => state.undoStack.length);
   const near = (a, b, tol) => Math.hypot(a[0] - b[0], a[1] - b[1]) <= tol;
   const sameQuat = (a, b) => a.every((x, i) => Math.abs(x - b[i]) < 1e-9);
@@ -112,18 +140,34 @@ withApp(async (page, logs) => {
      is a world point at the target depth, so it must end up exactly where
      the pointer took it. */
   const panCheck = async (label, x0, y0, dx, dy) => {
-    const c0 = await settle();
-    const before = await N(t => window.__p.proj(t), c0.tgt);
-    await rightDrag(x0, y0, dx, dy);
+    let before, grab;
+    const r = await rightDragRead(x0, y0, async (cp) => {
+      before = await N(t => window.__p.proj(t), cp.tgt);
+      // the world point under the press, if it is on a piece: it must follow the pointer too
+      grab = await N(([x, y]) => {
+        const e = { clientX: x, clientY: y };
+        return pickPlacedIndexFromEvent(e) >= 0 ? wheelZoomAnchor(x, y).toArray() : null;
+      }, [x0, y0]);
+      return { d: typeof dx === 'function' ? await dx(cp) : [dx, dy] };
+    });
+    if (typeof dx === 'function') { dy = r.info.d[1]; dx = r.info.d[0]; }
+    const c0 = r.pressed;
+    const ph = pressHeld(r.before, r.pressed);
+    check(label + ': the press moved no camera (the target slid along its view line)', ph.ok, ph.detail);
     const c1 = await N(() => window.__p.cam());
     const after = await N(t => window.__p.proj(t), c0.tgt);
     const moved = [after[0] - before[0], after[1] - before[1]];
+    if (grab) {
+      const g = await N(t => window.__p.proj(t), grab);
+      const gm = [g[0] - x0, g[1] - y0];
+      check(label + ': the piece point under the press followed the pointer to 0.5 px', near(gm, [dx, dy], 0.5), 'moved ' + px(gm));
+    }
     check(label + ': the point at the target depth followed the pointer (' + dx + ', ' + dy + ') px to 0.5 px',
       near(moved, [dx, dy], 0.5), 'moved ' + px(moved));
     if (dx) check(label + ': drag ' + (dx > 0 ? 'right' : 'left') + ', the view slides ' + (dx > 0 ? 'right' : 'left'), Math.sign(moved[0]) === Math.sign(dx));
     if (dy) check(label + ': drag ' + (dy < 0 ? 'up' : 'down') + ', the view slides ' + (dy < 0 ? 'up' : 'down'), Math.sign(moved[1]) === Math.sign(dy));
     check(label + ': no rotation (camera orientation identical)', sameQuat(c0.quat, c1.quat));
-    check(label + ': no zoom (camera-target distance identical to 1e-9)', Math.abs(c0.dist - c1.dist) < 1e-9,
+    check(label + ': no zoom (camera-target distance from the press identical to 1e-9)', Math.abs(c0.dist - c1.dist) < 1e-9,
       c0.dist.toFixed(6) + ' -> ' + c1.dist.toFixed(6));
     return { c0, c1 };
   };
@@ -153,10 +197,13 @@ withApp(async (page, logs) => {
   const sel0 = await N(() => state.selectedIndex);
   await shot('01-orbited-plate-off-to-one-side');
   /* The drag that puts the plate's centre on the canvas centre: the screen
-     offset, scaled by the plate centre's depth over the target's. */
-  const k = await N(() => window.__p.depthRatio([0, 0, 0]));
-  const want = [(C[0] - plate0[0]) * k, (C[1] - plate0[1]) * k];
-  const p1 = await panCheck('back to centre', plate0[0], plate0[1], Math.round(want[0]), Math.round(want[1]));
+     offset, scaled by the plate centre's depth over the target's - read at
+     the press, after the re-seat (k = 1 when the plate centre is what is
+     under the pointer). */
+  const p1 = await panCheck('back to centre', plate0[0], plate0[1], async () => {
+    const k = await N(() => window.__p.depthRatio([0, 0, 0]));
+    return [Math.round((C[0] - plate0[0]) * k), Math.round((C[1] - plate0[1]) * k)];
+  });
   const plate1 = await N(() => window.__p.proj([0, 0, 0]));
   const off1 = Math.hypot(plate1[0] - C[0], plate1[1] - C[1]);
   check('the plate centre is back on the canvas centre (to 2 px - the drag is whole pixels)', off1 <= 2,
@@ -206,9 +253,9 @@ withApp(async (page, logs) => {
   check('status as before', /^Selected #1 - Delete piece or press Delete/.test(await N(() => document.getElementById('status').textContent)));
   check('the menu still holds Export and Delete', await N(() => !!document.getElementById('ctx-export') && /Delete/.test(document.getElementById('ctx-menu').textContent)));
   const camC1 = await settle();
-  const tgtMove = Math.hypot(...camC0.tgt.map((x, i) => x - camC1.tgt[i]));
-  check('a still right-click moves no camera (no rotation; target within 1e-6 mm)',
-    sameQuat(camC0.quat, camC1.quat) && tgtMove < 1e-6, tgtMove.toExponential(2) + ' mm');
+  const still = pressHeld(camC0, camC1);
+  check('a still right-click moves no camera (same position and orientation; the target only slid along its view line)',
+    still.ok, still.detail);
   await shot('03-right-click-piece-menu-opens');
   /* a right-click on bare background still opens nothing */
   await N(() => hideCtxMenu());
@@ -219,16 +266,18 @@ withApp(async (page, logs) => {
   console.log('\n=== 4. right-press on a piece, drag 40 px, release: no menu ===');
   await N(() => { hideCtxMenu(); selectPlaced(0); window.__p.ctxLog.length = 0; });
   const tape4 = await N(() => window.__p.proj(state.placed[1].mesh.position.toArray()));
-  const c4 = await settle();
-  const t4 = await N(t => window.__p.proj(t), c4.tgt);
+  await settle();
+  // the tape's point under the press: the pan grabs it
+  const g4 = await N(([x, y]) => wheelZoomAnchor(x, y).toArray(), tape4);
+  const t4 = await N(t => window.__p.proj(t), g4);
   await rightDrag(tape4[0], tape4[1], 40, 0, 8);
   const ev4 = await N(() => window.__p.ctxLog.slice());
   console.log('   events: ' + ev4.join(' -> '));
   check('the browser did send contextmenu (at the press) - and it was held', ev4.indexOf('contextmenu') >= 0);
   check('no context menu after the 40 px drag', !(await N(() => window.__p.menuOpen())));
   check('the piece under the press was NOT selected (box stays selected)', (await N(() => state.selectedIndex)) === 0);
-  const t4b = await N(t => window.__p.proj(t), c4.tgt);
-  check('the view panned 40 px right', near([t4b[0] - t4[0], t4b[1] - t4[1]], [40, 0], 0.5), px([t4b[0] - t4[0], t4b[1] - t4[1]]));
+  const t4b = await N(t => window.__p.proj(t), g4);
+  check('the view panned 40 px right (the grabbed point with it)', near([t4b[0] - t4[0], t4b[1] - t4[1]], [40, 0], 0.5), px([t4b[0] - t4[0], t4b[1] - t4[1]]));
   await shot('04-right-drag-40px-no-menu');
   /* the slop: 3 px of jitter is still a click */
   await N(() => { hideCtxMenu(); selectPlaced(0); });
@@ -276,11 +325,15 @@ withApp(async (page, logs) => {
     const p = state.placed[0]; p.mesh.updateMatrixWorld(true);
     return { q: p.mesh.quaternion.toArray(), pos: p.mesh.position.toArray(), rings: g.position.toArray(),
              h: window.nsoRotate.handleScreen('turn', 1), kids: g.children.length,
-             k: window.__p.depthRatio(g.position.toArray()), ctr: window.__p.proj(g.position.toArray()) };
+             ctr: window.__p.proj(g.position.toArray()) };
   });
   check('the rings are drawn', r0.kids > 0, r0.kids + ' objects');
   await shot('05-rotate-open-before-pan');
-  await rightDrag(r0.h.x, r0.h.y, 150, 60);
+  // the rings' depth over the target's, read at the press (after the re-seat)
+  await rightDragRead(r0.h.x, r0.h.y, async () => {
+    r0.k = await N(() => window.__p.depthRatio(state.scene.getObjectByName('nso-rotate-handles').position.toArray()));
+    return { d: [150, 60] };
+  });
   const r1 = await N(() => {
     const g = state.scene.getObjectByName('nso-rotate-handles');
     const p = state.placed[0]; p.mesh.updateMatrixWorld(true);
@@ -333,10 +386,14 @@ withApp(async (page, logs) => {
     return N(() => window.__g.cam());
   };
   const gpan = async (label, x0, y0, dx, dy) => {
-    const c0 = await gsettle();
-    const b = await N(t => window.__g.proj(t), c0.tgt);
+    const cb = await gsettle();
     await page.mouse.move(x0, y0);
     await page.mouse.down({ button: 'right' });
+    // read at the press: the re-seat has run, nothing has moved
+    const c0 = await N(() => window.__g.cam());
+    const ph = pressHeld(cb, c0);
+    check(label + ': the press moved no camera (the target slid along its view line)', ph.ok, ph.detail);
+    const b = await N(t => window.__g.proj(t), c0.tgt);
     for (let i = 1; i <= 20; i++) await page.mouse.move(x0 + dx * i / 20, y0 + dy * i / 20);
     await page.mouse.up({ button: 'right' });
     const c1 = await gsettle();

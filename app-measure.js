@@ -285,7 +285,27 @@
     return (a >= 100 ? v.toFixed(2) : v.toFixed(3)) + ' mm';
   }
 
+  // The inch is defined as exactly 25.4 mm.
+  var MM_PER_IN = 25.4;
+
+  /* The same figure, in the unit the card is set to. Inches get a fourth
+     decimal under the same 100 mm line formatMm drops a decimal at (3.937 in),
+     because 0.0001 in is 0.00254 mm - the same order as the 0.001 mm the mm
+     form prints, not finer than it. The figure is converted, never re-measured:
+     everything upstream of here is millimetres. */
+  function formatLen(v, unit) {
+    if (unit !== 'in') return formatMm(v);
+    var i = v / MM_PER_IN;
+    return i.toFixed(Math.abs(v) >= 100 ? 3 : 4) + ' in';
+  }
+
+  // A bare number, for the per-axis deltas (the unit is named once, up front).
+  function formatNum(v, unit) {
+    return unit === 'in' ? (v / MM_PER_IN).toFixed(4) : v.toFixed(3);
+  }
+
   var CORE = {
+    MM_PER_IN: MM_PER_IN,
     WELD_Q: WELD_Q,
     EDGE_ANGLE_DEG: EDGE_ANGLE_DEG,
     COLLINEAR_DEG: COLLINEAR_DEG,
@@ -297,6 +317,8 @@
     edgeChain: edgeChain,
     span: span,
     formatMm: formatMm,
+    formatLen: formatLen,
+    formatNum: formatNum,
     /* Soup + point in, measurement out. The one call a test needs to ask the
        same question the UI asks, without a browser. */
     measureEdgeAt: function (soup, p, opts) {
@@ -326,6 +348,9 @@
   var SNAP_PX = 14;
   // The marker dot, in pixels, held at that size whatever the zoom.
   var DOT_PX = 4;
+  // A hover preview walks every edge of the piece each time it runs; above this
+  // many it is skipped (a click still works - it runs once, not every move).
+  var HOVER_MAX_EDGES = 60000;
 
   var IDLE_LABEL = 'Measure';
   var LIVE_LABEL = 'Measuring… click to stop';
@@ -337,7 +362,25 @@
   var ticking = false;
 
   function el(id) { return document.getElementById(id); }
-  function mode() { var s = el('sel-measure-mode'); return s && s.value === 'edge' ? 'edge' : 'span'; }
+  /* span / edge measure; apoint / aedge are the ruler's Align modes - they pick
+     the same points and edges, but hand them to the ruler (app-ruler.js)
+     instead of drawing a line between them. */
+  function mode() {
+    var s = el('sel-measure-mode');
+    var v = s ? s.value : 'span';
+    return v === 'edge' || v === 'apoint' || v === 'aedge' ? v : 'span';
+  }
+  function aligning() { var m = mode(); return m === 'apoint' || m === 'aedge'; }
+
+  /* ---- units. Millimetres are what the scene is in and what every test
+     reads; inches are only how a figure is PRINTED. The choice is a per-viewer
+     convenience, so it is remembered in this browser and nowhere else. */
+  var UNIT_KEY = 'nso.measure.unit';
+  var unit = 'mm';
+  try { if (window.localStorage && localStorage.getItem(UNIT_KEY) === 'in') unit = 'in'; } catch (e) { /* private window: mm */ }
+  var unitListeners = [];
+  function fmt(mm) { return CORE.formatLen(mm, unit); }
+  function fmtNum(mm) { return CORE.formatNum(mm, unit); }
 
   /* ---- scene helpers: made here, disposed here, never raycastable ---- */
 
@@ -438,14 +481,34 @@
 
   // app-mask.js's hitFace, with this file's own helpers skipped instead of
   // the paint overlay. Same ray, same raycaster, same order of business.
+  /* A GHOST is a generator card's live preview (Gen+ > Custom shape, Fittings,
+     Fasteners - app-piece-preview.js): a scene object, never a placed piece. It
+     is measurable like one - its triangles are real, in world millimetres - and
+     it is the thing you most want a true reading ON, because it is what is about
+     to be made. It is picked as a "piece" with placedIndex -1. */
+  var GHOST = -1;
+  function ghostMeshes() {
+    var out = [];
+    if (!state.scene) return out;
+    for (var i = 0; i < state.scene.children.length; i++) {
+      var c = state.scene.children[i];
+      if (c.isMesh && c.visible && c.userData && c.userData.nsoPiecePreview && c.geometry) out.push(c);
+    }
+    return out;
+  }
+
   function hitPiece(event) {
     if (!state.renderer || !state.camera || !state.modelGroup) return null;
     if (typeof setPointerFromEvent === 'function') setPointerFromEvent(event);
     state.raycaster.setFromCamera(state.pointer, state.camera);
-    var hits = state.raycaster.intersectObjects(state.modelGroup.children, true);
+    var ghosts = ghostMeshes();
+    var hits = state.raycaster.intersectObjects(ghosts.length ? state.modelGroup.children.concat(ghosts) : state.modelGroup.children, true);
     for (var i = 0; i < hits.length; i++) {
       if (helpers.indexOf(hits[i].object) >= 0) continue;
       if (hits[i].faceIndex == null) continue;
+      if (ghosts.indexOf(hits[i].object) >= 0) {
+        return { hit: hits[i], placedIndex: GHOST, placed: { mesh: hits[i].object, sourceId: null, name: 'the preview' } };
+      }
       var obj = hits[i].object;
       while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
       var idx = obj && obj.userData ? obj.userData.placedIndex : undefined;
@@ -463,6 +526,8 @@
     return {
       sourceId: pick.placed.sourceId,
       placedIndex: pick.placedIndex,
+      // a ghost is held by reference: it has no place in state.placed to look up
+      ghost: pick.placedIndex === GHOST ? pick.placed.mesh : null,
       geom: pick.placed.mesh.geometry,
       local: localPoint.slice(),
       kind: kind
@@ -470,6 +535,8 @@
   }
 
   function meshFor(anchor) {
+    // A ghost is rebuilt (new geometry) on every change to its card, which ends the anchor like a re-bake.
+    if (anchor.ghost) return anchor.ghost.parent && anchor.ghost.geometry === anchor.geom ? anchor.ghost : null;
     var p = state.placed[anchor.placedIndex];
     if (!p || !p.mesh || p.sourceId !== anchor.sourceId) {
       p = null;
@@ -497,6 +564,7 @@
     pending = null;
     dropHelpers();
     hideLabel();
+    if (window.NSO_RulerUI) { window.NSO_RulerUI.clearPick(); window.NSO_RulerUI.setHover(null); }
     if (why) setStatus(why);
   }
 
@@ -533,20 +601,30 @@
     return true;
   }
 
-  function takeEdge(pick) {
+  /* The whole edge nearest a pick, end to end. Edge mode and the ruler's Align
+     edge both ask this; quiet = true is the hover preview, which must not
+     write the status line on every pointer move. */
+  function chainAt(pick, quiet) {
     var mesh = pick.placed.mesh;
     var topo = topologyOf(mesh);
-    if (!topo) { setStatus('No geometry to measure on that piece', true); return false; }
+    if (!topo) { if (!quiet) setStatus('No geometry to measure on that piece', true); return null; }
+    if (quiet && topo.edges.length > HOVER_MAX_EDGES) return null;
     mesh.updateMatrixWorld();
     var lp = mesh.worldToLocal(pick.hit.point.clone());
     var near = CORE.nearestFeatureEdge(topo, [lp.x, lp.y, lp.z]);
     if (!near) {
-      setStatus('No edge on that face - nothing on it meets another face at ' +
+      if (!quiet) setStatus('No edge on that face - nothing on it meets another face at ' +
                 CORE.EDGE_ANGLE_DEG + ' degrees or more', true);
-      return false;
+      return null;
     }
     var chain = CORE.edgeChain(topo, near.edge);
-    if (!chain) { setStatus('That edge has no length', true); return false; }
+    if (!chain && !quiet) setStatus('That edge has no length', true);
+    return chain;
+  }
+
+  function takeEdge(pick) {
+    var chain = chainAt(pick, false);
+    if (!chain) return false;
     dropHelpers();
     pending = null;
     shot = {
@@ -594,6 +672,7 @@
   }
 
   function pieceName(anchor) {
+    if (anchor.ghost) return 'the preview';
     var p = state.placed[anchor.placedIndex];
     return p && p.name ? p.name : ('#' + (anchor.placedIndex + 1));
   }
@@ -616,12 +695,12 @@
     if (!pts) return '';
     var s = CORE.span([pts[0].x, pts[0].y, pts[0].z], [pts[1].x, pts[1].y, pts[1].z]);
     if (shot.type === 'edge') {
-      return 'Measure - edge ' + CORE.formatMm(s.length) +
+      return 'Measure - edge ' + fmt(s.length) +
              ' (' + shot.segments + (shot.segments === 1 ? ' segment' : ' segments') +
              (shot.forked ? ', stopped at a fork' : '') + ') on ' + pieceName(shot.a);
     }
-    return 'Measure - ' + CORE.formatMm(s.length) +
-           '  dX ' + s.dx.toFixed(3) + '  dY ' + s.dy.toFixed(3) + '  dZ ' + s.dz.toFixed(3) +
+    return 'Measure - ' + fmt(s.length) +
+           '  dX ' + fmtNum(s.dx) + '  dY ' + fmtNum(s.dy) + '  dZ ' + fmtNum(s.dz) +
            '  (' + shot.a.kind + ' → ' + shot.b.kind + ')';
   }
 
@@ -657,7 +736,7 @@
       if (shot) {
         var s = CORE.span([pts[0].x, pts[0].y, pts[0].z], [pts[1].x, pts[1].y, pts[1].z]);
         var chip = ensureLabel();
-        chip.textContent = CORE.formatMm(s.length);
+        chip.textContent = fmt(s.length);
         chip.hidden = false;
         placeLabel(chip, pts[0].clone().add(pts[1]).multiplyScalar(0.5));
       } else {
@@ -741,16 +820,33 @@
       if (seatBtn) seatBtn.click();
       else state.seatHereArmed = false;
     }
-    state.softenArmed = false;
-    state.capArmed = false;
-    if (typeof clearFacePick === 'function') clearFacePick();
+    /* The Soften / Cap pick modes wait for a click on a piece, so they stand
+       down. A LIVE Soften card is not one of them - it is previewing a face -
+       and clearing the face pick under it would wreck the preview that
+       Measure is being used alongside. */
+    var softenLive = !!(window.nsoSoftenLive && window.nsoSoftenLive.on && window.nsoSoftenLive.on());
+    if (!softenLive) {
+      state.softenArmed = false;
+      state.capArmed = false;
+      if (typeof clearFacePick === 'function') clearFacePick();
+    }
   }
 
   function enter() {
     state.measureOn = true;
     disarmOthers();
     setLabelState();
-    setStatus(mode() === 'edge'
+    var m = mode();
+    if (m === 'apoint' || m === 'aedge') {
+      // Aligning is meaningless without something to align to.
+      var rc = el('chk-ruler');
+      if (rc && !rc.checked) rc.click();
+      setStatus(m === 'apoint'
+        ? 'Align point - click a corner or an edge point; the ruler reads where it sits. Orbit and pan the piece to bring it onto a mark. Click Measure again to stop.'
+        : 'Align edge - click an edge; the ruler reads its span and how far it is from lying along the ruler. Click Measure again to stop.');
+      return;
+    }
+    setStatus(m === 'edge'
       ? 'Measure - click an edge to read its length. Click Measure again to stop.'
       : 'Measure - click two points. Corners and edges snap. Click Measure again to stop.');
   }
@@ -763,6 +859,84 @@
   }
 
   function toggle() { if (state.measureOn) leave(); else enter(); }
+
+  /* ---- the ruler's picks. The ruler (app-ruler.js) draws them; this file
+     finds them, because finding a point or an edge on a piece is what this
+     file already does. The same snap, the same chain, the same anchors - so a
+     point the ruler flags is a point Two points would have measured from. */
+
+  function pickName(pick) { return pick.placedIndex === GHOST ? 'the preview' : pieceName({ placedIndex: pick.placedIndex }); }
+
+  function alignPickFor(pick, m, quiet) {
+    if (m === 'apoint') {
+      return { kind: 'point', a: startSpanAt(pick), b: null, segments: 1, forked: false,
+               trueMm: 0, piece: pickName(pick) };
+    }
+    var chain = chainAt(pick, quiet);
+    if (!chain) return null;
+    return { kind: 'edge',
+             a: anchorOf(pick, chain.a, 'vertex'), b: anchorOf(pick, chain.b, 'vertex'),
+             segments: chain.segments, forked: chain.forked, trueMm: chain.length,
+             piece: pickName(pick) };
+  }
+
+  function takeAlign(pickHit, m) {
+    var R = window.NSO_RulerUI;
+    if (!R) { setStatus('The ruler is not loaded on this page', true); return false; }
+    var p = alignPickFor(pickHit, m, false);
+    if (!p) return false;
+    dropHelpers(); hideLabel(); shot = null; pending = null;
+    R.setHover(null);
+    R.setPick(p);
+    return true;
+  }
+
+  var hoverEvent = null, hoverTimer = 0, hoverLast = 0;
+  function hoverFrame() {
+    hoverTimer = 0;
+    var e = hoverEvent;
+    var R = window.NSO_RulerUI;
+    if (!e || !R || !state.measureOn || !aligning()) return;
+    hoverLast = Date.now();
+    var hit = hitPiece(e);
+    R.setHover(hit ? alignPickFor(hit, mode(), true) : null);
+  }
+  function onMove(e) {
+    if (!state.measureOn || !aligning() || e.buttons) return;
+    hoverEvent = e;
+    // At most one hover pick per 50 ms - each one walks the piece's edges.
+    if (!hoverTimer) hoverTimer = setTimeout(hoverFrame, Math.max(0, 50 - (Date.now() - hoverLast)));
+  }
+  function onLeave() {
+    hoverEvent = null;
+    if (window.NSO_RulerUI) window.NSO_RulerUI.setHover(null);
+  }
+
+  function setUnit(u, quiet) {
+    u = u === 'in' ? 'in' : 'mm';
+    var changed = u !== unit;
+    unit = u;
+    try { if (window.localStorage) localStorage.setItem(UNIT_KEY, unit); } catch (e) { /* not remembered */ }
+    var cb = el('chk-measure-inches');
+    if (cb) cb.checked = unit === 'in';
+    if (!changed) return;
+    // The number on screen is the same length, printed the other way.
+    if (shot) { tick(); setStatus(describe()); }
+    else if (!quiet) setStatus('Measure units - ' + (unit === 'in' ? 'inches' : 'millimetres'));
+    for (var i = 0; i < unitListeners.length; i++) { try { unitListeners[i](unit); } catch (e) { /* a listener's fault is its own */ } }
+  }
+
+  /* What app-ruler.js may read from here: the unit and the two ways to print a
+     length in it, an anchor's live world point, and a piece's name. Nothing in
+     it can change a piece. */
+  window.NSO_MeasureBridge = {
+    unit: function () { return unit; },
+    setUnit: setUnit,
+    fmt: fmt,
+    fmtNum: fmtNum,
+    worldOf: worldOf,
+    onUnit: function (fn) { unitListeners.push(fn); }
+  };
 
   /* Measure's session, for the helper registry (nso-helpers.js). A span read
      before an Undo measured a piece that is no longer there: it goes, and
@@ -780,6 +954,7 @@
      the plate while measuring still works. */
   window.nsoMeasureTakesClick = function (event) {
     if (!state.measureOn || !event || event.button !== 0) return false;
+    if (claimedElsewhere(event)) return false;
     return !!hitPiece(event);
   };
 
@@ -793,6 +968,8 @@
     return {
       type: shot.type,
       mm: s.length,
+      unit: unit,
+      value: unit === 'in' ? s.length / MM_PER_IN : s.length,
       dx: s.dx, dy: s.dy, dz: s.dz,
       // Where the two ends are right now, in world mm. Re-read every call,
       // never cached, so a piece that has been nudged since the click reports
@@ -801,23 +978,86 @@
       b: [pts[1].x, pts[1].y, pts[1].z],
       kinds: [shot.a.kind, shot.b.kind],
       segments: shot.segments || 1,
-      text: CORE.formatMm(s.length),
+      text: fmt(s.length),
       status: describe()
     };
   };
 
   window.nsoMeasureClear = function () { clearShot(null); };
 
+  /* A press a live tool has already claimed is not a measurement. A handle on a
+     ghost (the Wheel's, Crop's, Tube edge's, Bend's) starts a drag with
+     preventDefault, or stops the event outright before it gets here; Foam's
+     spray owns a press on its piece. Which listener on the canvas ran first
+     depends on when each was bound, so this does not rely on order: it asks the
+     same predicates app-core asks, and treats a prevented event as taken. */
+  function claimedElsewhere(event) {
+    if (event.defaultPrevented) return true;
+    var asks = ['nsoWheelTakesPointer', 'nsoFoamTakesPointer'];
+    for (var i = 0; i < asks.length; i++) {
+      if (typeof window[asks[i]] === 'function' && window[asks[i]](event)) return true;
+    }
+    return false;
+  }
+
   function onDown(event) {
     if (!state.measureOn || event.button !== 0) return;
+    if (claimedElsewhere(event)) return;
     var pick = hitPiece(event);
     if (!pick) return;
     event.stopPropagation();
     event.preventDefault();
-    if (mode() === 'edge') takeEdge(pick); else takeSpan(pick);
+    var m = mode();
+    if (m === 'apoint' || m === 'aedge') takeAlign(pick, m);
+    else if (m === 'edge') takeEdge(pick);
+    else takeSpan(pick);
+  }
+
+  /* DOCKING. Every card opens at one spot, so two open at once would sit on top
+     of each other. Measure is allowed to stay open beside another card (see the
+     one-panel rule in app-join.js), so when one is open Measure's panel moves to
+     its right-hand side, and goes back to the shared spot when it is alone. The
+     other panels are never moved: the one in use stays exactly where it is. */
+  var DOCK_GAP = 8;
+  function dock() {
+    var menu = el('menu-measure');
+    var body = menu && menu.querySelector(':scope > .vp-menu-body');
+    if (!body) return;
+    if (!menu.open) { body.style.left = ''; return; }
+    var parent = body.offsetParent;
+    if (!parent) return;
+    var pr = parent.getBoundingClientRect(), right = null;
+    var others = document.querySelectorAll('.vp-shell-menu[open] > .vp-menu-body');
+    for (var i = 0; i < others.length; i++) {
+      if (others[i] === body) continue;
+      var r = others[i].getBoundingClientRect();
+      if (r.width > 0 && (right == null || r.right > right)) right = r.right;
+    }
+    if (right == null) { body.style.left = ''; return; }
+    var left = right - pr.left + DOCK_GAP;
+    // Never past the right-hand edge of the viewport: overlap beats being lost.
+    left = Math.min(left, pr.width - body.offsetWidth - DOCK_GAP);
+    body.style.left = Math.max(0, Math.round(left)) + 'px';
+  }
+
+  var dockWatched = new WeakSet();
+  function watchDock() {
+    dock();
+    if (typeof ResizeObserver !== 'function') return;
+    // A panel that grows or shrinks (Gen+ with its Stock shelf) moves our edge.
+    var ro = watchDock._ro || (watchDock._ro = new ResizeObserver(dock));
+    document.querySelectorAll('.vp-shell-menu > .vp-menu-body').forEach(function (b) {
+      if (!dockWatched.has(b)) { dockWatched.add(b); ro.observe(b); }
+    });
   }
 
   function bind() {
+    if (!bind._dock && typeof MutationObserver === 'function') {
+      bind._dock = true;
+      new MutationObserver(function () { watchDock(); })
+        .observe(document.body, { attributes: true, subtree: true, attributeFilter: ['open'] });
+      window.addEventListener('resize', dock);
+    }
     var btn = el('btn-measure');
     if (btn && !btn._measureBound) {
       btn.addEventListener('click', toggle);
@@ -832,6 +1072,12 @@
       });
       sel._measureBound = true;
     }
+    var inch = el('chk-measure-inches');
+    if (inch && !inch._measureBound) {
+      inch.checked = unit === 'in';
+      inch.addEventListener('change', function () { setUnit(inch.checked ? 'in' : 'mm'); });
+      inch._measureBound = true;
+    }
     if (!document._measureKeys) {
       document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && state.measureOn) { clearShot('Measure cleared'); }
@@ -841,6 +1087,8 @@
     if (!state.renderer || !state.renderer.domElement || state._measureBound) return;
     state._measureBound = true;
     state.renderer.domElement.addEventListener('pointerdown', onDown, true);
+    state.renderer.domElement.addEventListener('pointermove', onMove, { passive: true });
+    state.renderer.domElement.addEventListener('pointerleave', onLeave);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);

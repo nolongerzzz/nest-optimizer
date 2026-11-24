@@ -1,0 +1,516 @@
+/* nso_cut_rotate_dial_drive_check.js - the Cut card's Rotate piece wheel, beside the Mitre wheel.
+   Real app, real Chromium, real mouse.
+     node tools/nso_cut_rotate_dial_drive_check.js        exit 0 = every gate held
+
+   The rotate rings stand too far out of view to use on a small piece worked close up, so the card carries a wheel
+   like the Mitre's that turns the piece itself about the vertical.
+
+   WHAT IS PINNED
+   - Layout: the Mitre and Rotate piece wheels are side by side, Rotate on the right; each has its - / + directly
+     under it and, under those, its box - the Mitre's with Square beside it (not beside the wheel, as they were).
+   - The wheel reads the piece's heading: 0 for a piece as loaded, and 90 after a clockwise quarter turn (its own +X
+     then lies along the plate's +Z).
+   - A real drag round the wheel turns the piece by the pointer's turn (clockwise on the wheel = clockwise on the
+     piece), a press that does not move does nothing, and the wheel rests on a 45 degree tick it passes within 3.
+   - The box takes a heading; - / + step 1 degree a press (Shift 0.1); the arrow keys step it.
+   - The blade goes with the piece: after the piece is turned the blade is still square across its length.
+   - One Undo point for a drag, and Undo gives the heading back; a locked piece is not turned.
+   - The Mitre's 90 button sits under Square and jumps the blade to the opposite direction (mitre 90): the blade's normal turns
+     a quarter-turn about the vertical; Square takes it back.
+   - Hide blade (a box at the top of the card): the blade, its tab and the whole-plate blade are not drawn; a real click on the piece
+     only picks it (the blade is not placed or dragged, a press where the hidden tab was takes no hold); the wheel still turns the
+     piece; Cut is off while hidden; it survives an Undo, and nothing else: shutting the Cut card clears it and the blade is out whenever the card opens.
+   - The axes: a tick each for Horizontal (ticked by default), Front/back and Side/side, one at a time (the one in
+     use cannot be cleared); the wheel then turns the piece about it. A lean reads the piece's tilt from level, 0 flat.
+     Front/back tips it along its length (its ends go up and down), Side/side across it. The same wheel, box, - / +,
+     real drag and Undo. There are no rotate rings on the card.
+   - A lean pivots the piece IN PLACE about ONE fixed line: its centre does not rise or fall as it tips (it passes through
+     the plate where it must) and it does not jump up when the wheel pauses or the drag is let go. It is stood on the plate
+     when the wheel's turn ends - another axis ticked, a click outside the card, Cut - not by a timer.
+   - A near-square piece (the spiral's shape) keeps that line all the way round: its own X stays put through 20, 50, 80,
+     110, 140 degrees (the footprint of a piece tipping over swaps its long side, which named a different axis each step).
+   - A lean reads the TRUE lean from where the piece started: 90 with the piece on its edge (not 0), 120 past it.
+   - Undo and Redo: the wheel reads the pose that came back (it kept the old number).                                  */
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { withApp, loadSTL } = require('./nso_app_harness');
+
+let fails = 0;
+const check = (name, cond, detail) => {
+  console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail ? ' - ' + detail : ''));
+  if (!cond) fails++;
+};
+
+function box(Lx, Wy, Hz) {
+  const o = [];
+  const q = (a, b, c, d) => o.push(...a, ...b, ...c, ...a, ...c, ...d);
+  q([0, 0, 0], [0, Wy, 0], [Lx, Wy, 0], [Lx, 0, 0]); q([0, 0, Hz], [Lx, 0, Hz], [Lx, Wy, Hz], [0, Wy, Hz]);
+  q([0, 0, 0], [Lx, 0, 0], [Lx, 0, Hz], [0, 0, Hz]); q([0, Wy, 0], [0, Wy, Hz], [Lx, Wy, Hz], [Lx, Wy, 0]);
+  q([0, 0, 0], [0, 0, Hz], [0, Wy, Hz], [0, Wy, 0]); q([Lx, 0, 0], [Lx, Wy, 0], [Lx, Wy, Hz], [Lx, 0, Hz]);
+  return o;
+}
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-cut-rotate-dial-'));
+function stl(name, soup) {
+  const f = path.join(TMP, name), n = soup.length / 9, b = Buffer.alloc(84 + n * 50);
+  b.writeUInt32LE(n, 80);
+  for (let t = 0; t < n; t++) for (let k = 0; k < 9; k++) b.writeFloatLE(soup[t * 9 + k], 84 + t * 50 + 12 + k * 4);
+  fs.writeFileSync(f, b);
+  return f;
+}
+
+const HELP = `
+window.__rect = id => { const r = document.getElementById(id).getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2, b: r.bottom, r: r.right }; };
+window.__heading = () => cutPieceHeading();
+/* The piece's own +X in the world, and the blade's normal in the world. */
+window.__axes = function () {
+  const p = state.placed[state.selectedIndex]; p.mesh.updateMatrixWorld(true);
+  const x = new THREE.Vector3(1, 0, 0).transformDirection(p.mesh.matrixWorld);
+  const i = getCutPlaneLocal(getActiveModel());
+  return { x: x.toArray(), n: i.normalWorld.toArray() };
+};
+`;
+
+withApp(async (page, logs) => {
+  await page.addScriptTag({ content: HELP });
+  const id = await loadSTL(page, stl('bar.stl', box(60, 14, 8)));
+  await page.click('#menu-cut > summary');
+  await page.waitForTimeout(150);
+  await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), id);
+  await page.waitForTimeout(150);
+  const R = id_ => page.evaluate(i => __rect(i), id_);
+  const heading = () => page.evaluate(() => __heading());
+  const dragDial = async (fromDeg, toDeg, steps) => {
+    const r = await R('cut-rotate-dial'), rad = r.w * 0.4;
+    const at = d => [r.cx + rad * Math.sin(d * Math.PI / 180), r.cy - rad * Math.cos(d * Math.PI / 180)];
+    const a = at(fromDeg);
+    await page.mouse.move(a[0], a[1]); await page.mouse.down();
+    for (let k = 1; k <= steps; k++) { const b = at(fromDeg + (toDeg - fromDeg) * k / steps); await page.mouse.move(b[0], b[1]); }
+    await page.mouse.up();
+  };
+
+  console.log('layout');
+  const md = await R('cut-miter-dial'), rd = await R('cut-rotate-dial'), mdeg = await R('cut-miter-deg'), sq = await R('btn-cut-square');
+  const mm = await R('btn-cut-miter-minus'), mp = await R('btn-cut-miter-plus'), rdeg = await R('cut-rotate-deg'), rm = await R('btn-cut-rotate-minus'), rp = await R('btn-cut-rotate-plus');
+  check('the wheels are side by side, Rotate piece on the right', Math.abs(md.cy - rd.cy) < 3 && rd.x > md.r - 1, JSON.stringify({ mitreX: md.x, rotX: rd.x }));
+  check('each wheel has its - / + directly under it, inside its width', mm.y - md.b >= 0 && mm.y - md.b < 14 && rm.y - rd.b >= 0 && rm.y - rd.b < 14 &&
+    mm.x >= md.x - 0.5 && mp.r <= md.r + 0.5 && rm.x >= rd.x - 0.5 && rp.r <= rd.r + 0.5, JSON.stringify({ mitre: mm.y - md.b, rotate: rm.y - rd.b }));
+  const r90a = await R('btn-cut-miter-90');
+  check('the Mitre number is the CENTRE of its wheel (no box under it)', Math.abs(mdeg.cx - (md.x + md.w / 2)) < 3 && Math.abs(mdeg.cy - (md.y + md.h / 2)) < 3 && mdeg.w < md.w * 0.7 && mdeg.y < mm.y,
+    JSON.stringify({ box: [mdeg.cx, mdeg.cy], wheel: [md.x + md.w / 2, md.y + md.h / 2] }));
+  check('Square and 90 sit side by side under the Mitre - / +, inside the Mitre column', sq.y >= mm.b - 1 && Math.abs(sq.cy - r90a.cy) < 2 && r90a.x >= sq.r - 1 && r90a.r <= rd.x + 4 && sq.x >= md.x - 20,
+    JSON.stringify({ steps: mm.b, square: [sq.x, sq.y, sq.r], ninety: [r90a.x, r90a.y, r90a.r] }));
+  const bd = await R('cut-bevel-dial'), bdeg = await R('cut-bevel-deg'), plumbR = await R('btn-cut-plumb'), bm = await R('btn-cut-bevel-minus'), bp = await R('btn-cut-bevel-plus');
+  check('the Bevel wheel is a half wheel (about 60 px high) whose left edge lines up with the Mitre wheel above it', bd.h < 70 && bd.h > 50 && Math.abs(bd.x - md.x) < 1.5 && Math.abs(bd.w - md.w) < 1.5, JSON.stringify({ bevel: [bd.x, bd.w, bd.h], mitre: [md.x, md.w] }));
+  check('the Bevel number is in the half disc, centred across it, above its flat edge', Math.abs(bdeg.cx - (bd.x + bd.w / 2)) < 3 && bdeg.cy > bd.y + 18 && bdeg.b < bd.y + bd.h * 50 / 58, JSON.stringify({ box: [bdeg.cx, bdeg.cy, bdeg.b], wheel: [bd.x, bd.y, bd.w, bd.h] }));
+  check('the Bevel - / + stand in the Rotate column, lined up exactly with the Rotate - / + above, and beside the wheel (not under it)', Math.abs(bm.x - rm.x) < 1.5 && Math.abs(bp.r - rp.r) < 1.5 && bm.x > bd.r - 4 && bm.y < bd.b && bm.b > bd.y,
+    JSON.stringify({ bevelMinus: [bm.x, bm.y], rotateMinus: [rm.x, rm.y], bevelPlus: [bp.r], rotatePlus: [rp.r], wheel: [bd.r, bd.y, bd.b] }));
+  check('Plumb is under the Bevel - / + and as wide as the pair', plumbR.y >= bm.b - 1 && Math.abs(plumbR.x - bm.x) < 1.5 && Math.abs(plumbR.r - bp.r) < 1.5, JSON.stringify({ plumb: [plumbR.x, plumbR.r, plumbR.y], pair: [bm.x, bp.r, bm.b] }));
+  {
+    const labs = await page.evaluate(() => [...document.querySelectorAll('.cut-dial-label')].map(l => { const r = l.getBoundingClientRect(), w = l.parentElement.getBoundingClientRect(); return { t: l.textContent, dx: r.left - w.left, dy: r.top - w.top, w: r.width }; }));
+    check('the three wheel names sit at the wheels\' top-left corners, and Rotate is just "Rotate"', labs.map(l => l.t).join() === 'Mitre,Rotate,Bevel' && labs.every(l => l.dx >= -6 && l.dx < 6 && l.dy >= 0 && l.dy < 6 && l.w < 45), JSON.stringify(labs));
+    const stat = await page.evaluate(() => { const e = document.getElementById('cutter-status'); return { text: e.textContent, shown: e.offsetParent !== null }; });
+    check('no instructions on the card: the status line is empty and takes no room', stat.text === '' && !stat.shown, JSON.stringify(stat));
+    const hints = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools .hint')].filter(e => e.offsetParent !== null).map(e => e.textContent));
+    check('...and no hint lines under the wheels', hints.length === 0, JSON.stringify(hints));
+  }
+  check('the Rotate piece number is the CENTRE of its wheel (no box under it): inside the rail, on its middle', Math.abs(rdeg.cx - (rd.x + rd.w / 2)) < 3 && Math.abs(rdeg.cy - (rd.y + rd.h / 2)) < 3 && rdeg.w < rd.w * 0.7 && rdeg.y < rm.y,
+    JSON.stringify({ box: [rdeg.cx, rdeg.cy], wheel: [rd.x + rd.w / 2, rd.y + rd.h / 2] }));
+  check('nothing sticks out of the card', rp.r < 440 && sq.r < rd.x + 8, 'right edge ' + rp.r);
+
+  console.log('the Mitre 90 button');
+  {
+    const r90 = await R('btn-cut-miter-90');
+    check('90 sits beside Square, in line with it and the same width', Math.abs(r90.cy - sq.cy) < 2 && r90.x >= sq.r - 1 && Math.abs(r90.w - sq.w) < 1.5, JSON.stringify({ square: [sq.x, sq.r, sq.cy], ninety: [r90.x, r90.r, r90.cy] }));
+    check('...inside the Mitre column', r90.r <= rd.x + 4, JSON.stringify({ ninetyRight: r90.r, rotateWheel: rd.x }));
+    const n0 = await page.evaluate(() => getCutPlaneLocal(getActiveModel()).normalWorld.toArray());
+    await page.click('#btn-cut-miter-90');
+    await page.waitForTimeout(100);
+    const n1 = await page.evaluate(() => getCutPlaneLocal(getActiveModel()).normalWorld.toArray());
+    const mit = await page.evaluate(() => ({ deg: state.cutMiterDeg, box: document.getElementById('cut-miter-deg').value, wheel: document.getElementById('cut-miter-deg').value }));
+    const dot0 = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2];
+    check('pressing 90 sets the mitre to 90 (the wheel centre reads 90°)', mit.deg === 90 && mit.box === '90°', JSON.stringify(mit));
+    check('...and the blade has turned a quarter-turn: its normal is square to what it was', Math.abs(dot0) < 1e-6, 'n.n0 = ' + dot0.toFixed(6));
+    await page.click('#btn-cut-square');
+    await page.waitForTimeout(100);
+    const n2 = await page.evaluate(() => getCutPlaneLocal(getActiveModel()).normalWorld.toArray());
+    check('Square takes it back to where it was', Math.abs(n2[0] * n0[0] + n2[1] * n0[1] + n2[2] * n0[2]) > 1 - 1e-9 && (await page.evaluate(() => state.cutMiterDeg)) === 0);
+  }
+
+  console.log('the heading');
+  check('a piece as loaded reads 0', (await heading()) === 0, String(await heading()));
+  check('the wheel shows it, with its degree sign', (await page.inputValue('#cut-rotate-deg')) === '0°');
+  await page.fill('#cut-rotate-deg', '90'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(150);
+  let ax = await page.evaluate(() => __axes());
+  check('typing 90 turns the piece a clockwise quarter: its +X lies along the plate\'s +Z', (await heading()) === 90 && ax.x[2] > 0.99 && Math.abs(ax.x[0]) < 0.02, JSON.stringify({ h: await heading(), x: ax.x.map(v => +v.toFixed(3)) }));
+  check('the wheel centre shows 90°', (await page.inputValue('#cut-rotate-deg')) === '90°');
+  const tr = await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'));
+  check('and the handle is at 90', /rotate\(90 /.test(tr), tr);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  check('the blade went with the piece: still square across its length', Math.abs(dot(ax.n, ax.x)) > 0.999, 'n.x ' + dot(ax.n, ax.x).toFixed(4));
+
+  console.log('the centre of the wheel is its box');
+  {
+    const c = await R('cut-rotate-deg');
+    const h0 = await heading(), undo0 = await page.evaluate(() => (state.undoStack || []).length);
+    await page.mouse.click(c.cx, c.cy);                                       // a REAL click on the readout
+    await page.waitForTimeout(120);
+    const f = await page.evaluate(() => { const e = document.getElementById('cut-rotate-deg'); return { active: document.activeElement === e, value: e.value, sel: e.value.slice(e.selectionStart, e.selectionEnd) }; });
+    check('a click in the centre takes the focus and selects the whole reading, so typing replaces it', f.active && f.value === '90°' && f.sel === '90°', JSON.stringify(f));
+    check('...and the click did not turn the piece or the wheel', (await heading()) === h0 && h0 === 90);
+    await page.keyboard.type('135'); await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+    check('typing 135 and Enter turns the piece to 135 and the centre reads 135° again', (await heading()) === 135 && (await page.inputValue('#cut-rotate-deg')) === '135°' && !(await page.evaluate(() => document.activeElement && document.activeElement.id === 'cut-rotate-deg')),
+      JSON.stringify({ h: await heading(), box: await page.inputValue('#cut-rotate-deg') }));
+    await page.mouse.click(c.cx, c.cy); await page.waitForTimeout(80);
+    await page.keyboard.type('10'); await page.keyboard.press('Escape'); await page.waitForTimeout(120);
+    check('Esc puts the reading back and turns nothing', (await heading()) === 135 && (await page.inputValue('#cut-rotate-deg')) === '135°');
+    await page.mouse.click(c.cx, c.cy); await page.waitForTimeout(80);
+    await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Shift+ArrowDown');
+    await page.waitForTimeout(120);
+    check('Up / Down in the box step the piece 1 degree (Shift 0.1): 135 -> 136 -> 137 -> 136.9', Math.abs((await heading()) - 136.9) < 0.051 && (await page.inputValue('#cut-rotate-deg')) === '136.9°', String(await heading()));
+    await page.keyboard.press('Tab'); await page.waitForTimeout(100);
+    check('leaving the box with nothing typed turns nothing and puts the degree sign back', Math.abs((await heading()) - 136.9) < 0.051 && (await page.inputValue('#cut-rotate-deg')) === '136.9°');
+    await page.fill('#cut-rotate-deg', '90'); await page.press('#cut-rotate-deg', 'Tab'); await page.waitForTimeout(150);   // back to 90 for what follows
+    check('and back at 90 for the gates below', (await heading()) === 90);
+  }
+
+  console.log('the Mitre and Bevel centres are boxes too');
+  {
+    const mi = await R('cut-miter-deg');
+    await page.mouse.click(mi.cx, mi.cy); await page.waitForTimeout(120);
+    const f = await page.evaluate(() => { const e = document.getElementById('cut-miter-deg'); return { active: document.activeElement === e, sel: e.value.slice(e.selectionStart, e.selectionEnd), v: e.value }; });
+    check('a click in the Mitre centre selects its reading', f.active && f.sel === f.v && f.v === '0°', JSON.stringify(f));
+    await page.keyboard.type('30'); await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+    check('typing 30 + Enter sets the mitre to 30 and the centre reads 30°', (await page.evaluate(() => state.cutMiterDeg)) === 30 && (await page.inputValue('#cut-miter-deg')) === '30°');
+    check('...and the wheel handle turned with it', /rotate\(30 /.test(await page.evaluate(() => document.getElementById('cut-dial-turn').getAttribute('transform'))));
+    await page.mouse.click(mi.cx, mi.cy); await page.waitForTimeout(80);
+    await page.keyboard.type('77'); await page.keyboard.press('Escape'); await page.waitForTimeout(120);
+    check('Esc puts the Mitre reading back', (await page.evaluate(() => state.cutMiterDeg)) === 30 && (await page.inputValue('#cut-miter-deg')) === '30°');
+    await page.mouse.click(mi.cx, mi.cy); await page.waitForTimeout(80);
+    await page.keyboard.press('ArrowUp'); await page.keyboard.press('Shift+ArrowDown'); await page.waitForTimeout(100);
+    check('Up / Down step the mitre 1 degree (Shift 0.1): 30 -> 31 -> 30.9', Math.abs((await page.evaluate(() => state.cutMiterDeg)) - 30.9) < 0.051 && (await page.inputValue('#cut-miter-deg')) === '30.9°');
+    await page.keyboard.press('Tab'); await page.click('#btn-cut-square'); await page.waitForTimeout(100);
+    check('Square takes it back to 0°', (await page.evaluate(() => state.cutMiterDeg)) === 0 && (await page.inputValue('#cut-miter-deg')) === '0°');
+    const bv = await R('cut-bevel-deg');
+    await page.mouse.click(bv.cx, bv.cy); await page.waitForTimeout(120);
+    await page.keyboard.type('-12.5'); await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+    check('typing -12.5 in the Bevel centre sets the bevel and it reads -12.5°', (await page.evaluate(() => state.cutBevelDeg)) === -12.5 && (await page.inputValue('#cut-bevel-deg')) === '-12.5°', String(await page.evaluate(() => state.cutBevelDeg)));
+    await page.click('#btn-cut-bevel-plus'); await page.waitForTimeout(100);
+    check('the Bevel + button steps it and the centre follows (-11.5°)', (await page.inputValue('#cut-bevel-deg')) === '-11.5°');
+    await page.mouse.click(bv.cx, bv.cy); await page.waitForTimeout(80);
+    await page.keyboard.type('0'); await page.keyboard.press('Enter'); await page.waitForTimeout(100);
+    check('and 0 puts it back to plumb', (await page.evaluate(() => state.cutBevelDeg)) === 0 && (await page.inputValue('#cut-bevel-deg')) === '0°');
+  }
+
+  console.log('drag');
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+  const undos0 = await page.evaluate(() => state.undoStack ? state.undoStack.length : null);
+  // a press that does not move does nothing
+  const r = await R('cut-rotate-dial');
+  await page.mouse.move(r.cx + 0.4 * r.w * Math.sin(1), r.cy - 0.4 * r.w * Math.cos(1));
+  await page.mouse.down(); await page.mouse.up();
+  check('a press without a move does nothing', (await heading()) === 0);
+  await dragDial(0, 20, 8);
+  let h = await heading();
+  check('dragging 20 degrees clockwise turns the piece 20 clockwise', Math.abs(h - 20) < 1.5, 'heading ' + h);
+  await dragDial(20, 110, 20);
+  h = await heading();
+  check('a longer drag is as far as the pointer went (20 + 90 = 110), through the 45 and 90 ticks', Math.abs(h - 110) < 1.5, 'heading ' + h);
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+  await dragDial(0, 43, 10);
+  h = await heading();
+  check('within 3 degrees of a 45 tick it rests on the tick (43 -> 45)', h === 45, 'heading ' + h);
+  await dragDial(0, 12, 6);
+  h = await heading();
+  check('...and leaves it again when the pointer goes on (45 + 12 = 57)', Math.abs(h - 57) < 1.5, 'heading ' + h);
+  const undoOne = await page.evaluate(() => state.undoStack ? state.undoStack.length : null);
+  await page.fill('#cut-rotate-deg', '10'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(80);
+  await page.click('#btn-undo');
+  await page.waitForTimeout(200);
+  const hb = await heading();
+  check('Undo gives the turn back (the typed 10 is one Undo point)', hb != null && Math.abs(hb - h) < 1.5, 'heading ' + hb + ' vs ' + h);
+
+  console.log('- / + and the keys');
+  const h1 = await heading();
+  await page.click('#btn-cut-rotate-plus');
+  await page.waitForTimeout(100);
+  const h2 = await heading();
+  check('+ is 1 degree clockwise', Math.abs(((h2 - h1 + 540) % 360) - 180 - 1) < 0.05, h1 + ' -> ' + h2);
+  await page.click('#btn-cut-rotate-minus');
+  await page.waitForTimeout(100);
+  check('- is 1 degree back', Math.abs(((await heading()) - h1 + 540) % 360 - 180) < 0.05, String(await heading()));
+  await page.focus('#cut-rotate-dial');
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(100);
+  const h3 = await heading();
+  check('the right arrow key turns it 1 degree clockwise', Math.abs(((h3 - h1 + 540) % 360) - 180 - 1) < 0.05, h1 + ' -> ' + h3);
+  await page.keyboard.press('Shift+ArrowLeft');
+  await page.waitForTimeout(100);
+  const h4 = await heading();
+  check('Shift+left is a tenth of a degree back', Math.abs(((h3 - h4 + 540) % 360) - 180 - 0.1) < 0.06, h3 + ' -> ' + h4);
+
+  console.log('the axes: Horizontal, Front/back, Side/side');
+  const ticks = () => page.evaluate(() => ({ h: document.getElementById('chk-cut-rot-h').checked, fb: document.getElementById('chk-cut-rot-fb').checked, ss: document.getElementById('chk-cut-rot-ss').checked }));
+  const axesOf = () => page.evaluate(() => { const m = state.placed[state.selectedIndex].mesh; m.updateMatrixWorld(true);
+    const q = m.quaternion, v = e => new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(q).toArray();
+    return { x: v([1, 0, 0]), y: v([0, 1, 0]), z: v([0, 0, 1]) }; });
+  const rh = await R('chk-cut-rot-h'), rfb = await R('chk-cut-rot-fb'), rss = await R('chk-cut-rot-ss');
+  check('three axis choices in one row ABOVE the wheels, Horizontal first, filling the width of the card', rh.b <= md.y + 2 && rh.b <= rd.y + 2 && Math.abs(rfb.cy - rh.cy) < 2 && Math.abs(rss.cy - rh.cy) < 2 && rh.x < rfb.x && rfb.x < rss.x && rss.r - rh.x > 250, JSON.stringify({ h: [rh.x, rh.y], fb: [rfb.x], ss: [rss.x, rss.r], wheelTop: md.y }));
+  check('Horizontal is ticked by default, the leans are not', JSON.stringify(await ticks()) === JSON.stringify({ h: true, fb: false, ss: false }), JSON.stringify(await ticks()));
+  check('and the card has no rotate rings option', await page.evaluate(() => !document.getElementById('chk-cut-rotate') && !document.getElementById('cut-rotate-rings') && !/Rotate rings/.test(document.getElementById('edit-card').textContent)));
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+  await page.click('#chk-cut-rot-fb');
+  check('ticking Front/back unticks Horizontal (one at a time)', JSON.stringify(await ticks()) === JSON.stringify({ h: false, fb: true, ss: false }), JSON.stringify(await ticks()));
+  await page.click('#chk-cut-rot-fb');
+  check('the axis in use cannot be unticked', (await ticks()).fb === true);
+  check('a flat piece reads 0 as a lean', (await heading()) === 0, String(await heading()));
+  const lvl = await axesOf();
+  await page.fill('#cut-rotate-deg', '20'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(150);
+  let ax2 = await axesOf();
+  const tilt = v => Math.acos(Math.min(1, Math.abs(v[1]))) * 180 / Math.PI;           // an upright axis (own Y): off vertical
+  const rise = v => Math.asin(Math.min(1, Math.abs(v[1]))) * 180 / Math.PI;           // a level axis (own X, Z): up from level
+  check('typing 20 leans the piece front over back: its LENGTH (own X) rises 20 degrees and its width stays level', Math.abs(rise(ax2.x) - 20) < 0.6 && rise(ax2.z) < 0.6 && Math.abs(tilt(ax2.y) - 20) < 0.6,
+    JSON.stringify({ xRise: rise(ax2.x).toFixed(1), yTilt: tilt(ax2.y).toFixed(1), zRise: rise(ax2.z).toFixed(1) }));
+  check('the wheel and box read 20, the handle at 20', (await heading()) === 20 && (await page.inputValue('#cut-rotate-deg')) === '20°' && /rotate\(20 /.test(await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'))));
+  await page.click('#btn-cut-rotate-plus');
+  await page.waitForTimeout(80);
+  check('+ is 1 degree more lean', (await heading()) === 21, String(await heading()));
+  await dragDial(0, 30, 8);
+  let hl2 = await heading();
+  check('a real drag of 30 degrees clockwise leans it 30 more (21 + 30)', Math.abs(hl2 - 51) < 1.5, 'reading ' + hl2);
+  await page.click('#btn-undo');
+  await page.waitForTimeout(200);
+  check('Undo gives the lean back', Math.abs((await heading()) - 21) < 1.5, 'reading ' + (await heading()));
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+  check('typing 0 brings it level again', (await heading()) === 0 && tilt((await axesOf()).y) < 0.3, JSON.stringify({ h: await heading(), box: await page.inputValue('#cut-rotate-deg'), active: await page.evaluate(() => document.activeElement && document.activeElement.id) }));
+  await page.click('#chk-cut-rot-ss');
+  check('ticking Side/side clears Front/back', JSON.stringify(await ticks()) === JSON.stringify({ h: false, fb: false, ss: true }));
+  await page.fill('#cut-rotate-deg', '25'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(150);
+  ax2 = await axesOf();
+  check('Side/side leans it across: its WIDTH (own Z) rises 25 degrees and its length stays level', Math.abs(rise(ax2.z) - 25) < 0.6 && rise(ax2.x) < 0.6, JSON.stringify({ xRise: rise(ax2.x).toFixed(1), zRise: rise(ax2.z).toFixed(1) }));
+  check('the blade is still on the piece through a lean', await page.evaluate(() => !!state.cutHelper && !!getCutPlaneLocal(getActiveModel())));
+  await page.fill('#cut-rotate-deg', '-15'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(150);
+  check('a lean reads signed: -15 leans it the other way', (await heading()) === -15 && Math.abs(rise((await axesOf()).z) - 15) < 0.6, String(await heading()));
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+  await page.click('#chk-cut-rot-h');
+  check('ticking Horizontal again: the wheel reads the heading again', JSON.stringify(await ticks()) === JSON.stringify({ h: true, fb: false, ss: false }) && (await heading()) !== null);
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+
+  console.log('a lean pivots in place, through the plate, about one line');
+  {
+    const box = () => page.evaluate(() => { const b = new THREE.Box3().setFromObject(state.placed[state.selectedIndex].mesh); const c = b.getCenter(new THREE.Vector3()); return { cy: c.y, cx: c.x, cz: c.z, lo: b.min.y }; });
+    await page.click('#chk-cut-rot-fb');
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.waitForTimeout(300);
+    await page.click('#chk-cut-rot-h');                   // the turn in hand lands: flat on the plate
+    await page.click('#chk-cut-rot-fb');
+    const flat = await box();
+    check('flat on the plate: the lowest point is at the bed (about 0.2)', Math.abs(flat.lo - 0.2) < 0.05, 'lowest ' + flat.lo.toFixed(3));
+    await page.fill('#cut-rotate-deg', '20'); await page.press('#cut-rotate-deg', 'Tab');
+    const t20 = await box();
+    await page.fill('#cut-rotate-deg', '50'); await page.press('#cut-rotate-deg', 'Tab');
+    const t50 = await box();
+    check('tipping 0 -> 20 -> 50: the centre of the piece stays where it was (no rising and falling)', Math.abs(t20.cy - flat.cy) < 0.05 && Math.abs(t50.cy - flat.cy) < 0.05 && Math.abs(t50.cx - flat.cx) < 0.05,
+      'centre height ' + flat.cy.toFixed(2) + ' -> ' + t20.cy.toFixed(2) + ' -> ' + t50.cy.toFixed(2));
+    check('...so a 60 mm bar tipped 50 degrees goes through the plate (its low end is well under it)', t50.lo < -8, 'lowest ' + t50.lo.toFixed(2));
+    await page.waitForTimeout(1600);
+    const still = await box();
+    check('a long pause does not lift it: it stays where it was, through the plate (no timer lands it)', Math.abs(still.cy - t50.cy) < 0.05 && still.lo < -8, 'centre ' + t50.cy.toFixed(2) + ' -> ' + still.cy.toFixed(2) + ', lowest ' + still.lo.toFixed(2));
+    check('...and it is still tipped 50 as the wheel reads', (await heading()) === 50, String(await heading()));
+    // a drag: held through a pause, and still in place when let go
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    const d0 = await box();
+    const rr = await R('cut-rotate-dial'), rad = rr.w * 0.4, at = d => [rr.cx + rad * Math.sin(d * Math.PI / 180), rr.cy - rad * Math.cos(d * Math.PI / 180)];
+    let q = at(0);
+    await page.mouse.move(q[0], q[1]); await page.mouse.down();
+    for (let k = 1; k <= 8; k++) { q = at(40 * k / 8); await page.mouse.move(q[0], q[1]); }
+    await page.waitForTimeout(1000);
+    const dHeld = await box();
+    check('a drag held still for a second keeps pivoting: the centre has not moved, the low end is through the plate', Math.abs(dHeld.cy - d0.cy) < 0.05 && dHeld.lo < -5 && (await heading()) === 40,
+      'centre ' + d0.cy.toFixed(2) + ' -> ' + dHeld.cy.toFixed(2) + ', lowest ' + dHeld.lo.toFixed(2));
+    await page.mouse.up();
+    await page.waitForTimeout(900);
+    const dDone = await box();
+    check('let go, it does not jump: the centre is where it was, the low end still through the plate', Math.abs(dDone.cy - d0.cy) < 0.05 && dDone.lo < -5, 'centre ' + dDone.cy.toFixed(2) + ', lowest ' + dDone.lo.toFixed(2));
+    // it lands when the wheel's turn ends: another axis ticked
+    await page.click('#chk-cut-rot-h');
+    await page.waitForTimeout(150);
+    const landed = await box();
+    check('ticking another axis ends the turn: it is stood on the plate', Math.abs(landed.lo - 0.2) < 0.05 && landed.cy > dDone.cy + 3, 'lowest ' + landed.lo.toFixed(2) + ', centre ' + dDone.cy.toFixed(2) + ' -> ' + landed.cy.toFixed(2));
+    await page.click('#chk-cut-rot-fb');
+    // a click outside the card ends it too
+    await page.fill('#cut-rotate-deg', '70'); await page.press('#cut-rotate-deg', 'Tab');
+    const out0 = await box();
+    await page.mouse.click(700, 120);
+    await page.waitForTimeout(150);
+    const out1 = await box();
+    check('a click outside the card lands it', out0.lo < -5 && Math.abs(out1.lo - 0.2) < 0.05, 'lowest ' + out0.lo.toFixed(2) + ' -> ' + out1.lo.toFixed(2));
+    await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), id);
+    // Undo gives the whole lean back, seated
+    await page.click('#btn-undo');
+    await page.waitForTimeout(250);
+    const u = await box();
+    check('one Undo takes the typed 70 back to the 40 before it, seated on the plate', Math.abs(u.lo - 0.2) < 0.06, 'lowest ' + u.lo.toFixed(2));
+    check('...and the WHEEL reads the pose that came back, 40 (it kept the old 70)', (await heading()) === 40 && (await page.inputValue('#cut-rotate-deg')) === '40°' && /rotate\(40 /.test(await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'))),
+      'reading ' + (await heading()) + ', box ' + (await page.inputValue('#cut-rotate-deg')));
+    await page.click('#btn-redo');
+    await page.waitForTimeout(250);
+    const rd = await axesOf();
+    check('Redo puts the 70 degree lean back (Redo closes and reopens the Cut tool, as it does for every helper, so the card starts again)', Math.abs(Math.acos(Math.min(1, rd.y[1])) * 180 / Math.PI - 70) < 0.8, 'own Y is ' + (Math.acos(Math.min(1, rd.y[1])) * 180 / Math.PI).toFixed(1) + ' from upright');
+    await page.click('#btn-undo');
+    await page.waitForTimeout(200);
+    await page.click('#chk-cut-rot-fb');
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.waitForTimeout(100);
+    // the reading is the TRUE lean, through the piece standing on its edge and past it
+    await page.fill('#cut-rotate-deg', '90'); await page.press('#cut-rotate-deg', 'Tab');
+    check('a lean of 90 (on its edge) reads 90, not 0', (await heading()) === 90, String(await heading()));
+    await page.fill('#cut-rotate-deg', '120'); await page.press('#cut-rotate-deg', 'Tab');
+    const ax120 = await axesOf();
+    check('past it, 120 reads 120, and the piece really is tipped 120 (60 the other side of upright)', (await heading()) === 120 && Math.abs(Math.acos(ax120.y[1]) * 180 / Math.PI - 120) < 0.8, JSON.stringify({ reading: await heading(), yUp: ax120.y.map(v => +v.toFixed(3)) }));
+    await dragDial(0, -30, 6);
+    check('a real drag carries on from there (120 - 30)', Math.abs((await heading()) - 90) < 1.5 || Math.abs((await heading()) - 90) < 4, String(await heading()));
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.click('#chk-cut-rot-h');
+    await page.waitForTimeout(150);
+    check('level again, on the plate', Math.abs((await box()).lo - 0.2) < 0.06);
+  }
+
+  console.log('a near-square piece keeps one axis the whole way round');
+  {
+    await page.evaluate(() => { if (typeof clearPlateOnly === 'function') clearPlateOnly(); });
+    const sid = await loadSTL(page, stl('square.stl', box(40, 40, 6)));
+    await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), sid);
+    await page.waitForTimeout(150);
+    await page.click('#chk-cut-rot-fb');
+    const ownX = () => page.evaluate(() => { const m = state.placed[state.selectedIndex].mesh; m.updateMatrixWorld(true); return new THREE.Vector3(1, 0, 0).applyQuaternion(m.quaternion).toArray(); });
+    const x0 = await ownX();
+    let worst = 0, centre = null, driftC = 0;
+    for (const v of [20, 50, 80, 110, 140, 170]) {
+      await page.fill('#cut-rotate-deg', String(v)); await page.press('#cut-rotate-deg', 'Tab');
+      const xx = await ownX();
+      worst = Math.max(worst, Math.acos(Math.min(1, Math.abs(xx[0] * x0[0] + xx[1] * x0[1] + xx[2] * x0[2]))) * 180 / Math.PI);
+      const c = await page.evaluate(() => new THREE.Box3().setFromObject(state.placed[state.selectedIndex].mesh).getCenter(new THREE.Vector3()).toArray());
+      if (centre) driftC = Math.max(driftC, Math.hypot(c[0] - centre[0], c[1] - centre[1], c[2] - centre[2])); else centre = c;
+    }
+    check('through 20, 50, 80, 110, 140, 170 the piece\'s own X never leaves its line (one axis, one way)', worst < 0.6, 'worst ' + worst.toFixed(2) + ' deg off');
+    check('...and its centre never moves (in place)', driftC < 0.05, driftC.toFixed(3) + ' mm');
+    check('...and the reading is the lean it was given', (await heading()) === 170, String(await heading()));
+    // the buttons too: 30 presses of + from level
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    for (let k = 0; k < 40; k++) await page.click('#btn-cut-rotate-plus');
+    const xx2 = await ownX();
+    check('40 presses of + (a 40 degree lean) never leave the line either', Math.acos(Math.min(1, Math.abs(xx2[0] * x0[0] + xx2[1] * x0[1] + xx2[2] * x0[2]))) * 180 / Math.PI < 0.6 && (await heading()) === 40, 'reading ' + (await heading()));
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.click('#chk-cut-rot-h');
+    await page.waitForTimeout(150);
+  }
+
+  console.log('Hide blade');
+  {
+    const hbox = await R('chk-cut-hide-blade');
+    const wp = await R('btn-cut-blade-plate'), axh = await R('chk-cut-rot-h');
+    check('the Hide blade box is up under the Blade block (above the axes row and the wheels), unticked', (await page.$eval('#chk-cut-hide-blade', e => e.checked)) === false && hbox.y >= wp.b - 2 && hbox.b <= axh.y + 2 && hbox.b <= md.y, JSON.stringify({ box: [hbox.x, hbox.y, hbox.b], wholePlateBottom: wp.b, axesTop: axh.y, wheelTop: md.y }));
+    check('blade shown, Cut on', await page.evaluate(() => !!state.cutHelper && state.cutHelper.visible === true && !document.getElementById('btn-cut').disabled));
+    const snap = () => page.evaluate(() => ({ cutT: state.cutT, at: JSON.stringify(state.cutBladeAt && state.cutBladeAt.local), drag: state.cutDragging, sel: state.selectedIndex, mitre: state.cutMiterDeg }));
+    const s0 = await snap();
+    await page.check('#chk-cut-hide-blade');
+    await page.waitForTimeout(100);
+    const h1 = await page.evaluate(() => ({ vis: state.cutHelper.visible, dis: document.getElementById('btn-cut').disabled, title: document.getElementById('btn-cut').title, flag: state.cutHideBlade }));
+    check('ticked: the blade is not drawn, Cut is off and says why', h1.vis === false && h1.dis === true && /hidden/i.test(h1.title) && h1.flag === true, JSON.stringify(h1));
+    // a real click on the piece, off its middle: it picks the piece and does not place the blade
+    const pc = await page.evaluate(() => { const m = state.placed[state.selectedIndex].mesh, b = new THREE.Box3().setFromObject(m), c = b.getCenter(new THREE.Vector3());
+      const w = [c.x + 8, b.max.y, c.z - 6], v = new THREE.Vector3(...w).project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
+      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; });
+    await page.mouse.move(pc.x, pc.y); await page.mouse.down();
+    const during = await snap();
+    await page.mouse.move(pc.x + 40, pc.y + 10, { steps: 5 });
+    await page.mouse.up();
+    const s1 = await snap();
+    check('a real click and drag on the piece does not place or drag the blade', during.drag === false && s1.cutT === s0.cutT && s1.at === s0.at, JSON.stringify({ cutT: [s0.cutT, s1.cutT], dragging: during.drag }));
+    check('...the piece stays picked', s1.sel === s0.sel && s1.sel >= 0);
+    // where the hidden tab was: a press takes no hold
+    const tp = await page.evaluate(() => { const ball = state.cutHelper.children.find(c => c.userData.cutBall); ball.updateMatrixWorld(true);
+      const w = new THREE.Vector3().setFromMatrixPosition(ball.matrixWorld), v = w.clone().project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
+      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; });
+    await page.mouse.move(tp.x, tp.y); await page.mouse.down();
+    const onTab = await snap();
+    await page.mouse.up();
+    check('a press where the hidden tab was takes no hold of the blade', onTab.drag === false);
+    // the wheel still turns the piece
+    await page.fill('#cut-rotate-deg', '30'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.waitForTimeout(150);
+    const rot = await page.evaluate(() => ({ h: cutPieceHeading(), vis: state.cutHelper.visible }));
+    check('the Rotate piece wheel still turns the piece, the blade staying hidden', rot.h === 30 && rot.vis === false, JSON.stringify(rot));
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    // the Whole plate blade hides too
+    await page.click('#btn-cut-blade-plate');
+    await page.waitForTimeout(150);
+    const pl = await page.evaluate(() => ({ vis: state.cutPlateHelper ? state.cutPlateHelper.visible : null, dis: document.getElementById('btn-cut').disabled }));
+    check('the whole-plate blade is hidden too, and Cut is off', pl.vis === false && pl.dis === true, JSON.stringify(pl));
+    await page.click('#btn-cut-blade-full');
+    await page.waitForTimeout(150);
+    // an Undo leaves the tool open and the blade hidden (a Redo shuts the whole Cut card, as it does for every tool, so that starts again)
+    await page.fill('#cut-rotate-deg', '25'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.waitForTimeout(150);
+    await page.click('#btn-undo'); await page.waitForTimeout(250);
+    const afterUndo = await page.evaluate(() => ({ flag: state.cutHideBlade, open: state.cutterOpen, vis: state.cutHelper ? state.cutHelper.visible : null, box: document.getElementById('chk-cut-hide-blade').checked, dis: document.getElementById('btn-cut').disabled, h: cutPieceHeading() }));
+    check('an Undo of a turn keeps the blade hidden and Cut off, and the wheel reads the pose that came back', afterUndo.flag === true && afterUndo.open === true && afterUndo.vis === false && afterUndo.box && afterUndo.dis && afterUndo.h === 0, JSON.stringify(afterUndo));
+    // untick: the blade is back, and a click places it again
+    await page.uncheck('#chk-cut-hide-blade');
+    await page.waitForTimeout(100);
+    const h2 = await page.evaluate(() => ({ vis: state.cutHelper.visible, dis: document.getElementById('btn-cut').disabled }));
+    check('unticked: the blade is drawn and Cut is on', h2.vis === true && h2.dis === false, JSON.stringify(h2));
+    await page.mouse.click(pc.x, pc.y);
+    await page.waitForTimeout(150);
+    const s2 = await snap();
+    check('...and a click on the piece places the blade again', s2.cutT !== s0.cutT || s2.at !== s0.at, JSON.stringify({ cutT: [s0.cutT, s2.cutT] }));
+    // shutting the card clears it
+    await page.check('#chk-cut-hide-blade');
+    await page.evaluate(() => { document.getElementById('menu-cut').open = false; });
+    await page.waitForTimeout(250);
+    check('shutting the Cut card clears Hide blade', await page.evaluate(() => state.cutHideBlade === false));
+    await page.evaluate(() => { document.getElementById('menu-cut').open = true; });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => selectPlaced(0));
+    await page.waitForTimeout(150);
+    check('...and the card opens with the blade shown', await page.evaluate(() => !document.getElementById('chk-cut-hide-blade').checked && !!state.cutHelper && state.cutHelper.visible === true));
+    // not a setting: however the card comes to open, the blade is out
+    await page.evaluate(() => { state.cutterOpen = false; state.cutHideBlade = true; openCutter('cut'); selectPlaced(0); });      // the tool opening afresh with the card already open
+    await page.waitForTimeout(150);
+    check('opening the Cut card always shows the blade, whatever Hide blade was before', await page.evaluate(() => state.cutHideBlade === false && !document.getElementById('chk-cut-hide-blade').checked && !!state.cutHelper && state.cutHelper.visible === true && !document.getElementById('btn-cut').disabled));
+    await page.click('#chk-cut-rot-h');
+  }
+
+  console.log('a locked piece');
+  await page.evaluate(() => { getActiveModel().posLock = true; });
+  const hl = await heading();
+  await page.click('#btn-cut-rotate-plus');
+  await page.waitForTimeout(100);
+  await page.fill('#cut-rotate-deg', '200'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+  await dragDial(0, 30, 6);
+  check('a position-locked piece is not turned, by +, the box or the wheel', (await heading()) === hl, 'heading ' + hl + ' -> ' + (await heading()));
+  await page.evaluate(() => { getActiveModel().posLock = false; });
+  await page.click('#btn-cut-rotate-plus');
+  await page.waitForTimeout(100);
+  check('and turns again once unlocked', Math.abs((await heading()) - hl - 1) < 0.06, String(await heading()));
+
+  const errs = logs.filter(l => /error|exception/i.test(l) && !/favicon|Failed to load resource/i.test(l));
+  check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+  console.log(fails ? '\n' + fails + ' FAILED' : '\nall gates held');
+  process.exit(fails ? 1 : 0);
+}).catch(e => { console.error(e); process.exit(2); });

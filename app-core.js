@@ -3,7 +3,8 @@
 // ===================== Plate Presets =====================
 const PLATES = {
   a1mini: { name: 'Bambu A1 Mini', w: 180, d: 180 },
-  a1:     { name: 'Bambu A1 / P1S / X1C', w: 256, d: 256 },
+  a1:     { name: 'Bambu A1 / X1C', w: 256, d: 256 },
+  p1s:    { name: 'Bambu P1S', w: 256, d: 256 },
   prusa:  { name: 'Prusa MK4 / MK3S', w: 250, d: 210 },
   ender:  { name: 'Creality Ender 3', w: 220, d: 220 },
   custom: { name: 'Custom', w: 180, d: 180 }
@@ -62,6 +63,11 @@ const state = {
   joinPickMode: false,
   joinArmed: null,
   joinSession: false,
+  /* The Subtract card picks its own A and B (app-join.js, startSubtractFlow) on
+     the Join slots, so the Join card is not visited. True while that run of picks
+     owns the session: the click on A arms B by itself, and shutting the card
+     ends it. clearJoinSlots() puts it down with the slots. */
+  subtractFlow: false,
   joinFaceA: null,
   joinFaceB: null,
   /* Triple join's third slot. Held here with the rest of the Join slots so
@@ -271,6 +277,7 @@ const UNDO_REPLACE_LABEL = {
   carveReplace: 'Undo: Carve reverted',
   notchReplace: 'Undo: Notch reverted',
   punchReplace: 'Undo: Punch reverted',
+  threadExtend: 'Undo: thread length put back',
   textReplace: 'Undo: Text reverted',
   weaveReplace: 'Undo: Weave reverted',
   wrapReplace: 'Undo: Wrap reverted',
@@ -283,6 +290,12 @@ const UNDO_REPLACE_LABEL = {
   bendReplace: 'Undo: Bend reverted',
   tubeEdgeReplace: 'Undo: Tube edge reverted',
   tubeNeckReplace: 'Undo: Neck reverted',
+  rodNeckReplace: 'Undo: Cylinder neck reverted',
+  rodBranchReplace: 'Undo: Branch reverted',
+  tubeBranchReplace: 'Undo: Tube branch reverted',
+  squareReducerReplace: 'Undo: Square reducer reverted',
+  squareNeckReplace: 'Undo: Square neck reverted',
+  squareBranchReplace: 'Undo: Square branch reverted',
   closeReplace: 'Undo: Close reverted',
   mirrorReplace: 'Undo: Mirror reverted',
   cropReplace: 'Undo: Crop reverted',
@@ -293,6 +306,10 @@ const UNDO_REPLACE_LABEL = {
   fillReplace: 'Undo: Fill reverted',
   fattenReplace: 'Undo: Fatten reverted',
   attachReplace: 'Undo: Attach reverted',
+  interlockReplace: 'Undo: Interlock reverted',
+  bossReplace: 'Undo: Step / Boss reverted',
+  drawConnectReplace: 'Undo: Draw > Connect reverted',
+  featureSizeReplace: 'Undo: Feature size reverted',
   detachReplace: 'Undo: Detach reverted',
   reattachReplace: 'Undo: Reattach reverted',
   stockReplace: 'Undo: Stock adjustment reverted',
@@ -329,6 +346,8 @@ function undoLast() {
     nsoReleaseGeometries(leaving);
     updateUndoBtn();
   }
+  if (typeof cutAfterPoseUndo === 'function') cutAfterPoseUndo();      // the Cut card's Rotate piece wheel reads the pose that came back
+  if (typeof nsoPaintSelLook === 'function') nsoPaintSelLook();   // a Select all group still standing: its look on the meshes the Undo put back
   return r;
 }
 
@@ -349,7 +368,7 @@ function undoLast() {
    the Supports card) keep state of their own that a snapshot of the plate
    does not hold; they are not redoable and an Undo of one empties the stack. */
 const REDO_LABEL = {
-  movePlaced: 'move re-applied', posePlaced: 'pose re-applied', addModels: 'clone re-applied',
+  movePlaced: 'move re-applied', groupMovePlaced: 'group move re-applied', posePlaced: 'pose re-applied', addModels: 'clone re-applied',
   splitReplace: 'Cut re-applied', joinReplace: 'Join re-applied', subtractReplace: 'Subtract re-applied',
   removePlaced: 'piece removed again', removeModel: 'model removed again',
   plateCutReplace: 'whole-plate cut re-applied'
@@ -505,6 +524,8 @@ function redoLast() {
   const say = r.entry.redoLabel || REDO_LABEL[r.entry.type] ||
     (UNDO_REPLACE_LABEL[r.entry.type] || '').replace(/^Undo: /, '').replace(/ reverted$/, ' re-applied');
   setStatus('Redo: ' + (say || r.entry.label || 'step re-applied'));
+  if (typeof cutAfterPoseUndo === 'function') cutAfterPoseUndo();
+  if (typeof nsoPaintSelLook === 'function') nsoPaintSelLook();
 }
 
 function undoLastStep() {
@@ -651,7 +672,10 @@ function undoLastStep() {
       state.editId = entry.editId;
     }
     if (entry.cutT != null) state.cutT = entry.cutT;
-    state.cutterOpen = false;
+    /* A cut made with the Cut card open leaves it open (entry.cutMemo, app-cut.js cutBladeMemo): the piece is back and the blade goes
+       back on it where it stood. A cut made with the card shut still closes it, as before. */
+    const keepCutter = !!(entry.cutMemo && entry.source);
+    state.cutterOpen = keepCutter;
     state.previewMesh = null;
     state.selectedIndex = -1;
     removeCutHelper();
@@ -665,6 +689,7 @@ function undoLastStep() {
     updateAdjustUI();
     updateUndoBtn();
     setStatus('Undo: ' + state.models.length + ' piece(s) on plate');
+    if (keepCutter && typeof cutRestoreAfterUndo === 'function') cutRestoreAfterUndo(entry.cutMemo, entry.source.id);
     return;
   }
   if (entry.type === 'joinReplace') {
@@ -978,6 +1003,18 @@ function undoLastStep() {
     setStatus('Undo: moved piece back');
     return;
   }
+  if (entry.type === 'groupMovePlaced') {
+    // A Select all group dragged together: every piece back where it was picked up, the group still selected.
+    (entry.items || []).forEach(it => {
+      const p = state.placed[it.index];
+      if (!p) return;
+      applyPlacedXZ(p, it.x, it.z);
+      restoreMeshY(p, it.meshY);
+    });
+    updateAdjustUI();
+    setStatus('Undo: moved ' + (entry.items || []).length + ' pieces back');
+    return;
+  }
   if (entry.type === 'poseBake') {
     nsoUndoPoseBake(entry);
     return;
@@ -1060,6 +1097,8 @@ function initThree() {
   };
   // Keep the orbit centre near the plate (see leashOrbitTarget)
   installOrbitLeash(state.camera, state.controls);
+  // ...and at the depth of what each drag grabs (see reseatOrbitTarget)
+  installOrbitReseat(state.controls, state.renderer.domElement, mainViewReseatPick);
 
   // Lights
   const ambient = new THREE.AmbientLight(0xffffff, 0.75);
@@ -1222,11 +1261,14 @@ function onViewportWheel(event) {
   const scale = Math.pow(0.95, Math.min(8, Math.abs(delta) * 0.01));
   const factor = delta < 0 ? scale : 1 / scale;
   const anchor = wheelZoomAnchor(event.clientX, event.clientY) || state.controls.target.clone();
-  // the framing of a 3 x 2 block of beds stands farther back than the 1200 mm one plate is held to
-  const zoomMax = (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1)
-    ? Math.max(WHEEL_ZOOM_MAX, 1.6 * NSO_BEDS.frameView(state.camera).distance) : WHEEL_ZOOM_MAX;
-  dollyAbout(state.camera, state.controls, anchor, factor, WHEEL_ZOOM_MIN, zoomMax);
+  dollyAbout(state.camera, state.controls, anchor, factor, WHEEL_ZOOM_MIN, wheelZoomMax());
   if (leashOrbitTarget(state.camera, state.controls)) state.controls.update();
+}
+
+// the framing of a 3 x 2 block of beds stands farther back than the 1200 mm one plate is held to
+function wheelZoomMax() {
+  return (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1)
+    ? Math.max(WHEEL_ZOOM_MAX, 1.6 * NSO_BEDS.frameView(state.camera).distance) : WHEEL_ZOOM_MAX;
 }
 
 /* THE LEASH. The orbit target may not sit more than one plate diagonal from
@@ -1240,12 +1282,16 @@ function onViewportWheel(event) {
    Returns true when it moved anything. */
 const _leashShift = new THREE.Vector3();
 
-function leashOrbitTarget(camera, controls) {
-  if (!camera || !controls) return false;
+function orbitLeashReach() {
   const plate = getCurrentPlate() || { w: 180, d: 180 };
   // one plate diagonal from the active bed's centre, plus how far the farthest other bed stands (app-beds.js)
-  const reach = Math.hypot(plate.w || 180, plate.d || 180) +
+  return Math.hypot(plate.w || 180, plate.d || 180) +
     ((typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1) ? NSO_BEDS.layoutReach() : 0);
+}
+
+function leashOrbitTarget(camera, controls) {
+  if (!camera || !controls) return false;
+  const reach = orbitLeashReach();
   const t = controls.target;
   const r = t.length();
   if (!(r > reach)) return false;
@@ -1260,6 +1306,82 @@ function leashOrbitTarget(camera, controls) {
    orientation is already right. */
 function installOrbitLeash(camera, controls) {
   controls.addEventListener('change', () => leashOrbitTarget(camera, controls));
+}
+
+/* THE ORBIT TARGET IS RE-SEATED AT EVERY DRAG. OrbitControls pans by the
+   target's depth (a pixel of drag moves a point AT the target's depth one
+   pixel) and orbits about the target. Wheel zoom scales camera and target
+   about the point under the cursor, which keeps the ratio of the target's
+   depth to that point's - and pan and orbit keep it too - so after a long
+   bout of zooming, panning and orbiting over pieces at different depths the
+   target is left wherever the arithmetic put it: often far in front of what
+   is on screen. Then a pan moves the picture a fraction of the pointer's
+   travel ("dragging uphill") and an orbit swings about a point in mid-air,
+   until Frame puts the target back.
+
+   So at the press that starts a drag (OrbitControls' 'start'), the target is
+   slid ALONG THE VIEW LINE to the depth of what is grabbed: for a pan, the
+   point under the pointer, which then follows the pointer exactly; for an
+   orbit or a middle-drag dolly, what is at the centre of the view (failing
+   that, under the pointer), so the orbit turns about what is being looked
+   at. The camera does not move and the target stays on its view line, so
+   the picture does not change by a pixel - only what the next drag does.
+   Nothing under the pointer (sky, past the far plane), a depth that would
+   leave the leash, or the same depth: the target is left as it is. The
+   depth is held to the wheel's own [min, max] distance.
+
+   Returns true when the target moved. No controls.update(): camera and
+   view direction are unchanged, and inside 'start' the next update is the
+   drag's own. */
+const _reseatFwd = new THREE.Vector3();
+
+function reseatOrbitTarget(camera, controls, point, minD, maxD, accept) {
+  if (!camera || !controls || !point) return false;
+  const fwd = _reseatFwd.copy(controls.target).sub(camera.position);
+  const d0 = fwd.length();
+  if (!(d0 > 0)) return false;
+  fwd.divideScalar(d0);
+  const depth = point.clone().sub(camera.position).dot(fwd);
+  if (!(depth > 0)) return false;
+  const d = Math.min(maxD, Math.max(minD, depth));
+  if (Math.abs(d - d0) <= 1e-9 * d0) return false;
+  const t = camera.position.clone().addScaledVector(fwd, d);
+  if (accept && !accept(t)) return false;
+  controls.target.copy(t);
+  return true;
+}
+
+/* Wire the re-seat to a viewport: `pick(press)` gets the press that started
+   the drag ({ x, y, button, pan }) and re-seats the target for its own view
+   (its own anchor, limits and leash). The press is recorded in the capture phase, so
+   before OrbitControls' own pointerdown dispatches 'start'; a 'start' with no
+   press behind it (a wheel step that dispatches one) re-seats nothing. */
+function installOrbitReseat(controls, el, pick) {
+  let press = null;
+  el.addEventListener('pointerdown', (e) => {
+    const rec = press = {
+      x: e.clientX, y: e.clientY, button: e.button,
+      // OrbitControls' own mapping: right pans; left pans with ctrl / meta / shift
+      pan: e.button === 2 || (e.button === 0 && !!(e.ctrlKey || e.metaKey || e.shiftKey))
+    };
+    // only for this press's own dispatch
+    setTimeout(() => { if (press === rec) press = null; }, 0);
+  }, true);
+  controls.addEventListener('start', () => {
+    const p = press;
+    press = null;
+    if (p) pick(p);
+  });
+}
+
+function mainViewReseatPick(press) {
+  const cam = state.camera, c = state.controls;
+  const rect = state.renderer.domElement.getBoundingClientRect();
+  const at = press.pan ? wheelZoomAnchor(press.x, press.y)
+    : (wheelZoomAnchor(rect.left + rect.width / 2, rect.top + rect.height / 2) || wheelZoomAnchor(press.x, press.y));
+  if (!at) return false;
+  const reach = orbitLeashReach();
+  return reseatOrbitTarget(cam, c, at, WHEEL_ZOOM_MIN, wheelZoomMax(), (t) => t.length() <= reach);
 }
 
 function onResize() {
@@ -1454,6 +1576,8 @@ function animate() {
   if (window.NSO_MICROSCOPE && window.NSO_MICROSCOPE.isOpen()) return;
   if (!(state.renderer && state.scene && state.camera)) return;
   const G = nsoRenderGate, now = performance.now();
+  /* a painted piece's colours (app-paint-view.js): added, refreshed or dropped before the gate looks, so they draw this frame */
+  if (window.NSO_PaintView) { try { window.NSO_PaintView.sync(); } catch (e) { console.warn('colours:', e); } }
   state.scene.updateMatrixWorld();
   state.camera.updateMatrixWorld();
   const sig = nsoRenderSignature();
@@ -1994,6 +2118,13 @@ function import3MF(filename, arrayBuffer) {
         }
       }
 
+      /* A Studio project's own settings, kept under the file's name: the Print card slices with them when the plate's parts are this
+         file's (app-print.js plateProject) - the same settings the project was sliced with in Studio. */
+      if (result.projectSettings) {
+        window.nsoProjects = window.nsoProjects || {};
+        window.nsoProjects[filename] = { config: result.projectSettings, objects: result.objectSettings || [] };
+      }
+
       /* Two or more objects and no scene block: a project from Studio or
          MakerWorld, with every piece already laid out on its plate. Each piece
          keeps the XY the file gave it, unless one would fall off this plate -
@@ -2001,12 +2132,18 @@ function import3MF(filename, arrayBuffer) {
       const kept = (!scene && result.objects.length > 1)
         ? savedPlacements3MF(result.objects, getCurrentPlate()) : null;
       let loaded = 0;
+      const painted = [];
       let chain = Promise.resolve();
       result.objects.forEach((obj, i) => {
         chain = chain.then(() => {
           const geometry = new THREE.BufferGeometry();
           geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
-          return addModelFromZUpGeometryAsync(obj.name, geometry, kept && kept.at ? { at: kept.at[i] } : undefined)
+          /* sourceFile: the file the piece came out of - a 3MF's objects carry their designer's names, and an export is named after the file */
+          /* paint: a Studio project's painted colours, and each part's own filament (nso_paint.js, docs/MULTICOLOR.md) */
+          const paint = obj.paint && window.NSO_Paint ? window.NSO_Paint.make(obj.paint.codes, obj.paint.flip, obj.paint.ext, obj.paint.colours) : null;
+          if (paint) painted.push(obj.name + ': ' + window.NSO_PaintView.describe({ paint }));
+          const o3 = Object.assign({ srcVertexIds: obj.vertexIds || null, sourceFile: filename, paint }, kept && kept.at ? { at: kept.at[i] } : {});
+          return addModelFromZUpGeometryAsync(obj.name, geometry, o3)
             .then(id => { if (id) loaded++; });
         });
       });
@@ -2019,6 +2156,8 @@ function import3MF(filename, arrayBuffer) {
         } else if (!loaded) {
           setStatus(`${filename}: no usable geometry found`, true);
         }
+        /* painted in colours: said once, after the load's own line */
+        if (loaded && painted.length) setStatus(`Loaded ${filename} - painted in colour: ${painted.join('; ')}`);
         return result;
       });
     })
@@ -2051,6 +2190,7 @@ function addModel(name, geometry, opts) {
   state.models.push({
     id,
     name: name.replace(/\.stl$/i, ''),
+    sourceFile: options.sourceFile || null,            // the file it was opened from, when that is not its name (a 3MF's object)
     geometry,
     quantity: 1,
     size: { x: size2.x, y: size2.y, z: size2.z },
@@ -2061,7 +2201,12 @@ function addModel(name, geometry, opts) {
     // their display mesh with the same engine (splitBothSides, app-cut.js).
     rawTris: options.rawTris || null,
     rawAxis: options.rawAxis || null,
-    centerOffset: options.centerOffset || null
+    centerOffset: options.centerOffset || null,
+    // A 3MF's own vertex indexing, one id per soup vertex (nso-3mf-read.js vertexIds): the 3MF export writes it back
+    // while it still lines up with the geometry (nsoIndexForExport), so shells that touch stay apart
+    srcVertexIds: options.srcVertexIds || null,
+    // Painted filament colours from a Studio project (nso_paint.js), while the triangles are the ones they were read with
+    paint: options.paint || null
   });
 
   if (!options.keepSelection) {
@@ -2083,8 +2228,16 @@ function placeNewModel(id, name, options) {
   /* Cut's armed cutter shows one piece alone (showEditPreview empties the plate).
      Crop's card is armed with no blade and keeps the plate: a piece imported while
      it is open - the cutter for Piece or Outline - lands on the plate beside the rest. */
-  if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection && !(typeof cutPlateOn === 'function' && cutPlateOn())) {
+  if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection && !options.at && !(typeof cutPlateOn === 'function' && cutPlateOn())) {
+    /* (A 3MF that keeps the file's own positions - options.at - is a plate laid out, not one piece to cut: it goes down where the file puts it.)
+       The piece just loaded is the one the cutter works on: showEditPreview shows getActiveModel(), which is state.editId, and
+       nothing else sets it on an upload - so with the Cut card open and nothing picked the preview was skipped, the plate stayed
+       empty, and the status line still said "cutter open, slide red plane". */
+    state.editId = id;
     showEditPreview();
+    renderModelList();                                       // the list marks the picked piece
+    updateEditSize();                                        // and the card's size line and blade follow it
+    if (typeof updateCutterUI === 'function') updateCutterUI();   // and Cut is live again (it was off with no piece to cut)
     setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - cutter open, slide red plane`);
   } else if (!options.keepSelection) {
     // Offset new uploads so they don't stack on existing plate pieces
@@ -2201,6 +2354,16 @@ function frameSelectedPiece() {
   setStatus('Camera: plate view');
 }
 
+/* How many plates have pieces on them: the active plate's state.placed plus
+   each other plate's stashed list (app-beds.js info()). One plate, the app as
+   it always was, is 1 with a piece and 0 without. */
+function nsoPlatesInPlay() {
+  if (typeof NSO_BEDS !== 'undefined' && NSO_BEDS && typeof NSO_BEDS.info === 'function') {
+    return NSO_BEDS.info().filter(function (r) { return r.placed > 0; }).length;
+  }
+  return state.placed.length > 0 ? 1 : 0;
+}
+
 /* CLEAR PLATE IS A WIPE. The pieces go off the plate AND out of state.models,
    with everything that named them: the two stacks (an entry names a model, a
    piece, a geometry that would be put back on a plate that is no longer
@@ -2213,6 +2376,15 @@ function frameSelectedPiece() {
    pieces and keep state.models; only this function wipes it. Returns how many
    geometries it disposed, for the check. */
 function clearPlateOnly() {
+  /* A FRESH START WHEN THIS IS THE ONLY PLATE IN PLAY. With one plate holding
+     pieces (the common, single-plate case) Clearing it leaves nothing in play
+     anywhere, so every armed mode is disarmed and every tool, card and menu is
+     closed - leaveTool(), the same gesture as a double-click on the canvas -
+     and the app starts over. With pieces on more than one plate the other
+     plates' work is still in play, so Clear plate stays what it was: this
+     plate's wipe and the helper teardown below, nothing more. Counted BEFORE
+     the wipe. */
+  if (nsoPlatesInPlay() <= 1 && typeof leaveTool === 'function') leaveTool();
   // Every tool closed and every helper gone first, while the pieces they
   // were drawn on are still there to close against (nso-helpers.js).
   nsoHelpers.teardown('clear-plate');
@@ -2286,26 +2458,76 @@ function cloneSelectedModel(opts) {
      the first clone appeared far from the piece it copied and the rest queued
      along the plate's edge. placeNewModel() (From File, From Library) puts a
      new piece just right of the rightmost piece, 4 mm clear; a clone does the
-     same, in line with the piece it copies, and each clone pushes that edge
-     out for the next - a row growing from the original. */
+     same, in line with the piece it copies, alternating sides so the row
+     grows outward from the original in both directions. */
   const gap = 4;
   const srcPlaced = (state.selectedIndex >= 0 && state.placed[state.selectedIndex]
       && state.placed[state.selectedIndex].sourceId === src.id)
     ? state.placed[state.selectedIndex]
     : state.placed.find(p => p.sourceId === src.id);
   const rowZ = srcPlaced ? srcPlaced.z : 0;
-  let rightEdge = Math.max(...state.placed.map(p => p.x + (p.width || 0) / 2));
-  function nextSpot() {
-    const x = rightEdge + src.size.x / 2 + gap;
-    rightEdge = x + src.size.x / 2;
-    return { x, z: rowZ };
+  /* EACH CLONE TAKES THE FREE SPOT NEAREST THE PLATE'S CENTRE.
+     Clones used to stack on one side of the original, so pressing Clone
+     several times walked the copies off the plate while the other half of
+     the plate stayed empty. Now each clone looks at the original's row first:
+     it can go just right or just left of that row, and it takes whichever
+     spot is on the plate and nearer the centre. When the row is full, the
+     clone starts a new row in front of or behind it (in the same order:
+     nearest first). Only pieces in a row's depth band set its edges, so a
+     piece in another row does not push clones away. A clone NEVER hangs
+     off the plate: when no spot fits, that clone is not made and the status
+     line says how many did not fit. */
+  const plate = (typeof getCurrentPlate === 'function' && getCurrentPlate()) || { w: 180, d: 180 };
+  const halfW = src.size.x / 2, halfD = src.size.z / 2;
+  /* Anchor on the ORIGINAL piece, not the selection: after a clone the
+     selection moves to the clone, and anchoring on it made later rows
+     drift toward one edge. */
+  const origPlaced = state.placed.find(p => p.name === src.name.replace(/-copy\d+$/i, '')) || srcPlaced;
+  const homeX = origPlaced ? origPlaced.x : 0;
+  const homeZ = origPlaced ? origPlaced.z : rowZ;
+  const rowStep = src.size.z + gap;
+  const fitsPlate = (x, z) => Math.abs(x) + halfW <= plate.w / 2 + 0.01
+    && Math.abs(z) + halfD <= plate.d / 2 + 0.01;
+  function rowSpots(z) {
+    const band = state.placed.filter(p =>
+      Math.abs(p.z - z) < (p.depth || 0) / 2 + halfD + gap / 2);
+    // An empty row lines up with the original; the plate centre is the fallback.
+    if (!band.length) return { xs: [homeX, 0], ordered: true };
+    const right = Math.max(...band.map(p => p.x + (p.width || 0) / 2));
+    const left = Math.min(...band.map(p => p.x - (p.width || 0) / 2));
+    return { xs: [right + halfW + gap, left - halfW - gap], ordered: false };
   }
+  function nextSpot() {
+    const maxRows = Math.max(1, Math.ceil(plate.d / rowStep)) + 1;
+    for (let k = 0; k <= maxRows; k++) {
+      for (const sign of (k === 0 ? [1] : [1, -1])) {
+        const z = homeZ + sign * k * rowStep;
+        const r = rowSpots(z);
+        const xs = r.ordered ? r.xs : r.xs.sort((a, b) => Math.abs(a) - Math.abs(b));
+        const hit = xs.find(x => fitsPlate(x, z));
+        if (hit !== undefined) return { x: hit, z };
+      }
+    }
+    return null;
+  }
+  /* Copy names continue from the highest number already used, so cloning
+     one at a time gives -copy1, -copy2, ... instead of -copy1 every time. */
+  const baseName = src.name.replace(/-copy\d+$/i, '');
+  const copyRe = new RegExp('^' + baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-copy(\\d+)$', 'i');
+  let copyNum = 0;
+  state.models.forEach(m => {
+    const mm = copyRe.exec(m.name || '');
+    if (mm) copyNum = Math.max(copyNum, Number(mm[1]));
+  });
   const newIds = [];
   let firstPlaced = null;
+  let noRoom = 0;
   for (let i = 0; i < n; i++) {
+    const spot = nextSpot();
+    if (!spot) { noRoom = n - i; break; }
     const geo = src.geometry.clone();
     geo.computeBoundingBox();
-    const name = src.name.replace(/-copy\d+$/i, '') + '-copy' + (i + 1);
+    const name = baseName + '-copy' + (++copyNum);
     /* A CLONE OF A RAW PIECE IS A RAW PIECE.
        addModel() only records rawTris when it is handed them, and this call
        used to hand it the display geometry alone - so every clone arrived
@@ -2325,6 +2547,8 @@ function cloneSelectedModel(opts) {
       keepSelection: true,
       silent: true,
       rawTris: (src.rawTris && src.rawTris.length) ? new Float32Array(src.rawTris) : null,
+      srcVertexIds: src.srcVertexIds ? new Int32Array(src.srcVertexIds) : null,
+      paint: src.paint && window.NSO_Paint ? window.NSO_Paint.clone(src.paint) : null,
       rawAxis: src.rawAxis || null,
       centerOffset: src.centerOffset
         ? { x: src.centerOffset.x, y: src.centerOffset.y, z: src.centerOffset.z }
@@ -2334,7 +2558,6 @@ function cloneSelectedModel(opts) {
     newIds.push(id);
     const model = state.models.find(x => x.id === id);
     if (!model) continue;
-    const spot = nextSpot();
     const entry = placeModelMovable(model, spot.x, spot.z);
     if (entry && firstPlaced === null) firstPlaced = state.placed.indexOf(entry);
   }
@@ -2361,7 +2584,12 @@ function cloneSelectedModel(opts) {
   updateOptimizeButton();
   updateEditSize();
   updateUndoBtn();
-  setStatus('Cloned ' + newIds.length + ' x ' + src.name + ' next to the piece');
+  if (noRoom) {
+    setStatus((newIds.length ? 'Cloned ' + newIds.length + ' x ' + baseName + '; ' : '')
+      + 'no room on the plate for ' + noRoom + (newIds.length ? ' more' : ' clone' + (noRoom > 1 ? 's' : '')), true);
+  } else {
+    setStatus('Cloned ' + newIds.length + ' x ' + baseName + ' next to the piece');
+  }
 }
 
 function previewModelOnPlate(geometry, size) {
@@ -2434,11 +2662,13 @@ function renderModelList() {
   el.innerHTML = '';
   const onPlate = modelsOnPlate();
   piecesListSig = onPlate.map(m => m.id).join(',');
+  // a Select all group (or the Supports card's lit plate) is the selection: every one of its rows is lit
+  const grpIds = new Set(typeof nsoSelAllPieces === 'function' ? nsoSelAllPieces().concat(nsoLitPieces()).map(p => p.sourceId) : []);
 
   onPlate.forEach(m => {
     const row = document.createElement('div');
     let cls = 'model-item';
-    if (m.id === state.editId) cls += ' active';
+    if (grpIds.size ? grpIds.has(m.id) : m.id === state.editId) cls += ' active';
     if (m.id === state.joinPartnerId) cls += ' join-partner';
     row.className = cls;
     row.dataset.editId = String(m.id);
@@ -3249,8 +3479,10 @@ function resolveDragPose(p, selfIdx, fromX, fromZ, toX, toZ) {
   applyPlacedXZ(p, g.x, g.z);
 }
 
-function startMoveDrag(idx, event) {
-  if (state.cutterOpen) {
+function startMoveDrag(idx, event, group) {
+  /* ...except a piece Lift left in the air, in the Crop card Lift is a button of: grabbing it to drop it elsewhere is Lift's own. */
+  const liftedOne = state.cutTool === 'crop' && typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(state.placed[idx]);
+  if (state.cutterOpen && !liftedOne && !cropCardIdle()) {
     setStatus('Cutter open - close cutter to move pieces');
     return false;
   }
@@ -3268,6 +3500,8 @@ function startMoveDrag(idx, event) {
   // Position lock (app-poslock.js): a locked piece is still selectable, but
   // the drag never starts and nothing is pushed to undo.
   if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'drag')) return false;
+  /* A Select all group moves as one: every piece by the same step, so none of it may be held. */
+  if (group && typeof nsoPosLockBlocks === 'function' && group.some(q => q !== p && nsoPosLockBlocks(q, 'drag'))) return false;
   setPointerFromEvent(event);
   /* The grab offset is read on the plane of the piece's own bottom - the
      bed for a piece on it, as it always was; a piece in the air is held
@@ -3278,11 +3512,15 @@ function startMoveDrag(idx, event) {
   state.moveIndex = idx;
   applyPlateGridVisibility();
   state.moveUndoFrom = { index: idx, x: p.x, z: p.z, meshY: p.mesh ? p.mesh.position.y : null };
+  /* the group's other pieces, each where it was picked up: the drag carries them by the held piece's step */
+  state.moveGroup = (group && group.length > 1) ? group.filter(q => q && q.mesh).map(q => ({
+    p: q, index: state.placed.indexOf(q), x: q.x, z: q.z, meshY: q.mesh.position.y
+  })) : null;
   /* A plate drag is flat: XY only, nothing under the pointer is read. The one
      exception is Lift's own drop (app-lift-plate.js): a piece Lift left in
      the air, grabbed and carried, rests on what it is let go over
      (app-grab-drop.js). Nothing else calls the grab. */
-  state.moveGrabbing = !!(typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(p) &&
+  state.moveGrabbing = !state.moveGroup && !!(typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(p) &&
     typeof nsoGrab !== 'undefined' && nsoGrab.begin(p, idx, event));
   state.moveMoved = false;
   state.moveGrab.x = p.x - hit.x;
@@ -3317,7 +3555,20 @@ function dragMovePlaced(event) {
   p.x = g.x;
   p.z = g.z;
   if (p.mesh) { p.mesh.position.x = g.x; p.mesh.position.z = g.z; }
+  if (state.moveGroup) nsoMoveGroupBy(g.x - state.moveUndoFrom.x, g.z - state.moveUndoFrom.z);
   state.moveMoved = true;
+}
+
+/* The Select all group follows the held piece: every other piece where it was picked up, plus the same step. */
+function nsoMoveGroupBy(dx, dz) {
+  const G = state.moveGroup;
+  if (!G) return;
+  const held = state.placed[state.moveIndex];
+  G.forEach(e => {
+    if (e.p === held) return;
+    e.p.x = e.x + dx; e.p.z = e.z + dz;
+    if (e.p.mesh) { e.p.mesh.position.x = e.p.x; e.p.mesh.position.z = e.p.z; }
+  });
 }
 
 /* Escape mid-drag puts a flat drag back where it was picked up (Lift's drop
@@ -3331,10 +3582,14 @@ window.addEventListener('keydown', (e) => {
     p.x = f.x;
     p.z = f.z;
     if (p.mesh) { p.mesh.position.x = f.x; p.mesh.position.z = f.z; }
+    if (state.moveGroup) nsoMoveGroupBy(0, 0);
   }
+  const many = !!state.moveGroup;
   state.moveMoved = false;
-  endMoveDrag();
-  setStatus('Put back - the piece is where it was picked up. Nothing changed.');
+  state.moveEscaped = true;         // not a click: a group put back stays the selection (nsoEndGroupDrag)
+  try { endMoveDrag(); } finally { state.moveEscaped = false; }
+  setStatus(many ? 'Put back - the pieces are where they were picked up. Nothing changed.'
+                 : 'Put back - the piece is where it was picked up. Nothing changed.');
 }, true);
 
 function endMoveDrag() {
@@ -3342,7 +3597,8 @@ function endMoveDrag() {
   clearFenceLines();
   const idx = state.moveIndex;
   const from = state.moveUndoFrom;
-  const grabbing = state.moveGrabbing, flat = state.moveMoved;
+  const grabbing = state.moveGrabbing, flat = state.moveMoved, group = state.moveGroup;
+  state.moveGroup = null;
   state.moveDragging = false;
   state.moveGrabbing = false;
   state.moveMoved = false;
@@ -3367,6 +3623,7 @@ function endMoveDrag() {
        the pose bounds the piece already has - a translation never
        invalidates them, so a piece that has not turned is not re-scanned. */
     if (flat) settlePlacedOnBed(p);
+    if (group) return nsoEndGroupDrag(idx, from, group, flat);
     /* A press on a piece always starts a drag, so a plain click (or an
        Alt-click, which also re-aims the view) ends here too. Only a drag
        that really moved the piece - the same test that decides the undo
@@ -3394,6 +3651,31 @@ function endMoveDrag() {
   }
 }
 
+/* The release of a drag on a Select all group. Not moved: it was a click, and a click on one piece of the group
+   selects that piece alone (Escape puts the group back first and never gets here as a click). Let go over another
+   plate: the whole group goes there (app-beds.js, moveGroup), one Undo. Otherwise every piece moved by the same step:
+   one Undo (groupMovePlaced) puts them all back, and the group stays selected. */
+function nsoEndGroupDrag(idx, from, group, flat) {
+  const p = state.placed[idx];
+  const moved = Math.abs(p.x - from.x) > 0.01 || Math.abs(p.z - from.z) > 0.01;
+  if (!moved) {
+    if (!state.moveEscaped) selectPlaced(idx);
+    return;
+  }
+  if (flat) group.forEach(e => { if (e.p !== p && state.placed.indexOf(e.p) >= 0) settlePlacedOnBed(e.p); });
+  if (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.moveGroup) {
+    const to = NSO_BEDS.dropTarget(p, from);
+    if (to >= 0) {
+      if (NSO_BEDS.moveGroup(group, to)) return;
+      /* refused (it said why): every piece back where it was picked up */
+      group.forEach(e => { if (state.placed.indexOf(e.p) >= 0) { applyPlacedXZ(e.p, e.x, e.z); restoreMeshY(e.p, e.meshY); } });
+      return;
+    }
+  }
+  pushUndo({ type: 'groupMovePlaced', items: group.map(e => ({ index: state.placed.indexOf(e.p), x: e.x, z: e.z, meshY: e.meshY })) });
+  if (!reportJoinFlushGap()) setStatus('Moved ' + group.length + ' pieces - one Undo (Ctrl+Z) puts them all back');
+}
+
 /* Where the pointer puts the blade, along the blade's own travel axis.
 
    The travel axis is the plane's normal (cutFrame's `normal`): the piece's
@@ -3409,6 +3691,8 @@ function endMoveDrag() {
    flat or stands on end (a horizontal plane at the piece's centre, the old
    drag plane, holds a standing piece's axis only edge-on). */
 function cutTFromPointer(hitWorld, hit) {
+  // Follow strand: a drag reads the pointer against the cord's centre line, not against the blade's straight travel.
+  if (!hitWorld && state.cutFollowDragging && typeof cutFollowDragTo === 'function') { cutFollowDragTo(); return; }
   const m = getActiveModel();
   const f = m ? cutFrame(m) : null;
   if (!f || !f.mesh) return;
@@ -3425,6 +3709,18 @@ function cutTFromPointer(hitWorld, hit) {
     // (app-cut.js, cutBladeSpec). The full blade ignores it.
     state.cutBladeAt = { modelId: m.id, local: local.clone(),
       normal: hit && hit.face && hit.face.normal ? hit.face.normal.clone() : null };
+    /* A SIZED or NOTCH blade clicked on a face that lies in its own plane - the top of a wall under a flat
+       blade - stays at the height it was set to: the click says WHERE across the piece (cutBladeSpec goes in
+       through the edge nearest it), not how high. Moved to the click, the blade sat on the top face, half of
+       it in the air over the piece, and missed. */
+    const bl = state.cutBlade, fn = state.cutBladeAt.normal;
+    if (bl && bl.sized && fn && Math.abs(fn.clone().normalize().dot(n)) > 0.9) {
+      state.cutDragging = false;            // nor does the press drag it there: the slider and the arrows set the height
+      state.cutDragFrom = null;
+      syncCutUI();
+      updateCutHelper();
+      return;
+    }
   } else {
     if (state.raycaster && state.camera) state.raycaster.setFromCamera(state.pointer, state.camera);
     const ray = state.raycaster.ray;
@@ -3478,6 +3774,7 @@ function onCanvasPointerMove(event) {
 
 function clearPointerState() {
   state.cutDragging = false;
+  if (state.cutFollowDragging && typeof cutFollowEndDrag === 'function') cutFollowEndDrag();
   if (state.moveDragging) endMoveDrag();
   state.moveDragging = false;
   if (state.controls) {
@@ -3492,6 +3789,7 @@ function onCanvasPointerUp(event) {
     state.cutDragging = false;
     if (state.controls) state.controls.enabled = true;
   }
+  if (state.cutFollowDragging && typeof cutFollowEndDrag === 'function') cutFollowEndDrag();   // put the blade down where it slid to
   if (state.editYawDragging) {
     state.editYawDragging = false;
     if (state.controls) state.controls.enabled = true;
@@ -3652,14 +3950,49 @@ function nsoCtxHasPiece() {
 }
 /* SELECT ALL. The app holds ONE selected piece (state.selectedIndex); "all the
    pieces on this plate" is a group beside it, state.multiSel (placed entries),
-   drawn with the selected piece's red glow. While it stands selectedIndex is -1,
-   so no single-piece verb can land on an arbitrary piece; the group answers
-   Delete (one Undo step per piece) and Clear plate, and selecting anything
-   else, switching plate, deleting or clearing ends it (clearSelectionOutline). */
+   drawn exactly as a selected piece is drawn - the rose body and the white
+   outline (nsoPaintSelLook). While it stands selectedIndex is -1, so no
+   single-piece verb can land on an arbitrary piece; the group answers Delete
+   (one Undo step per piece), Clear plate, the Scale card's Whole x (every
+   piece, one Undo), and a drag on any of its pieces (the whole group moves, to
+   another plate as well), and selecting anything else, switching plate,
+   deleting or clearing ends it (clearSelectionOutline). */
 function nsoSelAllPieces() {
   const g = state.multiSel;
   if (!g || !g.length) return [];
   return g.filter(p => state.placed.indexOf(p) >= 0);
+}
+/* Pieces drawn as selected without being a selection: the Supports card's
+   "Generate for plate" lights every piece it will build for (state.litSel).
+   clearSelectionOutline ends it with the rest of the selection's look. */
+function nsoLitPieces() {
+  const g = state.litSel;
+  if (!g || !g.length) return [];
+  return g.filter(p => state.placed.indexOf(p) >= 0);
+}
+/* Does this piece wear the selection's look: the one selected piece, a piece of
+   the Select all group, or one the Supports card lit for the plate. */
+function nsoLooksSelected(p) {
+  if (!p) return false;
+  if (state.placed[state.selectedIndex] === p) return true;
+  return nsoSelAllPieces().indexOf(p) >= 0 || nsoLitPieces().indexOf(p) >= 0;
+}
+/* Every piece of the group (or the lit set) in the one selected look - the
+   colour paintJoinHighlights gives the selected piece and the white outline
+   refreshOutline draws for it. Idempotent: called again after a bake, an Undo
+   or a plate move rebuilt a mesh, it puts the look back on the new one. */
+function nsoPaintSelLook() {
+  const grp = nsoSelAllPieces().concat(nsoLitPieces());
+  if (!grp.length) return 0;
+  if (typeof paintJoinHighlights === 'function') paintJoinHighlights();
+  else grp.forEach(p => {
+    if (!p.mesh || !p.mesh.material) return;
+    p.mesh.material.color.setHex(SELECT_COLOR);
+    p.mesh.material.emissive = new THREE.Color(0x9f1239);
+    p.mesh.material.emissiveIntensity = 0.4;
+  });
+  grp.forEach(p => { if (p.mesh && typeof refreshOutline === 'function') refreshOutline(p); });
+  return grp.length;
 }
 function nsoSelectAllOnPlate() {
   if (!state.placed.length) { setStatus('Nothing on the plate to select', true); return { ok: false, reason: 'empty plate' }; }
@@ -3667,13 +4000,13 @@ function nsoSelectAllOnPlate() {
   state.selectedIndex = -1;
   if (typeof nsoInputMode !== 'undefined' && nsoInputMode) setTimeout(function () { nsoInputMode.refresh(); }, 0);
   const group = state.placed.filter(p => p && p.mesh);
-  group.forEach(p => {
-    p.mesh.material.emissive = new THREE.Color(0xdc2626);
-    p.mesh.material.emissiveIntensity = 0.55;
-  });
   state.multiSel = group;
+  nsoPaintSelLook();
+  renderModelList();                // every row of the group lit in the Pieces card
   updateAdjustUI();
-  setStatus('Selected all ' + group.length + (group.length === 1 ? ' piece' : ' pieces') + ' on this plate - Delete removes them; click one piece to select it alone');
+  if (typeof updateEditSize === 'function') updateEditSize();     // the Scale card reads the group
+  setStatus('Selected all ' + group.length + (group.length === 1 ? ' piece' : ' pieces') +
+    ' on this plate - drag one to move them all (onto another plate too), Scale\'s Whole x sizes them all, Delete removes them; click one piece to select it alone');
   return { ok: true, count: group.length };
 }
 function nsoCtxMenuRefresh() {
@@ -3787,6 +4120,24 @@ function wireCtxMenu() {
   }, true);
 }
 
+/* The Crop card is open but doing nothing: no shape picked (or lent to the Foam gun) and Lift not armed. Then a press on a
+   piece is the ordinary one - select it, drag it to move it - as with no card open; with a shape up, or Lift armed, it
+   is the tool's. */
+function cropCardIdle() {
+  return state.cutTool === 'crop' && typeof NSO_CropCard !== 'undefined' && !!NSO_CropCard.idle && NSO_CropCard.idle() &&
+    !(typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.isArmed && NSO_LIFT_PLATE.isArmed());
+}
+
+/* Lift is a button in the Crop card, and what it lifts is left in the air to be grabbed and dropped somewhere
+   else. With the Crop card open a press on a piece only picks it (the cutter has no move), so a piece Lift left in the
+   air is the exception: a press on it is the ordinary select-and-move, whether or not Lift is still open. */
+function cropYieldsToLifted() {
+  if (state.cutTool !== 'crop' || typeof NSO_LIFT_PLATE === 'undefined' || !NSO_LIFT_PLATE.ownsDrop || !state.modelGroup) return false;
+  const h = nsoHelpers.pieceHits(state.raycaster.intersectObjects(state.modelGroup.children, false))[0];
+  const idx = h && h.object.userData.placedIndex;
+  return typeof idx === 'number' && !!state.placed[idx] && NSO_LIFT_PLATE.ownsDrop(state.placed[idx]);
+}
+
 function onCanvasPointerDown(event) {
   state.rightPress = null;
   /* The rotation handles are hit-tested first and swallow the event. That is
@@ -3804,8 +4155,7 @@ function onCanvasPointerDown(event) {
      because this is the code doing the claiming. */
   if (typeof nsoRotate !== 'undefined' && typeof state !== 'undefined' &&
       state.raycaster && state.camera && event.button === 0 &&
-      (typeof nsoInputMode === 'undefined' || !nsoInputMode || nsoInputMode.owns('menu-rotate') ||
-       (state.cutterOpen && state.cutTool !== 'crop' && state.cutRotate))) {
+      (typeof nsoInputMode === 'undefined' || !nsoInputMode || nsoInputMode.owns('menu-rotate'))) {
     var rotG = state.scene && state.scene.getObjectByName('nso-rotate-handles');
     if (rotG && rotG.visible && rotG.children.length) {
       setPointerFromEvent(event);
@@ -3858,6 +4208,13 @@ function onCanvasPointerDown(event) {
      start a move drag under the carve and report "Moved model #N" over its
      status. app-carve.js decides, where its own hit test lives. */
   if (typeof window.nsoCarveTakesClick === 'function' && window.nsoCarveTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Extract bit (app-extract-bit.js) owns a click on a piece while it is armed: the click chooses the void, and a
+     fall-through would start a move drag under it. */
+  if (typeof window.nsoExtractTakesClick === 'function' && window.nsoExtractTakesClick(event)) {
     setOrbitFromPlate(false);
     return;
   }
@@ -3950,6 +4307,16 @@ function onCanvasPointerDown(event) {
      canvas does the work, and a fall-through here would start a move drag
      under the spray. Ahead of Measure, which cannot change the piece. */
   if (typeof window.nsoFoamTakesPointer === 'function' && window.nsoFoamTakesPointer(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* The Pottery Wheel's handles (app-wheel-live.js) own a PRESS that lands on one of
+     them: the press starts a drag that writes to the Wheel's sliders, and a fall-through
+     here would start a move drag under it and push a "Moved model" Undo entry on release.
+     The wheel's own handler runs first on this canvas (capture), so by the time it is
+     asked here the drag has begun. */
+  if (typeof window.nsoWheelTakesPointer === 'function' && window.nsoWheelTakesPointer(event)) {
     setOrbitFromPlate(false);
     return;
   }
@@ -4071,11 +4438,20 @@ function onCanvasPointerDown(event) {
   // other half - and look past the blade's own (invisible, oversized) grab
   // sheet, which lies in front of much of the piece: a click there is a
   // click on the piece.
-  if (state.cutterOpen && state.modelGroup) {
+  if (state.cutterOpen && state.modelGroup && !cropCardIdle() && !cropYieldsToLifted()) {
     const inBlade = o => { for (let n = o; n; n = n.parent) if (n === state.cutHelper) return true; return false; };
     const modelHits = state.raycaster.intersectObjects(state.modelGroup.children, true)
       .filter(h => !inBlade(h.object));
-    if (modelHits.length) {
+    /* The ball on the blade's top end, and the bar it stands on, are the blade's handle: a press that reaches them before it
+       is drawn (over the piece, always) takes hold of the blade, it is not a click on the piece
+       behind. On every blade: on the Sized blade and the Notch the handle once let the press through, so taking hold of it
+       dropped the blade onto whatever face lay behind - the next wall over. A click on the piece itself still places them. */
+    const handle = state.cutHelper && !state.cutHideBlade
+      ? state.cutHelper.children.filter(c => c.userData && (c.userData.cutBall || c.userData.cutBar)) : [];
+    const ballHit = handle.length ? state.raycaster.intersectObjects(handle, false)[0] || null : null;
+    // The handle is drawn over everything (no depth test): where the pointer sees it, it is what is pressed, even when
+    // the ball stands behind a wall in depth.
+    if (modelHits.length && !ballHit) {
       let obj = modelHits[0].object;
       while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
       const idx = obj && obj.userData ? obj.userData.placedIndex : undefined;
@@ -4093,7 +4469,10 @@ function onCanvasPointerDown(event) {
           }
           if (p.sourceId !== state.editId) selectPlaced(idx);
           // Crop's card: the click picks the piece; there is no blade to drop. Nor has the whole-plate blade.
-          if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
+          // (Hide blade: the same - the click picks the piece and the blade, hidden, is not placed or dragged.)
+          if (state.cutTool === 'crop' || state.cutHideBlade || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
+          // Follow strand: the click finds the cord under it and the blade stands square across it there.
+          if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowFromHit(modelHits[0]); event.stopPropagation(); return; }
           // Cut's card: the blade drops where the click landed, square to the
           // piece's length; holding the button drags it along.
           state.cutDragging = true;
@@ -4106,13 +4485,25 @@ function onCanvasPointerDown(event) {
     }
   }
 
-  // Cutter plane drag - never orbit
-  if (state.cutHelper) {
+  // Cutter plane drag - never orbit (not while the blade is hidden: a hidden blade answers no press)
+  if (state.cutHelper && !state.cutHideBlade) {
     const cutHits = state.raycaster.intersectObject(state.cutHelper, true);
     if (cutHits.length) {
       setOrbitFromPlate(false);
+      // Follow strand: a drag on the blade slides it along the cord it is square across, not off it.
+      if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowBeginDrag(); event.stopPropagation(); return; }
       state.cutDragging = true;
-      state.cutDragFrom = null;
+      /* The drag reads the pointer on a plane through the point taken hold of - on the blade's sheet or frame, or on the ball at
+         its top end, which stands well off the blade's centre - so taking hold moves nothing. */
+      {
+        const gm = getActiveModel(), gf = gm ? cutFrame(gm) : null;
+        const hu = cutHits[0].object.userData || {};
+        const ballOfHit = (hu.cutBall || hu.cutBar) ? state.cutHelper.children.find(c => c.userData && c.userData.cutBall) : null;
+        const gp = ballOfHit
+          ? new THREE.Vector3().setFromMatrixPosition(ballOfHit.matrixWorld)             // the ball or its bar: by the ball's centre, which is on the blade's plane
+          : cutHits[0].point;
+        state.cutDragFrom = gf && gf.mesh ? gp.clone().applyMatrix4(new THREE.Matrix4().copy(gf.mesh.matrixWorld).invert()) : null;
+      }
       if (state.controls) state.controls.enabled = false;
       cutTFromPointer();
       event.stopPropagation();
@@ -4136,12 +4527,21 @@ function onCanvasPointerDown(event) {
           event.stopPropagation();
           return;
         }
-        if (state.cutterOpen && hit && hit.sourceId != null) {
+        if (state.cutterOpen && hit && hit.sourceId != null && !cropCardIdle() && !(state.cutTool === 'crop' && typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(hit))) {
           if (hit.sourceId !== state.editId) selectPlaced(idx);
-          if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
+          if (state.cutTool === 'crop' || state.cutHideBlade || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
+          if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowFromHit(modelHits[0]); event.stopPropagation(); return; }
           state.cutDragging = true;
           if (state.controls) state.controls.enabled = false;
           cutTFromPointer(modelHits[0].point, modelHits[0]);
+          event.stopPropagation();
+          return;
+        }
+        /* A press on a piece of the Select all group takes hold of the whole group: a drag moves every piece
+           of it (onto another plate as well), a plain click selects that piece alone (endMoveDrag). */
+        const grp = nsoSelAllPieces();
+        if (grp.length > 1 && hit && grp.indexOf(hit) >= 0) {
+          startMoveDrag(idx, event, grp);
           event.stopPropagation();
           return;
         }
@@ -4178,7 +4578,10 @@ function onCanvasPointerDown(event) {
 }
 
 function clearSelectionOutline() {
+  const hadGroup = !!((state.multiSel && state.multiSel.length) || (state.litSel && state.litSel.length));
   state.multiSel = null;           // a Select all group ends with any other selection change
+  state.litSel = null;             // and so does the Supports card's lit plate (it puts its own back)
+  if (hadGroup && typeof document !== 'undefined' && document.getElementById('model-list')) renderModelList();     // its rows go dark with it
   state.placed.forEach((p, i) => {
     if (p.mesh) {
       if (p.outline) {
@@ -5062,6 +5465,31 @@ function downloadBlob(blob, filename) {
   }, 200);
 }
 
+/** The plate export's default name: nest_<plate>_<n>pcs (no extension). */
+function plateExportDefaultName() {
+  const plateName = getCurrentPlate().name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
+  return `nest_${plateName}_${state.placed.length}pcs`;
+}
+
+/**
+ * The plate export's file name, STL or 3MF: what the Export card's "Plate file name" holds, or the default when it is
+ * empty. A typed .stl / .3mf is dropped (the format decides the extension) and characters no file name can hold become _.
+ */
+function plateExportFilename(ext) {
+  const el = document.getElementById('export-plate-name');
+  const typed = String(el && el.value || '').trim()
+    .replace(/\.(stl|3mf)$/i, '')
+    .replace(/[\/\\?%*:|"<>]/g, '_')
+    .trim();
+  return (typed || plateExportDefaultName()) + '.' + ext;
+}
+
+/** The name field's placeholder is the default as it stands now (the plate and its count change under it). */
+function syncPlateExportName() {
+  const el = document.getElementById('export-plate-name');
+  if (el) el.placeholder = plateExportDefaultName();
+}
+
 function exportSTLs() {
   if (!state.placed.length) {
     setStatus('Nothing to export - run Optimize first', true);
@@ -5075,8 +5503,7 @@ function exportSTLs() {
     const overlapNote = typeof nsoExportOverlapNote === 'function' ? nsoExportOverlapNote({ combined: geo }) : '';
     const buffer = geometryToBinarySTL(geo);
     const blob = new Blob([buffer], { type: 'application/octet-stream' });
-    const plateName = getCurrentPlate().name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
-    const filename = `nest_${plateName}_${state.placed.length}pcs.stl`;
+    const filename = plateExportFilename('stl');
 
     downloadBlob(blob, filename);
     nsoCloseTopCard('menu-export');
@@ -5128,6 +5555,11 @@ function setupExportFormatUI() {
     if (opt) opt.disabled = true;
   }
   sel.value = (EXPORT_FORMATS.indexOf(saved) !== -1 && (saved !== '3mf' || can3mf)) ? saved : 'stl';
+
+  // the default name is shown whenever the Export card opens
+  const menu = document.getElementById('menu-export');
+  if (menu) menu.addEventListener('toggle', () => { if (menu.open) syncPlateExportName(); });
+  syncPlateExportName();
 
   sel.addEventListener('change', () => {
     try { localStorage.setItem(EXPORT_FORMAT_STORAGE_KEY, sel.value); } catch (e) {}
@@ -5216,6 +5648,45 @@ function setupCoolingProfileUI() {
  * corner, so the same (x, y, z) -> (x, -z, y) swap applies and then a shift by
  * half the plate.
  */
+/**
+ * A piece's triangle soup (Bambu axes) as a 3MF mesh: { vertices, triangles }.
+ *
+ * Welding by position (NSO3MF.indexTriangleSoup) joins two shells wherever they touch: the four supp_ref heads whose
+ * stem and head are separate closed shells meeting at a ring came out with every ring edge shared by four faces, and
+ * Studio marked them as mesh errors. So a piece read from a 3MF keeps the file's own indexing (model.srcVertexIds, one
+ * id per soup vertex) - but only while it still lines up with this soup: one id per vertex, and every vertex sharing an
+ * id at one position. A soup any tool rebuilt (another count, another order) fails that and is welded as before.
+ */
+function nsoIndexForExport(flat, model) {
+  const ids = model && model.srcVertexIds;
+  if (ids && ids.length * 3 === flat.length) {
+    const at = new Map(), vertices = [], slot = new Int32Array(ids.length);
+    let ok = true;
+    for (let k = 0; k < ids.length; k++) {
+      let j = at.get(ids[k]);
+      const x = flat[3 * k], y = flat[3 * k + 1], z = flat[3 * k + 2];
+      if (j === undefined) {
+        j = vertices.length / 3;
+        at.set(ids[k], j);
+        vertices.push(x, y, z);
+      } else if (Math.abs(vertices[3 * j] - x) > 1e-5 || Math.abs(vertices[3 * j + 1] - y) > 1e-5 || Math.abs(vertices[3 * j + 2] - z) > 1e-5) {
+        ok = false;
+        break;
+      }
+      slot[k] = j;
+    }
+    if (ok) {
+      const triangles = [];
+      for (let k = 0; k < slot.length; k += 3) {
+        const a = slot[k], b = slot[k + 1], c = slot[k + 2];
+        if (a !== b && b !== c && a !== c) triangles.push(a, b, c);
+      }
+      return { vertices, triangles, kept: true };
+    }
+  }
+  return window.NSO3MF.indexTriangleSoup(flat);
+}
+
 function buildPlacedObjects3MF() {
   const plate = getCurrentPlate();
   const halfW = plate.w / 2;
@@ -5249,7 +5720,8 @@ function buildPlacedObjects3MF() {
         pos.getY(v)            // Bambu Z (height, plate at 0)
       );
     }
-    const mesh = window.NSO3MF.indexTriangleSoup(flat);
+    const model = (state.models || []).find(m => m && m.id === p.sourceId);
+    const mesh = nsoIndexForExport(flat, model);
     const out = {
       name: p.name || ('piece_' + (i + 1)),
       vertices: mesh.vertices,
@@ -5257,7 +5729,6 @@ function buildPlacedObjects3MF() {
     };
     // A piece's own slicer settings (the Supports card's: its sheet is a thin
     // wall) ride along as the object's override in model_settings.config.
-    const model = (state.models || []).find(m => m && m.id === p.sourceId);
     if (model && model.slicerSettings) out.settings = Object.assign({}, model.slicerSettings);
     return out;
   });
@@ -5457,7 +5928,7 @@ function applyModelSceneState(m, so) {
  *
  * @returns {object|null} the placed entry
  */
-function restoreSceneObject(so, positions) {
+function restoreSceneObject(so, positions, vertexIds, filename) {
   const Scene = window.NSO3MFScene;
   const disp = Scene.transformSoup(so.inverse, positions);
   const C = so.centerOffset || { x: 0, y: 0, z: 0 };
@@ -5471,7 +5942,7 @@ function restoreSceneObject(so, positions) {
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(raw, 3));
-  const id = addModelFromZUpGeometry(so.name, geometry, { silent: true });
+  const id = addModelFromZUpGeometry(so.name, geometry, { silent: true, srcVertexIds: vertexIds || null, sourceFile: filename || null });
   if (id == null) return null;
   const m = state.models.find(x => x.id === id);
   if (!m) return null;
@@ -5531,13 +6002,13 @@ function restoreSceneFrom3MF(filename, result, scene) {
         // else.
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(result.objects[i].positions, 3));
-        const id = addModelFromZUpGeometry(so.name, geometry);
+        const id = addModelFromZUpGeometry(so.name, geometry, { srcVertexIds: result.objects[i].vertexIds || null, sourceFile: filename });   // an export is named after the file opened (app-print.js fileName)
         if (id == null) return;
         const m = state.models.find(x => x.id === id);
         if (!m) return;
         applyModelSceneState(m, so);
         restored++;
-      } else if (restoreSceneObject(so, result.objects[i].positions)) {
+      } else if (restoreSceneObject(so, result.objects[i].positions, result.objects[i].vertexIds, filename)) {
         restored++;
       }
     } catch (err) {
@@ -5596,6 +6067,12 @@ function readSceneBlock(filename, result) {
   }
 }
 
+/* The Bambu project template an exported 3MF is written from: the PLATE'S PRINTER, where there is one for it (fixtures/bambu-templates/) -
+   a P1S plate exported from the A1 mini's template opened in Studio as an A1 mini project (the owner: "it's telling me it's configured for
+   A1 mini"). A plate with no template of its own (A1, Prusa, Ender, custom) is written from the A1 mini's, as before. */
+var NSO_BAMBU_TEMPLATES = { a1mini: 'a1mini-0.4', p1s: 'p1s-0.4' };
+function nsoBambuTemplateFor(plateId) { return NSO_BAMBU_TEMPLATES[plateId == null ? state.plate : plateId] || 'a1mini-0.4'; }
+
 function export3MF() {
   if (!window.NSO3MF || !window.NSOCoolingProfiles) {
     setStatus('3MF modules failed to load - check console', true);
@@ -5621,11 +6098,10 @@ function export3MF() {
   const plate = getCurrentPlate();
   const sceneJson = buildPlateSceneJson();
   const overlapNote = typeof nsoExportOverlapNote === 'function' ? nsoExportOverlapNote({ objects }) : '';
-  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name, sceneJson })
+  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name, sceneJson, template: nsoBambuTemplateFor() })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
-      const plateName = plate.name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
-      const filename = `nest_${plateName}_${state.placed.length}pcs.3mf`;
+      const filename = plateExportFilename('3mf');
       downloadBlob(blob, filename);
       nsoCloseTopCard('menu-export');
       const profile = window.NSOCoolingProfiles.getProfile(result.profileId);
@@ -5689,7 +6165,8 @@ function buildActiveModelObject3MF(m) {
     flat[i + 2] -= minZ;
   }
 
-  const mesh = window.NSO3MF.indexTriangleSoup(flat);
+  // the file's own indexing only when no triangle was dropped and the geometry is the soup it was read as
+  const mesh = nsoIndexForExport(flat, !dropped && !m.geometry.index ? m : null);
   // The same placement as a 12-number transform, for the scene block: model
   // space (x, y, z) -> file (x + dx, -z + dy, y - minZ), re-anchored onto the
   // geometry's own centre so inverting it lands on what addModel hands back.
@@ -5753,7 +6230,7 @@ function exportActiveModel3MF() {
   setStatus('Building 3MF...');
   const plate = getCurrentPlate();
   const sceneJson = buildModelSceneJson(m, object.basis);
-  return window.NSO3MF.build3MF({ objects: [object], profileId, plateName: plate.name, sceneJson })
+  return window.NSO3MF.build3MF({ objects: [object], profileId, plateName: plate.name, sceneJson, template: nsoBambuTemplateFor() })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
       downloadBlob(blob, filename);

@@ -92,6 +92,25 @@ withApp(async (page, logs) => {
       const c = m => { const a = m.geometry.attributes.color.array; let r = 0, b = 0; for (let i = 0; i < a.length; i += 3) { r += a[i]; b += a[i + 2]; } return r > b; };
       return c(ms[0]) !== c(ms[1]);
     }));
+    /* the filament readout (the owner: "a side by side filament readout in the top centre box"): each piece's filament from its own moves'
+       E, the Features list's checked types only, under the file line */
+    const fil = await page.evaluate(() => {
+      const f = NSO_MICROSCOPE.compareFilament(), box = document.getElementById('ms-head-fil');
+      const sumE = (o) => o.moves.filter(m => m.e > 0).reduce((t, m) => t + m.e, 0);
+      const d = NSO_MICROSCOPE.plateDoc('cmp'), objs = d ? d.objects : [];
+      return { f, shown: !!box && !box.hidden && /Shown/.test(box.textContent), eA: objs[0] && objs[0].moves ? sumE(objs[0]) : null, eB: objs[1] && objs[1].moves ? sumE(objs[1]) : null };
+    });
+    check('the head box shows each piece\'s filament, side by side: the total is the sum of its moves\' E, line type by line type adding up to it',
+      fil.shown && fil.f && Math.abs(fil.f.a.tot - fil.eA) < 1e-6 * Math.max(1, fil.eA) && Math.abs(fil.f.b.tot - fil.eB) < 1e-6 * Math.max(1, fil.eB) &&
+      Math.abs(Object.values(fil.f.a.by).reduce((t, v) => t + v, 0) - fil.f.a.tot) < 1e-6 * Math.max(1, fil.eA), J(fil.f && { a: fil.f.a.tot, b: fil.f.b.tot, eA: fil.eA, eB: fil.eB }));
+    const filOff = await page.evaluate(() => {
+      const f0 = NSO_MICROSCOPE.compareFilament(), name = f0.names[0];
+      NSO_MICROSCOPE.setFeatureDisplay(name, false);
+      const f1 = NSO_MICROSCOPE.compareFilament();
+      NSO_MICROSCOPE.setFeatureDisplay(name, true);
+      return { name, tot0: f0.a.tot, part: f0.a.by[name] || 0, tot1: f1.a.tot, gone: !(name in f1.a.by) };
+    });
+    check('...a line type switched off in the Features list leaves it, and the total drops by just its share', filOff.gone && Math.abs(filOff.tot0 - filOff.part - filOff.tot1) < 1e-6 * Math.max(1, filOff.tot0), J(filOff));
     await shot('01-side-by-side');
   }
 

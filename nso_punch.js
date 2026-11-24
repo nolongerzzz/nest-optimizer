@@ -99,12 +99,14 @@
     nozzle: 0.4,
     pattern: 'none',
     rows: 2, cols: 2, pitchX: 10, pitchY: 10, anchor: 'corner',
+    stagger: false,      // grid: every other row shifted half a pitch along u (hex packing at pitchY = pitchX * sqrt(3) / 2)
+    edge: 'refuse',      // a hole too near the face's edge: 'refuse' the punch, or 'drop' that hole (a sheet trimmed to its outline)
     n: 6, R: 10,
     endMm: 0.2,          // the cutter runs this far past the surface at each end
     smoothDeg: 30,       // neighbours this close are one smooth surface (and share a normal)
     planarDeg: 0.5,      // ...and this close, one flat region (the frame's u comes from its rim)
-    maxHoles: 400,
-    maxCount: 100        // rows, cols or n
+    maxHoles: 10000,     // a fine mesh: 100 x 100 Ø1 holes on a 180 mm sheet is ~30 s of boolean
+    maxCount: 200        // rows, cols or n
   };
 
   /* ------------------------------------------------------------- vectors */
@@ -127,6 +129,39 @@
     return a === '-0.0' ? '0.0' : a;
   }
   function plural(k, one, many) { return k + ' ' + (k === 1 ? one : many); }
+  /* Hole numbers for a reason: all of them up to a dozen, else the first dozen and the count. */
+  function listOf(ns) { return ns.length <= 12 ? ns.join(', ') : ns.slice(0, 12).join(', ') + ', ... ' + ns.length + ' in all'; }
+  var WALL_EPS = 1e-4;   // mm: a wall this close to the floor is AT it (a pitch of exactly Ø + floor passes)
+
+  /* Every pair (i < j) of boxes { lo, hi } that come within pad of each other: sweep and prune along the
+     axis the boxes spread furthest on. A grid of N holes is ~N * sqrt(N) box tests, not N^2 / 2 exact ones. */
+  function nearPairs(boxes, pad) {
+    var n = boxes.length, out = [];
+    if (n < 2) return out;
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], i, k;
+    for (i = 0; i < n; i++) for (k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], boxes[i].lo[k]); hi[k] = Math.max(hi[k], boxes[i].hi[k]); }
+    var ax = 0;
+    for (k = 1; k < 3; k++) if (hi[k] - lo[k] > hi[ax] - lo[ax]) ax = k;
+    var b = (ax + 1) % 3, c = (ax + 2) % 3;
+    var ord = new Int32Array(n);
+    for (i = 0; i < n; i++) ord[i] = i;
+    ord.sort(function (x, y) { return boxes[x].lo[ax] - boxes[y].lo[ax]; });
+    for (var p = 0; p < n; p++) {
+      var A = boxes[ord[p]], end = A.hi[ax] + pad;
+      for (var q = p + 1; q < n; q++) {
+        var Bx = boxes[ord[q]];
+        if (Bx.lo[ax] > end) break;
+        if (Bx.lo[b] > A.hi[b] + pad || A.lo[b] > Bx.hi[b] + pad || Bx.lo[c] > A.hi[c] + pad || A.lo[c] > Bx.hi[c] + pad) continue;
+        out.push(ord[p] < ord[q] ? [ord[p], ord[q]] : [ord[q], ord[p]]);
+      }
+    }
+    out.sort(function (x, y) { return x[0] - y[0] || x[1] - y[1]; });
+    return out;
+  }
+  function segBox(a, b, r) {
+    return { lo: [Math.min(a[0], b[0]) - r, Math.min(a[1], b[1]) - r, Math.min(a[2], b[2]) - r],
+             hi: [Math.max(a[0], b[0]) + r, Math.max(a[1], b[1]) + r, Math.max(a[2], b[2]) + r] };
+  }
 
   /* ---------------------------------------------- the soup, read once */
   var meshCache = typeof WeakMap === 'function' ? new WeakMap() : null;
@@ -380,9 +415,11 @@
   function patternOf(o) {
     var pts = [], i, j;
     if (o.pattern === 'grid') {
+      var sh = o.stagger && o.rows > 1 ? o.pitchX / 2 : 0;       // odd rows' shift along u
       for (j = 0; j < o.rows; j++) for (i = 0; i < o.cols; i++) {
-        if (o.anchor === 'centre') pts.push([(i - (o.cols - 1) / 2) * o.pitchX, (j - (o.rows - 1) / 2) * o.pitchY]);
-        else pts.push([i * o.pitchX, j * o.pitchY]);
+        var dx = (j % 2) * sh;
+        if (o.anchor === 'centre') pts.push([(i - (o.cols - 1) / 2) * o.pitchX + dx - sh / 2, (j - (o.rows - 1) / 2) * o.pitchY]);
+        else pts.push([i * o.pitchX + dx, j * o.pitchY]);
       }
     } else if (o.pattern === 'radial') {
       for (i = 0; i < o.n; i++) { var a = 2 * Math.PI * i / o.n; pts.push([o.R * Math.cos(a), o.R * Math.sin(a)]); }
@@ -430,11 +467,13 @@
       if (o.cols > 1 && !(isFinite(o.pitchX) && o.pitchX > 0)) return 'the grid needs a pitch across its columns above 0';
       if (o.rows > 1 && !(isFinite(o.pitchY) && o.pitchY > 0)) return 'the grid needs a pitch across its rows above 0';
       if (o.anchor !== 'corner' && o.anchor !== 'centre') return "the grid's anchor is 'corner' or 'centre'";
+      if (o.stagger && o.cols > 1 && o.rows > 1 && !(isFinite(o.pitchX) && o.pitchX > 0)) return 'a staggered grid needs a pitch across its columns above 0';
       if (o.rows * o.cols > o.maxHoles) return o.rows * o.cols + ' holes is more than one punch makes (' + o.maxHoles + ')';
     } else if (o.pattern === 'radial') {
       if (!cnt(o.n)) return 'a circle of holes needs a whole number of holes, 1 to ' + o.maxCount;
       if (!(isFinite(o.R) && o.R > 0)) return 'the circle needs a radius above 0';
     } else if (o.pattern !== 'none') return "pattern is 'none', 'grid' or 'radial'";
+    if (o.edge !== 'refuse' && o.edge !== 'drop') return "edge is 'refuse' or 'drop'";
     return null;
   }
 
@@ -558,7 +597,7 @@
         if (S.s0 >= d) return;
         if (S.s1 > d) {
           var skin = S.s1 - d;
-          if (skin < floor) viol.push({ kind: 'skin', wall: skin, holes: [H.n],
+          if (skin < floor - WALL_EPS) viol.push({ kind: 'skin', wall: skin, holes: [H.n],
             text: 'hole ' + H.n + ' would leave a ' + fmt(skin, floor) + ' mm skin under it' });
           kept.push({ s0: S.s0, s1: d, inTri: S.inTri, outTri: -1 });
         } else kept.push(S);
@@ -566,8 +605,10 @@
       H.spans = kept;
     });
 
-    // wall to the piece's edge, where each span goes in and comes out
-    holes.forEach(function (H) {
+    // wall to the piece's edge, where each span goes in and comes out. edge 'drop': a hole too near it is
+    // left out (a sheet trimmed to its outline), not a refusal
+    var trimmed = [], trimmedAt = [];
+    holes = holes.filter(function (H) {
       var worst = Infinity;
       H.spans.forEach(function (S) {
         [[S.s0, S.inTri], [S.s1, S.outTri]].forEach(function (e) {
@@ -576,46 +617,72 @@
           if (w < worst) worst = w;
         });
       });
-      if (worst < floor) viol.push({ kind: 'edge', wall: worst, holes: [H.n],
+      if (!(worst < floor - WALL_EPS)) return true;
+      if (o.edge === 'drop') { trimmed.push(H.n); trimmedAt.push({ n: H.n, point: H.centre, axis: H.axis }); return false; }
+      viol.push({ kind: 'edge', wall: worst, holes: [H.n],
         text: worst < 0 ? 'hole ' + H.n + ' would break through the piece\'s edge' :
               'hole ' + H.n + ' would leave ' + fmt(worst, floor) + ' mm of wall to the piece\'s edge' });
+      return true;
     });
+    if (!holes.length) {
+      return refuse('all ' + plural(total, 'hole', 'holes') + ' fall off the face or come within ' + fmt(floor) + ' mm of its edge - nothing is left to punch',
+        { dropped: dropped.length + trimmed.length, droppedHoles: dropped.concat(trimmed).sort(function (x, y) { return x - y; }),
+          droppedAt: droppedAt.concat(trimmedAt), trimmed: trimmed.length, frame: { o: p0, u: u, v: v, n: n0 }, wouldBe: [] });
+    }
 
-    // wall to each neighbour, over the stretches both are in material
+    // wall to each neighbour, over the stretches both are in material. Only pairs whose spans' boxes come
+    // within the floor of each other are measured (nearPairs): a 100 x 100 sheet is ~10^5 tests, not 5 * 10^7
     var segs = holes.map(function (H) {
       return H.spans.map(function (S) {
         var a = sub(H.centre, mul(H.axis, S.s0)), b = sub(H.centre, mul(H.axis, S.s1));
         return { a: a, b: b, mid: mul(add(a, b), 0.5), half: (S.s1 - S.s0) / 2 };
       });
     });
-    for (var x = 0; x < holes.length; x++) for (var y = x + 1; y < holes.length; y++) {
-      var w = Infinity;
+    var boxes = segs.map(function (L) {
+      var bx = { lo: [Infinity, Infinity, Infinity], hi: [-Infinity, -Infinity, -Infinity] };
+      L.forEach(function (S) {
+        var q = segBox(S.a, S.b, r);
+        for (var k = 0; k < 3; k++) { bx.lo[k] = Math.min(bx.lo[k], q.lo[k]); bx.hi[k] = Math.max(bx.hi[k], q.hi[k]); }
+      });
+      return bx;
+    });
+    nearPairs(boxes, floor).forEach(function (pr) {
+      var x = pr[0], y = pr[1], w = Infinity;
       segs[x].forEach(function (A) {
         segs[y].forEach(function (B) {
           if (len(sub(A.mid, B.mid)) - A.half - B.half - 2 * r >= Math.min(w, floor)) return;
           w = Math.min(w, segDist(A.a, A.b, B.a, B.b) - 2 * r);
         });
       });
-      if (w < floor) viol.push({ kind: 'between', wall: w, holes: [holes[x].n, holes[y].n],
+      if (w < floor - WALL_EPS) viol.push({ kind: 'between', wall: w, holes: [holes[x].n, holes[y].n],
         text: w < 0 ? 'holes ' + holes[x].n + ' and ' + holes[y].n + ' would run into each other' :
               'holes ' + holes[x].n + ' and ' + holes[y].n + ' would leave ' + fmt(w, floor) + ' mm between them' });
-    }
+    });
     var frame = { o: p0, u: u, v: v, n: n0 };
     if (viol.length) {
       viol.sort(function (a, b) { return a.wall - b.wall; });
       var more = viol.length - 1;
       return refuse(viol[0].text + '; the floor is ' + fmt(floor) + (more ? ' (' + plural(more, 'more place is', 'more places are') + ' under it too)' : ''),
-        { violations: viol, floor: floor, frame: frame, dropped: dropped.length, droppedHoles: dropped, droppedAt: droppedAt, wouldBe: holes });
+        { violations: viol, floor: floor, frame: frame, dropped: dropped.length + trimmed.length,
+          droppedHoles: dropped.concat(trimmed).sort(function (x, y) { return x - y; }), droppedAt: droppedAt.concat(trimmedAt), trimmed: trimmed.length, wouldBe: holes });
     }
     var what = plural(holes.length, 'hole', 'holes') + (o.threadSpec ?
                ' ' + o.threadSpec.id + (o.threadSpec.hand < 0 ? ' left-hand' : '') + ' threaded (Ø' + fmt(o.diaMm) + ' at the crests of the cut, pitch ' + fmt(o.threadSpec.P) + ') ' :
                ' Ø' + fmt(o.diaMm) + ' ') + (o.depth === 'through' ? 'through' : fmt(+o.depth) + ' mm deep') +
                (o.threadNote ? ' - note: ' + o.threadNote : '');
-    var reason = dropped.length ?
-      plural(dropped.length, 'hole', 'holes') + ' of ' + total + ' fall off the face and ' + (dropped.length === 1 ? 'was' : 'were') +
-      ' dropped (' + dropped.join(', ') + '); punching ' + what : 'punching ' + what;
-    return { ok: true, holes: holes, reason: reason, dropped: dropped.length, droppedHoles: dropped, droppedAt: droppedAt,
-             floor: floor, frame: frame, thread: o.threadSpec ? { spec: o.threadSpec, fit: o.threadFit, note: o.threadNote || '' } : null };
+    var said = [];
+    if (o.edge === 'drop' && (dropped.length || trimmed.length)) {
+      // trimmed to the face: one count - a Fill's overhang and its edge band are the same thing to the user
+      var out = dropped.length + trimmed.length;
+      said.push(out + ' of ' + total + ' ' + (out === 1 ? 'is' : 'are') + ' off the face or within ' + fmt(floor) + ' mm of its edge and left out');
+    } else if (dropped.length) {
+      said.push(plural(dropped.length, 'hole', 'holes') + ' of ' + total + ' fall off the face and ' + (dropped.length === 1 ? 'was' : 'were') +
+        ' dropped (' + listOf(dropped) + ')');
+    }
+    var reason = said.length ? said.join('; ') + '; punching ' + what : 'punching ' + what;
+    var allDropped = trimmed.length ? dropped.concat(trimmed).sort(function (x, y) { return x - y; }) : dropped;
+    return { ok: true, holes: holes, reason: reason, dropped: allDropped.length, droppedHoles: allDropped, droppedAt: droppedAt.concat(trimmedAt),
+             trimmed: trimmed.length, floor: floor, frame: frame, thread: o.threadSpec ? { spec: o.threadSpec, fit: o.threadFit, note: o.threadNote || '' } : null };
   }
 
   /* ----------------------------------------------------------- cutters */
@@ -709,18 +776,61 @@
   }
 
   /* Do any two of the plan's cutters meet (in air, past the material - through
-     holes crossing a tube's bore)? Then they are unioned before the subtract;
-     otherwise they go to the kernel as one soup of separate shells. */
-  function cuttersOverlap(pl) {
-    var holes = (pl && pl.holes) || [];
-    var seg = holes.map(function (H) {
+     holes crossing a tube's bore)? Then they cannot go to the kernel as one soup
+     of separate shells; cutterGroups splits them into sets that do not. */
+  function cutterSegs(holes) {
+    return holes.map(function (H) {
       var m = sidesFor(H.dia), a = unit(H.axis), P0 = add(H.centre, mul(a, H.lift == null ? DEFAULTS.endMm : H.lift));
       return { a: P0, b: sub(P0, mul(a, H.depth)), r: H.thread ? H.dia / 2 + 1e-3 : H.dia / 2 / Math.cos(Math.PI / m) };
     });
-    for (var i = 0; i < seg.length; i++) for (var j = i + 1; j < seg.length; j++) {
-      if (segDist(seg[i].a, seg[i].b, seg[j].a, seg[j].b) < seg[i].r + seg[j].r + 1e-6) return true;
+  }
+  function overlapPairs(holes) {
+    var seg = cutterSegs(holes);
+    return nearPairs(seg.map(function (S) { return segBox(S.a, S.b, S.r); }), 1e-6).filter(function (pr) {
+      var A = seg[pr[0]], B = seg[pr[1]];
+      return segDist(A.a, A.b, B.a, B.b) < A.r + B.r + 1e-6;
+    });
+  }
+  function cuttersOverlap(pl) { return overlapPairs((pl && pl.holes) || []).length > 0; }
+
+  /* The plan's holes as groups (arrays of indices into pl.holes) no two cutters of which meet: each
+     group goes to the kernel as one soup of separate shells, and the groups are subtracted in turn.
+     Greedy colouring in hole order; holes that meet nothing are all in the first group. */
+  function cutterGroups(pl) {
+    var holes = (pl && pl.holes) || [], n = holes.length, adj = [], i;
+    for (i = 0; i < n; i++) adj.push([]);
+    overlapPairs(holes).forEach(function (pr) { adj[pr[0]].push(pr[1]); adj[pr[1]].push(pr[0]); });
+    var col = new Int32Array(n).fill(-1), groups = [];
+    for (i = 0; i < n; i++) {
+      var used = {};
+      adj[i].forEach(function (j) { if (col[j] >= 0) used[col[j]] = true; });
+      var g = 0;
+      while (used[g]) g++;
+      col[i] = g;
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(i);
     }
-    return false;
+    return groups;
+  }
+
+  /* How far the click's face runs from the click, along u and v: the face's own corners (its smooth
+     surface) laid on the click's tangent plane - { ok, u: [min, max], v: [min, max], frame }. A grid
+     that covers it is Fill: cols = 2 * ceil(max(|u|) / pitchX) + 1 about a centred anchor. */
+  function extent(soup, hit, opts) {
+    var o = optsOf(opts);
+    if (!soup || soup.length < 36 || soup.length % 9) return { ok: false, reason: 'there is no piece to punch' };
+    var F = frameOf(soup, hit, o);
+    if (F.reason) return { ok: false, reason: F.reason };
+    var M = F.M, U = [Infinity, -Infinity], V = [Infinity, -Infinity];
+    for (var t = 0; t < M.n; t++) {
+      if (M.region[t] !== F.R0) continue;
+      for (var k = 0; k < 3; k++) {
+        var d = sub(vtx(M.soup, t, k), F.p0), x = dot(d, F.u), y = dot(d, F.v);
+        if (x < U[0]) U[0] = x; if (x > U[1]) U[1] = x;
+        if (y < V[0]) V[0] = y; if (y > V[1]) V[1] = y;
+      }
+    }
+    return { ok: true, u: U, v: V, frame: { o: F.p0, u: F.u, v: F.v, n: F.n0 } };
   }
 
   var API = {
@@ -730,6 +840,9 @@
     slide: slide,
     surface: surface,
     cuttersOverlap: cuttersOverlap,
+    cutterGroups: cutterGroups,
+    extent: extent,
+    _nearPairs: nearPairs,
     sidesFor: sidesFor,
     _smoothNormal: function (soup, t, p, smoothDeg) { return smoothNormal(meshOf(soup, smoothDeg || DEFAULTS.smoothDeg), t, p); }
   };

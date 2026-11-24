@@ -39,7 +39,13 @@
          notch_u.stl, a block with a U notch through it: click the notch's back
          wall with Thicken OUT armed, the verb follows to Thicken in, the slider
          runs to the piece's size, the ghost carries the added slab, Set moves
-         that wall and nothing else, the engine refuses past the far wall */
+         that wall and nothing else, the engine refuses past the far wall
+     14. one side of a sheet - a 2 mm wall with rounded edges (generated here):
+         its front, rims and back are one smooth surface with no crease to
+         stop at, and a click on the front took the back too, so "one wall"
+         was the whole piece. A click on the front now takes the front and
+         half of each rim, a click on the back the rest; Set moves the front
+         and leaves the back where it was */
 
 const fs = require('fs');
 const os = require('os');
@@ -587,6 +593,97 @@ withApp(async (page, logs) => {
     check('  ...26 mm (the whole width): refused in words', !l2.ok && /more than the feature it grows into/.test(l2.readout), l2.readout);
     await page.click('#btn-thicken-cancel');
     check('Cancel: no slab left, slider back to 8, piece untouched', !(await page.evaluate(() => !!nsoThickenLive.objects().slab)) && (await page.evaluate(() => +document.getElementById('inp-thicken-mm').max)) === 8 && sameFloats(await rawOf(page), orig));
+  }
+
+  console.log('\n=== 14. one side of a sheet: a wall with rounded edges ===');
+  {
+    /* 40 long (x), 2 thick (y: front +1, back -1), 10 tall (z); each end a
+       half round of radius 1 in SEG steps; caps fanned from the centre. Wound outward. */
+    const SEG = 32, NF = 20, L = 20, H = 10, prof = [];
+    for (let i = 0; i <= SEG; i++) { const a = -Math.PI / 2 + Math.PI * i / SEG; prof.push([L + Math.cos(a), Math.sin(a)]); }
+    for (let i = 1; i < NF; i++) prof.push([L - 2 * L * i / NF, 1]);           // the front, in NF steps
+    for (let i = 0; i <= SEG; i++) { const a = Math.PI / 2 + Math.PI * i / SEG; prof.push([-L + Math.cos(a), Math.sin(a)]); }
+    for (let i = 1; i < NF; i++) prof.push([-L + 2 * L * i / NF, -1]);         // the back
+    const tris = [], np = prof.length;
+    for (let i = 0; i < np; i++) {
+      const a = prof[i], b = prof[(i + 1) % np];
+      tris.push([[a[0], a[1], 0], [b[0], b[1], 0], [b[0], b[1], H]], [[a[0], a[1], 0], [b[0], b[1], H], [a[0], a[1], H]]);
+    }
+    for (let i = 0; i < np; i++) {
+      const a = prof[i], b = prof[(i + 1) % np];
+      tris.push([[0, 0, H], [a[0], a[1], H], [b[0], b[1], H]]);
+      tris.push([[0, 0, 0], [b[0], b[1], 0], [a[0], a[1], 0]]);
+    }
+    const buf = Buffer.alloc(84 + tris.length * 50);
+    buf.writeUInt32LE(tris.length, 80);
+    tris.forEach((t, k) => t.forEach((v, j) => v.forEach((c, q) => buf.writeFloatLE(c, 84 + k * 50 + 12 + j * 12 + q * 4))));
+    const file = path.join(out, 'sheet_rounded.stl');
+    fs.writeFileSync(file, buf);
+
+    await page.click('#btn-clear-plate');
+    const id = await loadSTL(page, file); await selectModel(page, id);
+    await page.evaluate(() => { document.getElementById('menu-add').open = true; });
+    const bb = await rawBox(page), orig = await rawOf(page);
+    const yMid = (bb.lo[1] + bb.hi[1]) / 2, zMid = (bb.lo[2] + bb.hi[2]) / 2, xMid = (bb.lo[0] + bb.hi[0]) / 2;
+    const side = np * 2, front = 2 * NF;          // the side band's triangles; the flat front's (the back's the same)
+    /* the raw frame may have turned the sheet: find which raw axis is the
+       2 mm one and which way is the front */
+    const thin = [0, 1, 2].reduce((m, k) => bb.size[k] < bb.size[m] ? k : m, 0);
+    const fp = [xMid, yMid, zMid], bp = [xMid, yMid, zMid];
+    fp[thin] = bb.hi[thin]; bp[thin] = bb.lo[thin];
+
+    await frameOn(thin === 1 ? [0.2, 0.6, 1.2] : [1.2, 0.6, 0.2])(page);
+    await page.click('#btn-thicken-out');
+    await realClick(page, await screenOfRaw(page, fp));
+    let s1 = await live(page);
+    if (!s1.wall) {                                // the view showed the other face: look from the far side
+      await page.click('#btn-thicken-cancel');
+      await frameOn(thin === 1 ? [0.2, -0.6, -1.2] : [-1.2, -0.6, -0.2])(page);
+      await page.click('#btn-thicken-out');
+      await realClick(page, await screenOfRaw(page, fp));
+      s1 = await live(page);
+    }
+    check('a click on one face of the sheet: that face (' + front + ' triangles), not the whole band (' + side + '); the rims are held',
+      s1.wall && s1.wall.count === front, s1.readout);
+    check('  ...still Thicken out (both faces are outer)', s1.mode === 'out');
+    await setMm(page, 1);
+    const s2 = await live(page);
+    if (s2.ok && !s2.gateWhy) {
+      const g = Array.from(s2.soup);
+      /* which face the click landed on depends on the view: the one that moved */
+      let hiMoved = 0;
+      for (let i = 0; i < orig.length; i += 3) if (Math.abs(orig[i + thin] - bb.hi[thin]) < 1e-4 && Math.abs(g[i + thin] - orig[i + thin]) > 1e-6) hiMoved++;
+      if (!hiMoved) { const tmp = fp[thin]; fp[thin] = bp[thin]; bp[thin] = tmp; }
+      let backMoved = 0, frontMoved = 0, edgeHalf = 0, other = 0;
+      const span = [0, 1, 2].filter(k => k !== thin && bb.size[k] > 30)[0];      // the 42 mm axis
+      const c = (bb.lo[span] + bb.hi[span]) / 2;
+      for (let i = 0; i < orig.length; i += 3) {
+        const d = g[i + thin] - orig[i + thin], dir = fp[thin] > bp[thin] ? 1 : -1, moved = Math.hypot(g[i] - orig[i], g[i + 1] - orig[i + 1], g[i + 2] - orig[i + 2]);
+        if (Math.abs(orig[i + thin] - bp[thin]) < 1e-4) { if (moved > 1e-6) backMoved++; continue; }
+        if (Math.abs(orig[i + thin] - fp[thin]) < 1e-4) {
+          const atRim = Math.abs(Math.abs(orig[i + span] - c) - L) < 1e-3;
+          if (atRim && near(d * dir, 0.5, 0.05)) edgeHalf++;
+          else if (!atRim && near(d * dir, 1, 1e-4) && near(moved, 1, 1e-4)) frontMoved++;
+          else other++;
+        } else if (moved > 1e-6) other++;
+      }
+      check('  ...the ghost at 1 mm: the face moved 1 mm straight out, the far face and the rims stayed, the face\'s edge on each rim moved half',
+        frontMoved > 0 && backMoved === 0 && other === 0 && edgeHalf > 0,
+        frontMoved + ' face corners at 1 mm, ' + edgeHalf + ' rim-edge corners at 0.5, ' + backMoved + ' back corners moved, ' + other + ' other');
+      await page.click('#btn-thicken-set');
+      await page.waitForFunction(() => !nsoThickenLive.on(), null, { timeout: 30000 });
+      check('  ...Set bakes it: the piece is the ghost, bit for bit', sameFloats(await rawOf(page), g));
+      await undo(page);
+      check('  ...Undo: the sheet as it was', sameFloats(await rawOf(page), orig));
+      await page.click('#btn-thicken-out');
+    } else check('  ...the ghost at 1 mm is not refused', false, s2.readout);
+    await realClick(page, await screenOfRaw(page, fp));
+    const again = (await live(page)).wall;
+    await realClick(page, await screenOfRaw(page, fp));
+    check('armed again: a click picks the same face, a second click on it goes back to the whole piece',
+      again && again.count === front && (await live(page)).wall === null, JSON.stringify(again));
+    await page.click('#btn-thicken-cancel');
+    check('Cancel: piece untouched', sameFloats(await rawOf(page), orig));
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

@@ -599,7 +599,7 @@ withApp(async (page, logs) => {
     await frames(page);
     const seen = await page.evaluate(() => { window.__sliceObs.disconnect(); return window.__sliceSeen; });
     check('a real click on Slice slices the mesh: a toolpath made here', r && r.ok, J(r));
-    check('...while it runs the Slice report says "Slicing N object(s)..."', seen.texts.some(t => /^Slicing \d+ object\(s\)\.\.\./.test(t)), seen.texts.slice(0, 3).join(' | ').slice(0, 120));
+    check('...while it runs the Slice report says "Slicing N object(s)..."', seen.texts.some(t => /^Slicing (\d+ object|the plate)/.test(t)), seen.texts.slice(0, 3).join(' | ').slice(0, 120));
     check('...and the switch shows busy (aria-busy on Slice, .is-busy on the switch), its label still "Slice", never "Slicing..."',
       seen.aria && seen.busyCls && seen.labels.every(l => l === 'Slice'), J({ aria: seen.aria, busyCls: seen.busyCls, labels: Array.from(new Set(seen.labels)) }));
     st = await cardState(page);
@@ -676,7 +676,10 @@ withApp(async (page, logs) => {
       return { n: document.querySelectorAll('#ms-btn-step-back').length, disabled: b.disabled, text: b.textContent, left: Math.round(r.left), top: Math.round(r.top), cardRight: Math.round(c.right), cardTop: Math.round(c.top), h: Math.round(r.height) }; });
     check('BACK stands once, grey at the starting point, right of the card\'s head and level with its top', bk.n === 1 && bk.disabled && /Back/.test(bk.text) && bk.left >= bk.cardRight && bk.left - bk.cardRight < 20 && Math.abs(bk.top - bk.cardTop) <= 2, J(bk));
     const rBk = await reach(page, ['ms-btn-step-back']);
-    check('...and a click can reach it (nothing over it)', rBk.blocked.length === 0, J(rBk));
+    // grey, it takes no pointer (styles.css: a disabled control in G-scope lets the press through to what is behind it,
+    // so a right-click there cannot open the browser's menu): what is at its face is its own holder, nothing else
+    check('...and a click can reach it (nothing over it but, while it is grey, its own holder)',
+      rBk.blocked.every((x) => /^ms-btn-step-back \(covered by ms-step-back-hold\)$/.test(x)) && (rBk.blocked.length === 0 || bk.disabled), J(rBk));
     await clickFace(page, '#ms-slice-settings-toggle'); await frames(page);
     await clickFace(page, '#ms-measure-toggle'); await frames(page);
     await page.evaluate(() => NSO_MICROSCOPE.setZRange(0, 5)); await frames(page);
@@ -906,6 +909,8 @@ withApp(async (page, logs) => {
     // SLICE SETTINGS (VIEW > Slice settings): the Slice row - an edit survives the round trip and the next slice takes it
     await page.fill('#ms-slice-layer', '0.25');
     await page.evaluate(() => document.getElementById('ms-slice-layer').dispatchEvent(new Event('change', { bubbles: true })));
+    /* the plate has one slice, the Supports card's (the owner: "It needs to be one slice"): its layer is the card's Slice settings' */
+    await page.evaluate(() => { const el = document.getElementById('slice-set-layer'); el.value = '0.25'; el.dispatchEvent(new Event('change', { bubbles: true })); });
     // NORMAL / SLICE (VIEW > Normal / Slice view): the switch - the track back to the mesh
     r = await clickFace(page, '.ms-switch-track');
     await waitMesh(page);
@@ -999,7 +1004,7 @@ withApp(async (page, logs) => {
     await waitSlice(page);
     await frames(page);
     pitch2 = await page.evaluate(() => window.__s.layerPitch());
-    check('Slice settings -> the Slice row: the edit (layer 0.25) is what the next slice (Normal, then Slice again) takes', r && r.ok && pitch2 !== null && Math.abs(pitch2 - 0.25) < 0.005, String(pitch2));
+    check('Slice settings -> the plate\'s slice: the Supports card\'s layer (0.25) is what the next slice (Normal, then Slice again) takes', r && r.ok && pitch2 !== null && Math.abs(pitch2 - 0.25) < 0.005, String(pitch2));
     const f = await page.evaluate(() => {
       const $ = id => document.getElementById(id);
       const d = NSO_MICROSCOPE.getDoc();
@@ -1107,15 +1112,16 @@ withApp(async (page, logs) => {
     const s5 = await at();
     check('Escape 5, nothing left to undo: G-scope closes', !s5.open && await page.evaluate(() => document.getElementById('microscope').hidden), J(s5));
 
-    // a new visit: the plate read again, the Slice settings folded and back on the printer profile (0.25 forgotten)
+    // the next open: the plates were kept (docs/GSCOPE.md item 3), and the Slice settings with them - the 0.25 as it was
+    // left; what the close ended stays ended (the ▾ shut)
     await page.click('#btn-microscope');
     await waitMesh(page);
     await frames(page);
     const v = await page.evaluate(() => ({ side: document.getElementById('ms-main-card').dataset.side, folded: document.getElementById('ms-slice-settings').hidden,
       aria: document.getElementById('ms-slice-settings-toggle').getAttribute('aria-expanded'), layer: document.getElementById('ms-slice-layer').value,
       nozzle: document.getElementById('ms-slice-nozzle').value, menu: document.getElementById('ms-import-menu').classList.contains('is-open') }));
-    check('a new visit: the Normal side, the ▾ shut, the Slice settings folded and re-seeded (nozzle 0.4, layer 0.2 - the 0.25 is gone)',
-      v.side === 'normal' && v.folded && v.aria === 'false' && v.layer === '0.2' && v.nozzle === '0.4' && !v.menu, J(v));
+    check('the next open, plates kept: the Normal side, the ▾ shut, the Slice settings as they were left (nozzle 0.4, layer 0.25)',
+      v.side === 'normal' && v.layer === '0.25' && v.nozzle === '0.4' && !v.menu, J(v));
     // CLOSE shuts the menu with G-scope
     await clickFace(page, '#ms-btn-import-more');
     const r = await clickFace(page, '#ms-close');

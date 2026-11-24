@@ -29,7 +29,8 @@ Both are in `npm test`.
 a box, the way Extract bit is a cutter bounded by its bit. Given a piece and a box
 (Crop's Box: centre, size, yaw) it fills every bit of empty space in the box that is
 **buried** in the piece and welds to every face it meets. The Foam card below is its
-sealed-hollow case; the ADD card that sprays a box is the GUN (§11).
+sealed-hollow case; FOAM's Box mode sprays a box (§11). The GUN - point into a gap, no box - is
+its own tool and its own engine: docs/FOAM-GUN.md.
 
 Fill / Densify (`nso_hollow.js` `fill`) stays exactly as it is: one click, every
 enclosed cavity gone, nothing to see. Foam is its visible, partial counterpart.
@@ -170,7 +171,8 @@ the skip list as a **required** input - `foam()` without one is refused - so
 
 ## 8. Flagged, not built
 
-- Freehand blobs (foam sprayed at a spot, not filling a hollow).
+- Freehand blobs (foam sprayed at a spot, not filling a hollow). The GUN (docs/FOAM-GUN.md) fills
+  the gap a click is in; a blob on an open surface is still not built.
 - Filling open vessels from the Foam card - refused there in words. foamBox (§10)
   fills them; the GUN (§11) is its ADD card.
 - Thin-wall beef-up (foam to thicken a wall from inside).
@@ -230,6 +232,14 @@ pieces, one with a yawed box).
 - **Cut at a height where the side changes.** A face whose side changes inside its span is cut at
   that critical height (a slanted rim opens at the inner rim's lowest corner, a saddle mid-wall;
   every inner wall of `slantCup` is one tall quad and is cut there).
+- **One level per flat face.** A weld or a union can leave a flat face spread over a few float32
+  steps of height (1e-6..1e-5 mm), and every distinct height would be a critical height - a stack
+  of slabs a hair thick that no lid can be laid on. Before the critical heights are read, heights
+  within the weld radius (1e-4 mm) of a run's lowest are taken as one level, the height most
+  corners in the run have. Only the engine's working copy moves; an original corner goes back out
+  as the raw corner it came from. A flat face that is a needle - one corner within 1e-4 mm of the
+  line through the other two - has no facing to read (float noise picks its sign), so it faces
+  neither way and the lid closes over it.
 - **The void.** The faces that border buried space, turned inside out, closed by a flat **lid**
   wherever the buried space ends against air (a cup's rim, a bell's mouth), are a closed solid.
 - **The foam** is that solid cut by the box's six faces and then the level, plane by plane, each
@@ -305,7 +315,14 @@ should keep the void for its piece while the amount changes (not done: the GUN, 
 - The amount is by height, not volume.
 - The engine has no preview of its own: the GUN (§11) draws the foam from `mesh`.
 
-## 11. The GUN: foamBox from the ADD column
+## 11. FOAM's Box mode: foamBox from the Fill & fix card
+
+This was the GUN until 2026-11-18. The GUN is now point-and-spray with no box (docs/FOAM-GUN.md);
+the box moved here, to **FOAM**, unchanged, and is FOAM's default mode. FOAM has two modes side by
+side: **Box** (this section) and **Hollows** (the sealed-hollow Foam, §1-9). The box panel carries
+**Hollows**, the hollow panel **Box**; each switch puts the other mode away first. Below, "GUN" reads
+"FOAM, Box mode"; ids are `#btn-foam`, `#foam-box-panel`, `#foam-box-readout`, `#btn-foam-box-cancel`,
+and the page API is `window.nsoFoamBox`.
 
 `app-foam.js` (the gun), `app-crop-card.js` (the loan of the Box), `index.html` (`#btn-foam-gun`,
 `#foam-gun-panel`). UI only: every number is foamBox's (§10). `tools/nso_foam_drive_check.js`

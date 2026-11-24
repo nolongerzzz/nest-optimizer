@@ -165,8 +165,13 @@ const keep = process.argv.indexOf('--keep') >= 0 ? process.argv[process.argv.ind
     model === refModel.replace(/(name="DesignerUserId">)[^<]*/, '$1') && !/<mesh|<object/.test(model));
   check('3dmodel.model: Application BambuStudio-' + G.DEFAULT_STUDIO_VERSION + ', the G-code\'s own slicer',
     model.includes('<metadata name="Application">BambuStudio-02.08.02.61</metadata>'));
-  const tpl = JSON.parse(fs.readFileSync(path.join(ROOT, W.TEMPLATE_DIR, W.DEFAULT_TEMPLATE, 'template.json'), 'utf8'));
-  check('DEFAULT_STUDIO_VERSION is the pinned Bambu template\'s (' + tpl.studio_version + ')', G.DEFAULT_STUDIO_VERSION === tpl.studio_version);
+  /* The print path (app-print.js) slices against project_test.3mf, not the plate export's template (template.json names
+     plate_export.3mf since the INLINE export), so the default is read off that project's own Application tag. */
+  const printTpl = readZip(fs.readFileSync(path.join(ROOT, W.TEMPLATE_DIR, W.DEFAULT_TEMPLATE, 'project_test.3mf')));
+  const printTplVersion = ((printTpl.get('3D/3dmodel.model') || Buffer.alloc(0)).toString('utf8')
+    .match(/<metadata name="Application">BambuStudio-([\d.]+)<\/metadata>/) || [])[1];
+  check('DEFAULT_STUDIO_VERSION is the print path\'s Bambu template\'s (project_test.3mf, ' + printTplVersion + ')',
+    G.DEFAULT_STUDIO_VERSION === printTplVersion);
   const si = outText(G.PART.sliceInfo), refSi = refText(G.PART.sliceInfo);
   const refSiPlaceheld = refSi.replace(/(key="first_layer_time" value=")[^"]*/, '$10.000000').replace(/^ *<warning [^\n]*\n/gm, '');
   check('slice_info.config: the reference\'s, line for line, but first_layer_time 0.000000 and no <warning> lines',

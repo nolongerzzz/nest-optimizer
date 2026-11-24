@@ -16,6 +16,11 @@
 //                  changes by -dr.
 //   Wall -> w      bore faces move by -(w - wall). Outer held.
 //   Diameter -> d  (a rod: no bore) outer faces by dr, nothing else.
+//   'ring' {outer, bore, wall}  several of the above staged together (the
+//                  Scale card's preview): ONE move to where they all say the
+//                  faces end - Outer, then the bore from Wall (off the new
+//                  outer) or Bore - judged once on the final ring, so an outer
+//                  brought in past the old bore is fine when the bore came in too.
 //
 // The length is held by all of them. A ring verb is refused under the wall
 // floor (NSO_ringWallFloor) and where the two faces would cross, in mm.
@@ -194,12 +199,12 @@ function NSO_ringNormal(s, q) {
 function NSO_ringPlan(reading, verb, value, opts) {
   opts = opts || {};
   var out = { ok: false, reason: '' };
-  var v = +value;
+  var v = verb === 'ring' ? NaN : +value;
   if (!reading || reading.shape !== 'round') {
     out.reason = 'not round - ' + ((reading && reading.reason) || 'no reading');
     return out;
   }
-  if (!isFinite(v)) { out.reason = 'enter a number of mm'; return out; }
+  if (verb !== 'ring' && !isFinite(v)) { out.reason = 'enter a number of mm'; return out; }
   var R = reading.outer.diameterMm / 2;
   var hollow = !!reading.hollow, r = hollow ? reading.bore.diameterMm / 2 : 0;
   var R2 = R, r2 = r;
@@ -207,6 +212,13 @@ function NSO_ringPlan(reading, verb, value, opts) {
     if (verb !== 'diameter') { out.reason = 'a rod has no bore - only Diameter applies'; return out; }
     if (!(v > 0)) { out.reason = 'diameter would be ' + NSO_ringFmt(v) + ' mm - a rod needs more than zero'; return out; }
     R2 = v / 2;
+  } else if (verb === 'ring') {
+    // Several ring fields at once, as ONE move: the targets are where the
+    // faces end, so a bore brought in and an outer brought in past where the
+    // bore stood are judged together, not one after the other.
+    var g = NSO_ringTargets(R, r, value);
+    if (!g.ok) { out.reason = g.reason; out.blame = g.blame; return out; }
+    R2 = g.R2; r2 = g.r2;
   } else if (verb === 'outer') {
     if (!(v > 0)) { out.reason = 'outer Ø would be ' + NSO_ringFmt(v) + ' mm - it needs more than zero'; return out; }
     R2 = v / 2;   // the bore is held
@@ -221,17 +233,21 @@ function NSO_ringPlan(reading, verb, value, opts) {
   if (hollow) {
     if (r2 >= R2) {
       // said from the face that moved
-      out.reason = verb === 'outer'
+      var fromOuter = verb === 'outer' || (verb === 'ring' && R2 < R);
+      if (verb === 'ring') out.blame = fromOuter ? 'outer' : NSO_ringBoreKey(value);
+      out.reason = fromOuter
         ? 'outer would reach the bore - Ø' + NSO_ringFmt(2 * R2) + ' outer against a Ø' + NSO_ringFmt(2 * r2) + ' bore'
         : 'bore would reach the outer - Ø' + NSO_ringFmt(2 * r2) + ' bore against a Ø' + NSO_ringFmt(2 * R2) + ' outer';
       return out;
     }
     if (!(r2 > 0)) {
+      if (verb === 'ring') out.blame = NSO_ringBoreKey(value);
       out.reason = 'bore would close up - Ø' + NSO_ringFmt(2 * r2) + ' mm is at or below zero';
       return out;
     }
     var floor = NSO_ringWallFloor(opts);
     if (floor != null && R2 - r2 < floor) {
+      if (verb === 'ring') out.blame = (value && value.wall != null) ? 'wall' : (value && value.outer != null && R2 < R ? 'outer' : NSO_ringBoreKey(value));
       out.reason = 'wall would be ' + NSO_ringFmt(R2 - r2) + ' mm, under the ' + NSO_ringFmt(floor) + ' mm floor';
       out.floorMm = floor;
       return out;
@@ -243,6 +259,21 @@ function NSO_ringPlan(reading, verb, value, opts) {
   out.dOuter = R2 - R; out.dBore = hollow ? r2 - r : 0;
   return out;
 }
+
+/* The 'ring' verb's targets: value is { outer, bore, wall } in mm, each null
+   when that field asks for no change. Outer sets the outer circle; Wall, when
+   given, sets the bore from the NEW outer (the bore sits that far inside it);
+   otherwise Bore sets it; otherwise the bore is held. R, r are the radii now. */
+function NSO_ringTargets(R, r, value) {
+  value = value || {};
+  var o = value.outer, b = value.bore, w = value.wall;
+  if (o != null && !(+o > 0)) return { ok: false, blame: 'outer', reason: 'outer Ø would be ' + NSO_ringFmt(o) + ' mm - it needs more than zero' };
+  var R2 = o != null ? +o / 2 : R;
+  var r2 = w != null ? R2 - +w : (b != null ? +b / 2 : r);
+  if (!isFinite(R2) || !isFinite(r2)) return { ok: false, blame: o != null ? 'outer' : NSO_ringBoreKey(value), reason: 'enter a number of mm' };
+  return { ok: true, R2: R2, r2: r2 };
+}
+function NSO_ringBoreKey(value) { return (value && value.wall != null) ? 'wall' : 'bore'; }
 
 /* The wall floor: NSO_Thickness.floorFor(nozzle), the one place this repo
    keeps it (nozzle x 1.05; 0.42 mm at the default 0.4 nozzle). opts.floor
@@ -260,7 +291,7 @@ function NSO_ringWallFloor(opts) {
    before, after, plan, ... }; on refusal tris is the original soup. */
 function NSO_ringApplyRaw(soup, verb, value, opts) {
   opts = opts || {};
-  var res = { ok: false, reason: '', tris: soup, verb: verb, value: +value };
+  var res = { ok: false, reason: '', tris: soup, verb: verb, value: verb === 'ring' ? value : +value };
   if (typeof NSO_sectionRead !== 'function' || typeof NSO_fattenCrossSectionFaces !== 'function') {
     res.reason = 'nso_section.js and app-fatten.js must be loaded - the ring verbs read the shape ' +
       'with the one and filter faces with the other';
@@ -270,7 +301,7 @@ function NSO_ringApplyRaw(soup, verb, value, opts) {
   res.before = before;
   var plan = NSO_ringPlan(before, verb, value, opts);
   res.plan = plan;
-  if (!plan.ok) { res.reason = plan.reason; return res; }
+  if (!plan.ok) { res.reason = plan.reason; if (plan.blame) res.blame = plan.blame; return res; }
   if (plan.dOuter === 0 && plan.dBore === 0) { res.reason = 'nothing to change - that is the size it already is'; return res; }
 
   var k = before.axisIdx, c = before.outer.center;

@@ -47,7 +47,8 @@ axis a thrown vessel runs out of first.
 | id | machine | bed X | bed Y | build Z |
 |---|---|---|---|---|
 | `a1mini` | Bambu A1 Mini | 180 | 180 | 180 |
-| `a1` | Bambu A1 / P1S / X1C | 256 | 256 | 256 |
+| `a1` | Bambu A1 / X1C | 256 | 256 | 256 |
+| `p1s` | Bambu P1S | 256 | 256 | 250 |
 | `prusa` | Prusa MK4 / MK3S | 250 | 210 | **210** |
 | `ender` | Creality Ender 3 | 220 | 220 | 250 |
 | `custom` | whatever the Plate card says | — | — | — |

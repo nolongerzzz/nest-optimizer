@@ -307,7 +307,14 @@ function installHelpers() {
     {
       const id = await oneBox(BAD);
       const orig = await page.evaluate(i => window.__ov.raw(i), id);
-      await page.evaluate(() => extractBitFromSelected());
+      // Extract bit is a click now: on the inside wall of box_closed's cavity (56 mm wide, centred in the piece), facing the air.
+      const pick = await page.evaluate(i => {
+        const p = state.placed.find(q => q && q.sourceId === i && q.mesh);
+        p.mesh.updateMatrixWorld(true);
+        const b = nsoBounds.worldBox(p.mesh), c = b.getCenter(new THREE.Vector3());
+        return { index: state.placed.indexOf(p), point: [c.x + 27.9, c.y, c.z], normal: [-1, 0, 0] };
+      }, id);
+      await page.evaluate(pk => extractBitFromSelected(pk), pick);
       const st = await page.evaluate(() => window.__ov.status());
       console.log('  status: ' + st);
       const made = await page.evaluate(i => state.models.filter(m => m.id !== i).map(m => m.id), id);

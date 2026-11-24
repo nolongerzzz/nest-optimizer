@@ -976,3 +976,309 @@ mm tall), Undo, untick.
   still does them.
 - **Only the straight wall of one tube.** A tube with a hole, a boss or a
   second shell inside D is refused, not worked around.
+
+## Cylinders — Neck on a solid rod (2026-11-07)
+
+Shape → **Cylinders** is the rod's door to Neck. Tube edge's Neck reads its
+axis off an open, round end, so a solid cylinder was refused ("the end is
+closed - a flat Ø30.84 face with no opening") while Bend and Limb worked on it.
+Cylinders opens the same card in a rod mode (`state.tubeEdge.rod`): a
+"Cylinder / rod · Neck" heading in place of Verb, no Walls, Neck's Length, Δr,
+Profile, the same ghost and the same three handle rings, Set / Cancel.
+
+The engine is Neck's own, `NSO_tubeNeckRaw(soup, { rod: true, ... })`
+(`NSO_rodNeckRaw` is that call):
+
+- **The axis** is read off the rod's **closed, round end** - Tube edge's own
+  face reader (`NSO_teFaces` / `NSO_teClassFace`, its `closed` kind) - the end
+  standing highest, as Tube edge picks an open one (`NSO_tnRodEnd`).
+- **One face**: a rod has only its outside, so Walls is Outside only whatever
+  was asked. The band must be one cylinder about that axis and nothing else -
+  a bore there (a cup) is refused and pointed at Tube edge → Neck. Mid-rod the
+  outside follows the Profile (Smooth cosine, Funnel taper), held to 75°.
+- **At an end** (the band centred within Length / 2 of it, or on it): a step,
+  as a tube's one-face step - in is a **spigot**, out a **collar**, square
+  shoulder Length in. The end disc is not taken out: every vertex of it moves
+  along its own radial line by Δr × (its radius / R) - the rim by Δr exactly,
+  through the same `NSO_tnMoveRing` arithmetic as the moved ring, so the two
+  weld bit for bit; the centre stays (`NSO_tnScaleDisc`).
+- **The limit**: the rod at the waist (or the spigot) at least 2 nozzle widths
+  across - the bore limit, for the rod itself - refused with the most it may
+  pinch.
+- **The gates** are Neck's: topology (Euler unchanged), Pappus on the outside
+  face, and the rest of the piece copied bit for bit (the end disc's vertices
+  excepted on a step).
+
+Tube edge's Neck refusing a rod now ends "- a solid rod or cylinder is necked
+from Shape → Cylinders"; Cylinders refusing a tube ends "- a tube is necked
+from Tube edge → Neck". Commit undo type `rodNeckReplace` ("Undo: Cylinder
+neck reverted"). Switching the card between Tube edge and Cylinders reads the
+piece again; once a piece reads in the other mode, a neck's Length and Δr
+start from that mode's defaults (a rod: 1.5 radii long, in by a quarter of its
+radius - Ø30.84: 23 mm, −4); a read that is refused leaves them as they were.
+
+Tests: `tools/nso_tube_neck_test.js` section 11 (Stock rod pinch, bulge,
+funnel, spigot, collar, an imported 48-gon rod along X with rim-fan end discs,
+two necks, refusals; mesh_validate on every output) and the drive
+`tools/nso_cylinders_neck_check.js` (`npm run cylinders:drive`).
+
+## Cylinders → Branch — a rod pulled out of a rod's wall (2026-11-07)
+
+The Cylinders card's second verb (its **Cylinder** picker: Neck | Branch).
+**Press on the side of a rod where the branch grows, and drag outward**: the
+branch's tip follows the pointer on the plane through the rod's axis and the
+press, writing **Length** (mm out of the wall, along the branch) and **Angle**
+(° off the rod's axis: 90 straight out, under 90 leaning toward the rod's
+upper end - a shoot - over 90 drooping). **Ø** is the branch at the wall,
+**Tip Ø** its end (blank: the same, a cylinder; less: a shoot that tapers).
+The ghost is the branch alone; **Set** welds it on, one Undo
+(`rodBranchReplace`, "Undo: Branch reverted"), and the card stays up, its
+root cleared, for the next branch. A plain click roots a branch at the fields'
+Length and Angle. Esc mid-drag puts the fields back.
+
+The engine is `nso_rod_branch.js` (`NSO_rodBranchRead`, `NSO_rodBranchPlan`
+- the branch, no union, what the ghost shows - and `NSO_rodBranchRaw`, the
+Promise that welds it on):
+
+- **The parent** is any rod with a flat, round, closed end - the trunk, or a
+  branch made here, whose flat tip is such an end, so **branches grow off
+  branches**. Of the piece's closed round ends the one taken is the one whose
+  axis the press sits round (behind that end, as near its circle as any); the
+  two ends of one straight rod read the same wall, and the higher one is taken.
+  A press on a facet's flat reads up to R(1 − cos π/n) inside the circle: on a
+  straight rod that is snapped to the rod's own radius.
+- **The solid**: a frustum about the branch's own axis, ringed every 0.5 - 2 mm
+  (about as often as its facets are wide - one facet from the wall to the tip
+  was a needle Limb's bend turned inside out), its facets turned half a facet
+  off the press's meridian (on it, a Stock rod pressed at a vertex column met
+  the branch's vertices exactly, and the kernel answered with a doubled edge;
+  the weld retries at two other turns if the result is not one clean solid).
+  Its root disc is buried just deep enough that the whole disc is inside the
+  parent (solved by bisection; refused in words when no depth roots it).
+- **The parent's wall round the junction is subdivided to 0.7 mm first**
+  (nso_densify.js): a Stock rod's wall triangles run its whole length, the
+  union cuts them into slivers tens of mm long, and Limb's own subdivision of
+  its flex zone then left a mesh with open edges or triangles under the
+  slicer's weld. From 0.7 mm triangles the junction's are small and Limb has
+  nothing there to split. That same subdivision, run on a wall an earlier
+  union already cut, breaks it the same way - so the subdivided wall is used
+  only when it is provably as clean as the original (same edge counts, no
+  more piercing pairs by NSO_Repair), else the union goes ahead on the wall as
+  it was (`fine` in the result says which). The root cause is queued as its
+  own task: nso_densify.js's needle zip on sliver meshes.
+- **The union** is the app's Manifold boolean, `nsoUnionSoups` (Fill's: the
+  plain kernel add). Join's `NSO_unionSoups` welds both inputs at 0.08 mm
+  first, which collapsed the slivers an earlier branch's junction leaves.
+- **The gates**: as many solids after as before (the branch joined, not lying
+  beside), closed and 2-manifold, and the volume grown by at least half what
+  stands out of the wall and at most the branch's whole solid.
+- **Refusals**: no flat round end; a press on an end face; a branch as wide as
+  the rod at the press, or wider (with the most it may be); root or tip under
+  2 nozzle widths; Length ≤ 0; Angle outside 20° - 160°.
+
+**Defaults** off the rod pressed: Ø a third of the rod's (to 0.5 mm), Length
+1.5 × the rod's Ø, Angle 45°; a typed Ø too wide for the rod just pressed is
+set back to that rod's third.
+
+**Then Limb.** A welded branch is a limb to Limb (its root the fork). Two
+changes to Limb came with it:
+
+- **The fade**: a flex vertex's move fades in over 3 mm (or a quarter of the
+  zone) of surface from the fork's boundary. A branch that leaves its rod at
+  45° meets it in a loop that runs mm along Limb's bone, so the zone's
+  vertices next to the loop's high side moved while their neighbours across it
+  held, and the triangles between tore. On a square fork nothing changes.
+- **The closed guard**: the piece Limb hands back is counted as
+  tools/mesh_validate.py counts it (welded at 1e-4 mm) - no more open,
+  doubled or mis-wound edges, and no more triangles the weld collapses, than
+  it had - else Limb refuses in words and the piece is unchanged. Its fold and
+  pierce guards both look at the subdivided mesh, so they could not see a
+  subdivision that broke it; a bend once passed both and came back with 43
+  doubled edges.
+
+**Limb on a rod: the rod hint** (2026-11-07, after "I have not been able to
+get a single branch to stretch+bend, or extend"). Limb finds a limb by walking
+the surface from the piece's foot; round a fat or slanted junction that reading
+skewed - its bone leaned off the shoot's axis and its fork's loop was ragged -
+so on a short, fat shoot (Ø10.5 × 15 at 45° on a Ø30.84 cylinder) every
+Extend and Bend was refused at every Reach. Now, when the grab is on a rod with
+a flat, round tip (every Branch-made shoot, and the trunk), app-limb.js hands
+Limb a hint (nso_rod_branch.js `NSO_rodLimbHint`): the rod's own axis is the
+bone, and the hinge sits 1 mm past the last place, going down from the grab,
+where the surface within the rod's radius stops being the rod's own face. The
+flex zone between hinge and grab is clean rod; it is subdivided in small
+spheres strung along the axis (`nso_limb.js`, rod branch of `prepare`) that
+stay off the junction, and a Branch-made shoot is ringed finer than Limb's
+1 mm already - its tip disc too, now in concentric rings rather than a fan of
+rim-to-centre needles - so nothing there is split. Without a rod under the
+grab, or when the zone the hint gives is not clean rod, Limb reads the tree as
+before. Measured (tools/nso_rod_branch_test.js, section 4b): Extend 5, Bend 20
+and both, at Reach 0, 1 and 5, on Ø10.5 × 15 at 45° and 90°, Ø10.5 × 30, Ø7 and
+Ø5 shoots, all set; grabbed half-way along the short Ø10.5 shoot at 45° there
+is no clean rod below the grab (it meets the trunk over its first ~5 mm) and
+Limb says to grab it further out. In the real page (the Cylinders drive,
+section 7) a pick + Extend 5 / Bend 20 / Apply and a Stretch + bend drag both
+set on that shoot.
+
+**Sliders.** Every number of Neck and Branch has a slider beside its box
+(app-live-slider.js: the slider writes the box, the ghost follows at the pace
+it can keep). The box stays the exact number - typed, or written by a ring
+handle or the branch drag, the slider then put back in step. Ranges come from
+what was read: a neck's Length up to the rod's or tube's length, Δr from a
+2-nozzle-width waist to a bulge of the radius; a branch's Ø and Tip Ø up to the
+pressed rod's Ø, Length up to 3 of it (at least 60 mm), Angle 20° - 160°. Tip
+Ø's slider sits at Ø while its box is blank. The Cylinder verb and Profile stay
+pickers (choices, not numbers).
+
+**Neck first, then Branch.** Neck rebuilds a rod between whole rings of its
+vertices; a branch's union re-cuts the trunk's wall, so Neck refuses a
+branched trunk in words. Neck the trunk, then branch it.
+
+Tests: `tools/nso_rod_branch_test.js` (`npm run rod:branch`: the shipped
+boolean on the vendored kernel, every output through mesh_validate - its
+self-intersection pass swapped for NSO_Repair's BVH, the Python one went past
+12 GB on a 20,000-triangle trunk whose wall triangles all overlap - the tip,
+taper and angle measured off the output, branches off branches, Limb bending
+what Branch made, refusals) and section 6 of the drive
+`tools/nso_cylinders_neck_check.js` (press, drag, Set, a second branch, two
+Undos, in the real page).
+
+## Tubes → Branch — a tube out of a tube's wall (2026-11-08)
+
+The Tube edge button now reads **Tubes**, and its Verb picker has a fourth
+verb, **Branch**: Cylinders → Branch for a tube. Press on the tube's outside
+where the branch grows and drag outward (the tip follows the pointer); Ø,
+**Bore Ø** (the branch's bore at the wall - its wall is (Ø − Bore) / 2), Tip Ø
+(a taper keeps the wall to the tip), Length and Angle, each a slider and a box.
+Set welds it on, its bore opened into the tube's: a tee at 90°, a wye at 45°.
+One Undo (`tubeBranchReplace`, "Undo: Tube branch reverted"); the card stays
+up for the next. Defaults off the tube pressed: Ø a third of its Ø, Bore the Ø
+less two of the tube's own walls (Ø20 / 1.6 wall: Ø6.5 / Ø3.3).
+
+The engine is Branch's (`nso_rod_branch.js`, `opts.tube`):
+
+- **The parent** is read off an **open** round end (Tube edge's 'open' kind):
+  the tube whose outside the press sits on; a press on its bore, or its end,
+  is refused in words. A tube branch's tip is an open ring, so tube branches
+  grow off tube branches.
+- **Three booleans** (`NSO_rbWeldTube`): the branch's outside less a TRIM - the
+  parent's bore, 0.02 mm wider so no face of it lies on the parent's, along
+  the parent's axis over the junction - so the branch fills nothing inside the
+  bore; that added to the tube; then the branch's BORE taken out - rooted with
+  its whole foot inside the parent's bore (solved as the outside's root is; so
+  it cuts only the near wall), ringed facet for facet with the outside, and run
+  1 mm out past the tip with no ring on the tip's plane (one there lay on the
+  tip face, and the kernel answered that exact touch with doubled edges).
+- **The gates**: one solid as before; closed and 2-manifold; the **Euler
+  characteristic down by exactly 2** - one handle more: the branch's bore joins
+  the tube's and opens at its tip (a bore blind at either end would leave it as
+  it was); the volume grown, by no more than the branch's outside solid.
+- **The slicer's weld** (rods too, now): the kernel can leave triangles with an
+  edge under 1e-4 mm. Welded as tools/mesh_validate.py welds, a result that
+  only collapses those (nothing opened or doubled) is used welded - no vertex
+  moves 0.1 µm; anything else at that weld retries the facets' turn.
+- **Refusals**: a wall under the nozzle-safety floor (nso_thickness.js), with
+  the widest bore the Ø allows; a bore as wide as the tube's own; a tip whose
+  bore, keeping the wall, would be under 2 nozzle widths; plus Branch's own.
+  Cylinders → Branch on a tube points at Tubes, Tubes → Branch on a solid rod
+  points at Cylinders.
+- **Limb** bends a tube branch about its own axis the same way: the rod hint
+  reads an open tip too, and counts the bore as the rod's own face.
+- **Speed**: the junction's pre-subdivision is skipped when it balloons (a wall
+  an earlier union cut is slivers - 27,000 triangles became 115,000), and its
+  piercing check counts only triangles near the junction: a third tube branch
+  went from 52 s to 3 s.
+
+Tests: tools/nso_rod_branch_test.js section 4c (three tube branches on one
+tube - 45°, 90°, a 120° taper - each Euler −2 and mesh_validate PASS, the open
+tip read back at its Ø and bore; a tube branch off a tube branch; Limb on one;
+refusals), and section 8 of the Cylinders drive (Tubes reads "Tubes", Branch
+in its Verb, the Bore row, defaults, press + drag, Set, Euler −2 on the page's
+own piece, one Undo; no Bore row in Cylinders).
+
+## Square tubes — Reducer, Neck and Branch on a square tube (2026-11-11)
+
+Tubes' card has a **Square tubes** toggle (`chk-te-square`; Tubes only, not
+Cylinders). Ticked, the card works on a tube whose section is a **square
+wall round a square bore** — the trunk and branches of a tree support drawn as
+square tubes, after Bambu's tree trunks. Its verbs are **Reducer**, **Neck**
+and **Branch** (Roll and Keep length are not offered); the same fields, read
+as **sides** (mm across the flats: New side, Side, Bore, Tip) and **Δ** as a
+change of half-side. A row at the top — Side, Wall, Length, **Add square
+tube** — puts a new square tube on the plate (both ends open, standing on the
+plate, selected; one Undo) to start a tree from. Squares mark the end, the
+band and the branch in place of rings; they are markers, not handles (type,
+slide, click the tube for a neck, press and drag for a branch, as Tubes →
+Branch).
+
+```
+node tools/nso_square_tube_test.js           headless: reader, Reducer, Neck, Branch (the shipped boolean), refusals (npm: tube:square)
+node tools/nso_square_tube_drive_check.js    the real app: toggle, Add square tube, each verb's Set, Undo, a press-and-drag branch (npm: tube:square-drive)
+SQ_TUBE_SHOTS=dir node tools/nso_square_tube_drive_check.js   ...and screenshots
+```
+
+The engine is `nso_square_tube.js` (loaded after nso_tube_edge.js,
+nso_bend.js and nso_rod_branch.js, whose weld, face finder, topology counter
+and tube-branch booleans it uses; it carries no copy of them).
+
+**The end.** A flat face (Tube edge's face finder) with two boundary loops,
+each a square: exactly four corners (a turn over ~1°), every other point on
+the line between two corners, four equal sides at right angles (within
+max(0.02 mm, 0.2%)), the two concentric with parallel sides. That gives the
+centre, the axis (the face's normal, outward), the half-sides a and b, the
+wall t = a − b and a frame along the outside's sides. A click picks the end
+nearest it; none, the highest. A rectangle, a closed square end (a solid
+bar) and a round end refuse by name.
+
+**The radial line of a square** is a scaling about the axis: a vertex (x, y)
+of the loop of half-side r goes to (x, y)·r′/r. Each new ring is the old
+ring's vertices carried along theirs, so station 0 is the loop itself (the
+same float32 bits) and the new wall shares the old one's edges. Where two
+loops of different vertices meet (a lip, the last station of a neck and the
+ring above it) they are zipped side by side, a ladder per side, corner to
+corner — each such band is planar per side, so the volume gate's prismatoid
+sum is exact.
+
+| verb | what it does |
+|---|---|
+| **Reducer** | the end becomes a square pipe of side S2 and bore B2: each face from its own half-side to its target over Transition T, Straight (a plane per side) or Trumpet (tangent to the tube, the half-side changing as the square of the length, sampled to 0.01 mm sag), then Run straight on, square and open. The wall at the run is (S2 − B2)/2 exactly; through the transition it is measured square to the faces and held to the floor (nso_thickness.js). Defaults on a new end: 4 mm under its own side and bore over 10 mm — a trunk narrowing. |
+| **Neck** | a band of Length centred where the tube is clicked (blank: its middle), the wall moved by Δ (below 0 a pinch). Smooth: a cosine; Funnel: straight in and out. **Walls Both** carries the section: Smooth's faces are offsets ±t/2 of the mid-wall's curve; Funnel's are the outside's polyline and its lines a wall in, the face on the inside of each bend sharp and the other round it on an arc of radius t — the waist exactly a + Δ / b + Δ, the wall t square to the faces. Outside only / Bore only move that face alone. The band's triangles on each moving face are taken out, grown until they run between two whole rings, and rebuilt. |
+| **Branch** | press a side face and drag outward: a square tube of Side / Bore / Tip (a taper keeps its wall), Length and Angle (20° – 160° off the axis, in the plane of the axis and the face's normal), its square turned to the face (a 90° branch is a square tee, 45° a wye). The foot is moved along the face, if need be, so it stays on that one face. Welded with Tubes → Branch's three booleans (`NSO_rbWeldTube`) and its gates: one solid, closed and 2-manifold, Euler down by exactly 2, the volume grown by no more than the branch's outside solid; a kernel answer that is not clean is tried again with the root buried a little deeper. Its tip is an open square end, so branches grow off branches and a Reducer narrows a tip. |
+
+**Gates (Reducer, Neck)**, on the output: Bend's topology counter — nothing
+opened, doubled or mis-wound, Euler unchanged — and the volume change
+against the frusta within 1e-3. Everything off the rebuilt faces is copied bit
+for bit.
+
+**Refusals**, in words, the piece unchanged: no open square end (a round
+tube points at Tubes with Square tubes off); a bore under 2 nozzle widths
+across; a wall under the floor (with the widest bore it allows); a face
+steeper than 75° (with the transition it needs); a 0 mm transition with a
+change; a neck past either end, too short to carry the wall (with the length
+it needs), closing the bore (with the most it may pinch), or over a stretch
+that is not straight square tube — a neck, a branch's junction, a reducer
+already there (**necks may not overlap**); a branch as wide as the face, a
+press on the end or the bore, an angle outside 20° – 160°.
+
+Undo types `squareReducerReplace`, `squareNeckReplace`,
+`squareBranchReplace` ("Undo: Square … reverted"). Paint stands it down, as
+Tubes.
+
+### Numbers
+
+From `tools/nso_square_tube_test.js` (114 checks; every output closed,
+2-manifold, consistently wound, `mesh_validate.py --gate` PASS with no piercing
+pairs; sections read off the output at a height):
+
+| piece and treatment | in → out triangles | measured |
+|---|---|---|
+| Square tube 20 / 16.8 × 40 (Add square tube's) | — → 3,192 | volume 4,710.40 = (20² − 16.8²) × 40 |
+| reducer → 12 / 8.8 over 10, run 5 | 3,192 → 3,496 | run 12.000 / 8.800; half-way 16.000 / 12.800; volume the frusta's |
+| …then a trumpet reducer on its end → 8 / 5.6 over 6, run 4 | 3,496 → 4,864 | run 8.000 / 5.600 |
+| expander → 28 / 24.8 over 12, trumpet | 3,192 → 4,864 | lip 28 / 24.8 |
+| neck smooth, Both, Δ −2 over 12 | 3,192 → 6,232 | waist 16.0 / 12.8; wall 1.596 |
+| neck funnel, Both, Δ −2 over 12 | 3,192 → 3,120 | waist bore 12.82; wall 1.591 |
+| two necks 10 mm apart | 6,840 → 7,072 | both waists there; a third overlapping refused |
+| four branches on a 20 / 16.8 × 80 trunk (90°, 45°, 30° tapered, 120°), one off a branch, a reducer on a tip, a neck above them | 6,232 → 77,728 | Euler 0 → −10; each tip read back as an open square end at its side and bore |
+
+A square branch welds in 2 – 6 s under node (the kernel's three booleans).
