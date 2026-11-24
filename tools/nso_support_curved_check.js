@@ -219,6 +219,10 @@ async function cardRun() {
     await page.waitForFunction(() => state.models.length === 1 && state.placed.length === 1, null, { timeout: 30000 });
     const id = await page.evaluate(() => state.placed[0].sourceId);
     await page.click('#menu-supports > summary');
+    /* The open card fetches its printer profile's template, and when it lands the rows are seeded again - the Supports
+       angle with them (app-print.js showSettings, then the saved setting's own over it). A 60 set before that is laid
+       over with the profile's 30 (Tests #445/#446 shard 2). So the angle is set once the template is in and no seed runs. */
+    await page.waitForFunction(() => { const s = NSO_Print.card.state(); return s.template && !s.seeding; }, null, { timeout: 60000 });
     /* 60 deg, set, not left to the default: #263 makes the card's default 35 */
     await page.evaluate(id => { NSO_SUPPORTS_CARD.pick(id); NSO_SUPPORTS_CARD.angle(60); }, id);
     /* this section is the card's verdict on the lattice planner's lost spots (30 deg lean: the three at the arc's foot); the
@@ -559,7 +563,8 @@ async function cardRun() {
     const run = await cardRun();
     const v = run.after, A = v.areas;
     const arcArea = A.reduce((best, a) => (!best || a.count > best.count ? a : best), null);
-    check('the card builds at 60 deg, no page errors', v.state === 'built' && !run.errors.length, `${v.count || ''} ${run.errors.join('; ')}`.trim());
+    check('the card builds at 60 deg, no page errors', v.state === 'built' && v.angle === 60 && run.before.angle === 60 && !run.errors.length,
+      `${v.count || ''}; angle ${run.before.angle} before, ${v.angle} after ${run.errors.join('; ')}`.trim());
     check('the arc\'s area - its top included - reads held: every one of its spots held',
       arcArea && arcArea.kind === 'held' && arcArea.point[2] > 30, arcArea ? `area ${arcArea.id + 1}, ${arcArea.count} spots, its middle at z ${f2(arcArea.point[2])}` : 'none');
     const lostRows = v.rows.filter(r => r.kind === 'unreachable');
