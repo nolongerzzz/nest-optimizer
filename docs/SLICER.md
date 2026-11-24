@@ -1333,12 +1333,22 @@ mm from the nearest seam on the layer below (to 10 mm), so a loop with no corner
 where the one below was. A gap line whose ends meet is a ring and begins the same way, beside the
 walls' seams. The box's seam stays on one corner, the cylinder's in one line, all the way up.
 
-### A top run ends on a long line (`endOnLongRun`, 2026-11-23)
+### A top face stops as little as it can (`topRuns`, path.glide, 2026-11-23)
 
-A top-surface run swept into a corner ended on its shortest strokes, and the wipe (2 mm back along
-the path while retracting) folded over them in a millimetre: the owner's logo letters had a curl
-at each such corner. Studio's runs start in the corner and end on a long line. A top run whose last
-stroke is shorter than its first is now laid the other way round.
+Every place a top run stops is a retraction, a wipe, a lift and a prime on the finished face - a
+mark. The layer's top was filled as one lot, the nearest free line next, so the nozzle came into a
+letter part way along its lines, swept to one end and came back for the rest: on the owner's Gulf
+logo the l (a rectangle) took two runs, the f five, the top layer stopped 40 times (Studio's: 28),
+and each stop left a curl where the wipe folded over a corner's short strokes. Ending each run on a
+long line instead only moved the wipe into the middle of the letter: a scar across it (the next print).
+
+Now each piece of the top is filled on its own, nearest piece next, begun at whichever of its two
+outermost lines is nearer: a plain shape is one zig-zag. A concave piece that still takes several
+runs goes from one to the next inside itself without a stop (path.glide: a move under 15 mm whose
+line crosses no edge of the piece, at the layer's height, nothing retracted - Studio's top goes
+line to line the same way). The one stop left on a piece wipes back along its last stroke only
+(the planner's `wipePath(..., oneStroke)`), the rest of the retraction taken standing. The logo's
+top layer: 14 stops.
 
 ### A connector may not cut across the outline (`crossesOutline`, 2026-11-23)
 

@@ -464,16 +464,17 @@ function frustum(n, r0, r1, z0, z1) {
     // is outside (crossesOutline: the Gulf logo's 18 mm sparse connector over the G's open counter): its 10 mm connector through the notch's inner corner is a travel.
     // ...and all of them on 2026-11-23, when a wall loop began at its most hidden corner, in line with the seams below (seamAligned, Studio's
     // seam_position aligned: the cylinder's seam in one line all the way up; the box's was on a corner already and is as it was), and a top surface run was laid to end on
-    // its long line (endOnLongRun: the wipe drawn out along it, not folded into a corner - the Gulf logo's letters had a curl at each).
+    // its long line (since undone: it moved the wipe into the middle of the letters). Again the same day when a top face began to be filled piece by
+    // piece from an end, a concave piece gliding run to run inside itself (topRuns, path.glide: the logo's top layer 40 stops -> 14).
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
-      'fixtures/cylinder_r10h30_s64.stl': ['a7733b6013bb2178', 'dbee85e08cc0fea8'],
-      'fixtures/fixture_sphere_curved.stl': ['e7fe982c2d71cfd1', 'c5b6fdad5c780c2a'],
-      'fixtures/hinge_knuckle_box.stl': ['1f36469b848d6052', '73862d6018fc8260'],
-      'fixtures/quick/shape-torus.stl': ['bc5164cba7ebfe12', '9b7395305023f22e'],
-      'fixtures/quick/shape-tube.stl': ['10cc9a2db3a59504', '3bf086f28f00df14'],
-      'fixtures/supports/top_clip_x2.stl': ['b5e20b2871727db1', '3c9dc85b79f2d11f'],
-      'fixtures/supports/top_clip_x2_coupon.stl': ['4783e7292c496e54', '196d5db127e28341']
+      'fixtures/cylinder_r10h30_s64.stl': ['a7733b6013bb2178', '68c8495358f7f205'],
+      'fixtures/fixture_sphere_curved.stl': ['2f1c42a460e49977', '2378d00c26f04ea3'],
+      'fixtures/hinge_knuckle_box.stl': ['49e3e35c89de1f87', '286edb2f7e331a5d'],
+      'fixtures/quick/shape-torus.stl': ['f02abc35cb4b8f59', '9b7395305023f22e'],
+      'fixtures/quick/shape-tube.stl': ['998e799525db1289', '3bf086f28f00df14'],
+      'fixtures/supports/top_clip_x2.stl': ['f2e0f2a3fa01b21f', '970e78e801afadf4'],
+      'fixtures/supports/top_clip_x2_coupon.stl': ['c890489ef6e0ba4a', '196d5db127e28341']
     };
     const bad = [];
     let n = 0;

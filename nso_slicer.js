@@ -958,10 +958,6 @@
     return false;
   }
 
-  /* A TOP SURFACE ENDS ON A LONG LINE (the owner's Gulf logo, 2026-11-23: a curl on the letters' tops at every place a top run stopped). A run swept
-     into a corner ends on its shortest strokes, and the wipe - 2 mm back along the path while it retracts - folds over them in a millimetre: the
-     ooze lands in one spot. Studio's runs start in the corner and end on a long line, the wipe drawn out along it. So a top run whose last stroke
-     is shorter than its first is laid the other way round. */
   /* WHERE A LOOP STARTS (Studio's SeamPlacer, seam_position aligned - in short). Every loop has a seam: its start, the seam gap left where it
      ends, a wipe and a prime beside it. NSO began each loop wherever its polygon began - on the owner's Gulf logo the rim's inner wall began
      half way down its smooth right side, and the seam showed there as a break with a grey fleck in the white (2026-11-23); Studio's began in the
@@ -1003,11 +999,37 @@
     return best ? pts.slice(best).concat(pts.slice(0, best)) : pts;
   }
 
-  function endOnLongRun(pts) {
-    var n = pts.length;
-    if (n < 3) return pts;
-    var first = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]), last = Math.hypot(pts[n - 1][0] - pts[n - 2][0], pts[n - 1][1] - pts[n - 2][1]);
-    return last < first ? pts.slice().reverse() : pts;
+  /* A TOP SURFACE, ONE RUN A PIECE WHERE IT CAN BE (the owner's Gulf logo, 2026-11-23). Every place a top run stops is a retraction, a wipe, a lift
+     and a prime on the finished face - a mark. The layer's top was filled as one lot, the nearest free line next: the nozzle came into a letter
+     part way along its lines, swept to one end and had to come back for the rest - the l (a plain rectangle) in two runs, the f in five. Now
+     each piece of the top is filled on its own, the nearest piece next, and begun at whichever of its two outermost lines is nearer: a plain
+     shape is one zig-zag from end to end. (Ending a run on a long line, tried first, only moved the wipe from the corner into the middle of the
+     letter, a scar across it - the owner's next print.) */
+  function topRuns(g, cs, angle, spacing, join, hull, L) {
+    var lastOf = function (pa) { return pa.closed ? pa.pts[0] : pa.pts[pa.pts.length - 1]; };
+    var here = L.paths.length ? lastOf(L.paths[L.paths.length - 1]) : null;
+    var pieces = g.parts(cs).map(function (pc) { var sg = scanFill(g.polys(pc), angle, spacing, 0); sg.edge = g.polys(g.offset(pc, spacing / 2)); return sg; }).filter(function (sg) { return sg.length; });
+    var out = [];
+    while (pieces.length) {
+      var bi = 0, bp = null, bd = Infinity;
+      pieces.forEach(function (sg, k) {
+        [sg[0].a, sg[0].b, sg[sg.length - 1].a, sg[sg.length - 1].b].forEach(function (p) {
+          var d = here ? Math.hypot(p[0] - here[0], p[1] - here[1]) : 0;
+          if (d < bd) { bd = d; bi = k; bp = p; }
+        });
+      });
+      var runs = connect(pieces[bi], join, hull, bp), edge = pieces[bi].edge;
+      pieces.splice(bi, 1);
+      /* a piece that still takes more than one run (a concave one: the G, the f) goes from run to run inside itself without a stop - a short move
+         that crosses no edge of the piece, at the layer's height, nothing retracted (path.glide; Studio's top goes from line to line the same way) */
+      runs.forEach(function (r, k) {
+        if (k) { var a = runs[k - 1].pts[runs[k - 1].pts.length - 1], b = r.pts[0];
+          if (Math.hypot(b[0] - a[0], b[1] - a[1]) <= TOP_GLIDE_MM && inside(edge, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2) && !crossesOutline(edge, a, b)) r.glide = true; }
+        out.push(r);
+      });
+      if (runs.length) here = runs[runs.length - 1].pts[runs[runs.length - 1].pts.length - 1];
+    }
+    return out;
   }
 
   function connect(segs, maxLen, hull, startAt) {
@@ -3045,8 +3067,9 @@
             }
             /* a support's first layer at its own density (Bambu's Initial layer density): the lines that much further apart */
             var sFill = P.role === 'support' && i === 0 && o.supportFirstLayerDensity > 0 && o.supportFirstLayerDensity < 1 ? sInf / Math.max(0.2, o.supportFirstLayerDensity) : sInf;
+            if (feat === 'Top surface') { topRuns(g, cs, solidAngle, sFill, solidJoin, hull, L).forEach(function (pth) { var pa = { feature: feat, width: wInf, closed: false, pts: pth.pts }; if (pth.glide) pa.glide = true; L.paths.push(pa); }); return; }
             connect(scanFill(polys, solidAngle, sFill, 0), sFill > sInf ? 3 * sFill : solidJoin, hull).forEach(function (pth) {
-              L.paths.push({ feature: feat, width: wInf, closed: false, pts: feat === 'Top surface' ? endOnLongRun(pth.pts) : pth.pts });
+              L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
             });
           }
           /* a bridge's angle: the profile's bridge_angle (Bambu lays every bridge at it); else, under the column rule's 3.6 angles (Studio 02.09,
@@ -3642,6 +3665,8 @@
    */
   /* the lead-in a loop is begun with before a run that hangs over a gap (seamOffOverhang), mm along the held wall before it */
   var SEAM_LEAD_IN_MM = 3;
+  /* the longest move from one top run to the next inside the same piece that is made without a stop (topRuns: path.glide) */
+  var TOP_GLIDE_MM = 15;
   var FILL_FEATURES = { 'Sparse infill': 1, 'Internal solid infill': 1, 'Solid infill': 1, 'Top surface': 1, 'Bottom surface': 1, 'Bridge': 1 };
   /** A polyline cut `mm` from its end: { head, tail }, sharing the cut point (the whole line is the tail when it is shorter). */
   function cutFromEnd(pts, mm) {

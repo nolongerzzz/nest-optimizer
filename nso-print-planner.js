@@ -599,9 +599,11 @@
   }
 
   /** The last `wipeMm` of a path walked backwards: the wipe. */
-  function wipePath(pts, wipeMm) {
+  /* oneStroke (a top surface): the wipe goes back along the last stroke only - not on round the zig-zag's turns, where it folded over the
+     short strokes of a corner and left a curl on the face; the rest of the retraction is taken standing (the Gulf logo's letters, 2026-11-23) */
+  function wipePath(pts, wipeMm, oneStroke) {
     var out = [pts[pts.length - 1]];
-    var left = wipeMm;
+    var left = oneStroke && pts.length > 1 ? Math.min(wipeMm, dist(pts[pts.length - 1], pts[pts.length - 2])) : wipeMm;
     for (var i = pts.length - 1; i > 0 && left > EPS; i--) {
       var a = pts[i], b = pts[i - 1];
       var d = dist(a, b);
@@ -659,7 +661,7 @@
           if (sl > 1e-9) segs.push({ l: sl, ux: sx / sl, uy: sy / sl, v: 0, a: 0 });
         }
         items.push({
-          obj: oi, slot: p.slot != null ? p.slot : (L.slot || 0), feature: p.feature, thin: !!p.thinWall, keep: p.feature === 'Bridge' || spans, pts: pts, closed: !!p.closed, loop: loop, segs: segs,
+          obj: oi, slot: p.slot != null ? p.slot : (L.slot || 0), feature: p.feature, glide: !!p.glide, thin: !!p.thinWall, keep: p.feature === 'Bridge' || spans, pts: pts, closed: !!p.closed, loop: loop, segs: segs,
           bead: bead, vFeature: fs.v, vWipe: v, v: v, a: fs.a, len: pathLength(pts), rings: rings
         });
       });
@@ -681,6 +683,7 @@
       else if (prev && !sameObj) retract = true;            // from one object to another: always
       else if (d < S.retract.minTravel - EPS) retract = false;
       else if (sameObj && travelInside(it.rings, pos, start)) retract = false;
+      else if (sameObj && it.glide && prev.feature === 'Top surface') retract = false;   /* run to run inside one top piece (the slicer's path.glide) */
       else retract = true;
       it.travel = { from: pos, d: d, retract: retract, hop: retract && S.retract.hop > 0 };
       if (prev) prev.retractAfter = retract;
@@ -2174,7 +2177,7 @@
         put('G1 F' + fmt(pd.it.vWipe * 60, 3));
         st.lastF = pd.it.vWipe * 60;
         accel(S.accel.def);
-        var wp = pd.it.loop ? wipeForward(pd.lastPts[pd.lastPts.length - 1], pd.it.loop, R.wipeDistance) : wipePath(pd.lastPts, R.wipeDistance);
+        var wp = pd.it.loop ? wipeForward(pd.lastPts[pd.lastPts.length - 1], pd.it.loop, R.wipeDistance) : wipePath(pd.lastPts, R.wipeDistance, pd.it.feature === 'Top surface');
         var wl = pathLength(wp);
         var spent = 0;
         for (var q = 1; q < wp.length; q++) {
@@ -2242,7 +2245,7 @@
         put('G1 F' + fmt(wF, 3));
         st.lastF = wF;
         accel(S.accel.def);
-        var wp = pd.it.loop ? wipeForward(pd.lastPts[pd.lastPts.length - 1], pd.it.loop, R.wipeDistance) : wipePath(pd.lastPts, R.wipeDistance);
+        var wp = pd.it.loop ? wipeForward(pd.lastPts[pd.lastPts.length - 1], pd.it.loop, R.wipeDistance) : wipePath(pd.lastPts, R.wipeDistance, pd.it.feature === 'Top surface');
         var wl = pathLength(wp), spent = 0;
         for (var q = 1; q < wp.length; q++) {
           var share = +fe(len * RETRACT_DURING_WIPE * dist(wp[q - 1], wp[q]) / wl);

@@ -1104,27 +1104,25 @@ async function main() {
       })();
       check('no infill crosses the G\'s open counter above the base: a connector that would cut across the fill\'s outline is a travel', overCounter.length === 0, overCounter.join('; '));
       /* seams: no loop and no gap ring begins on the smooth right side of the rim (it did half way down it: a break with a grey fleck in the white, the
-         owner's half-size print); and every top-surface run ends on a stroke at least as long as its first (its wipe drawn out, not folded in a corner) */
+         owner's half-size print) */
       const seamCheck = (() => {
-        let z = 0, f = '', x = 0, y = 0, prevE = false; const bad = []; let run = null;
-        const endRun = () => { if (run && run.length > 2) { const a = run[0], b = run[1], c = run[run.length - 2], d = run[run.length - 1];
-          if (Math.hypot(d[0] - c[0], d[1] - c[1]) + 1e-3 < Math.hypot(b[0] - a[0], b[1] - a[1])) bad.push('top run ' + z + ' ends short at ' + d.map(v => v.toFixed(1))); } run = null; };
+        let z = 0, f = '', x = 0, y = 0, prevE = false; const bad = [];
         g.split('\n').forEach(l => {
-          if (/^; Z_HEIGHT: /.test(l)) { endRun(); z = +l.slice(12); return; }
-          if (/^; FEATURE: /.test(l)) { endRun(); f = l.slice(11); return; }
+          if (/^; Z_HEIGHT: /.test(l)) { z = +l.slice(12); return; }
+          if (/^; FEATURE: /.test(l)) { f = l.slice(11); return; }
           if (!/^G1 /.test(l)) return;
           const mx = / X(-?[\d.]+)/.exec(l), my = / Y(-?[\d.]+)/.exec(l), nx = mx ? +mx[1] : x, ny = my ? +my[1] : y;
           const ext = (mx || my) && / E[\d.]/.test(l);
-          if (ext && !prevE) {
-            if (/wall|Gap infill/.test(f) && nx > 206 && ny > 112 && ny < 135) bad.push(f + ' starts ' + z + ' ' + nx + ',' + ny);
-            if (f === 'Top surface') { endRun(); run = [[x, y]]; }
-          }
-          if (f === 'Top surface' && run) { if (ext) run.push([nx, ny]); else if (mx || my) endRun(); }
+          if (ext && !prevE && /wall|Gap infill/.test(f) && nx > 206 && ny > 112 && ny < 135) bad.push(f + ' starts ' + z + ' ' + nx + ',' + ny);
           prevE = !!ext; x = nx; y = ny;
         });
-        endRun(); return bad;
+        return bad;
       })();
-      check('seams: nothing begins on the rim\'s smooth right side (loops and gap rings start at a corner, in line), and each top run ends on a long stroke', seamCheck.length === 0, seamCheck.slice(0, 5).join('; '));
+      check('seams: nothing begins on the rim\'s smooth right side (loops and gap rings start at a corner, in line)', seamCheck.length === 0, seamCheck.slice(0, 5).join('; '));
+      /* every stop on a top face is a mark (retract, wipe, lift, prime): each piece of the top is filled on its own from an end, and a concave one goes
+         run to run inside itself without a stop - 14 stops on the top layer where the layer's top filled as one lot stopped 40 (Studio's: 28) */
+      const topStops = (() => { let z = '', f = '', n = 0; g.split('\n').forEach(l => { if (/^; Z_HEIGHT: /.test(l)) z = l.slice(12); else if (/^; FEATURE: /.test(l)) f = l.slice(11); else if (z === '1.8' && f === 'Top surface' && /^; WIPE_START/.test(l)) n++; }); return n; })();
+      check('the top layer\'s face stops 14 times (Studio\'s 28): a piece of the top is one run where it can be, and a concave one glides run to run inside itself', topStops <= 14, String(topStops));
       check('no walled crumbs: no outer wall smaller than 2.5 mm across on any layer (the colour split hands its slivers to the region beside them)', crumbs.length === 0, crumbs.join(' '));
       /* the tower's part of each layer, line for line: the numbers to 0.0011 (the way round the tower: 194.022 where Studio has 194.023);
          not the object's own wipes (NSO's paths), the spiral, the fans, the first layer's speed */
