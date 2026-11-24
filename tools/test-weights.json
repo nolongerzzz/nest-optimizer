@@ -324,6 +324,8 @@
     "soften:holes": {"weight":19550,"note":""},
     "soften:rim": {"weight":5000,"note":"estimate: nso_soften_rim_test.js measured locally at about 2.3 s (headless, Custom-shape pieces through the validator)"},
     "boxedges:test": {"weight":1500,"note":"nso_box_edges_test.js, a headless kernel run plus 400 random edge sets, measured locally at about 0.5 s"},
+    "meshedges:test": {"weight":3500,"note":"nso_mesh_edges_test.js, the kernel on a notched wall and a wedge through the shipped boolean kernel, plus 40 random edge sets, measured locally at about 3 s"},
+    "soften:meshedges": {"weight":25000,"note":"estimate: nso_soften_mesh_edges_drive_check.js (one page, a notched wall, a real click on an edge, three bakes and an Undo)"},
     "soften:edges": {"weight":30000,"note":"estimate: nso_soften_edges_drive_check.js measured locally at about 25 s (one page, a box, real clicks on edges, a cylinder)"},
     "soften:live": {"weight":45000,"note":"estimate: nso_soften_live_drive_check.js measured locally at about 40 s (one page, a box, a cylinder, a pocket piece through the kernel)"},
     "split:parts": {"weight":8800,"note":""},

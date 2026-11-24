@@ -21,7 +21,7 @@
 //                      and Undo gives the original box back
 //   5  un-pick/clear   a second click on an edge takes it off; Clear takes all
 //   6  refusals        Corners / Corners+edges say they have no edge to pick;
-//                      a cylinder says it is not a box
+//                      a cylinder is not refused: its rim edges are offered
 //   7  Full wrap       with Pick edges off, the wrap is exactly as it was
 
 const fs = require('fs');
@@ -276,7 +276,9 @@ withApp(async (page, logs) => {
   await tile('fillet');
   await page.waitForTimeout(500);
   const ic = await info();
-  check('a cylinder: refused as not a box, with Pick edges ticked', ic && ic.ok === false && /not a plain box|Pick edges needs a plain box/.test((ic.reason || '') + (await status())), (ic && ic.reason) + ' | ' + (await status()));
+  const cylSegs = await page.evaluate(() => (window.nsoSoftenLive.edgeSegments() || []).length);
+  check('a cylinder is no longer refused: its rim edges are offered to pick (nso_mesh_edges.js)',
+        ic && ic.needEdges === true && cylSegs > 12, (ic && ic.reason) + ' | ' + cylSegs + ' edges');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
 
