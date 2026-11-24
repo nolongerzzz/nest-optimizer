@@ -43,6 +43,11 @@ to it fails the "Push to the preview repository" step with `refusing to allow a
 Personal Access Token to create or update workflow`. Give the token that scope
 first, then change the file.
 
+The other way round also works, and needs no token change: put the new
+`pages.yml` on `main` of the preview repo first (with credentials that may
+write workflows), then land the identical file here. The next mirror push
+carries a `pages.yml` that matches what is already there, so it is accepted.
+
 The push uses a personal access token rather than the built-in `GITHUB_TOKEN`,
 both because `GITHUB_TOKEN` has no access to another repository and because
 pushes made with it deliberately do not trigger workflows in the target repo.
@@ -109,6 +114,8 @@ creates the Pages site; later ones are faster. The site is then live at
 | Mirror is green, no deploy run in the preview repo | Actions disabled in the preview repo, or the token used was a `GITHUB_TOKEN` rather than a PAT |
 | `Create Pages site failed ... not accessible by integration` | Step 3 not done. Set the Pages source to **GitHub Actions** by hand; the token cannot create the site |
 | Site 404s | First deploy has not finished yet; check the deploy run in the preview repo |
+| Deploy logs `Found 0 artifact(s)` / `No artifacts named "github-pages" were found` | The artifact listing lagging behind the upload. `pages.yml` waits and retries twice, so the job only fails if all three attempts miss; re-run it |
+| Deploy sits on `Current status:` (blank) until `Timeout reached` | A Pages deployment of that commit was left behind by a cancelled run. `pages.yml` no longer cancels deploys under way; if it still happens, push a new commit to `claude-wip` rather than re-running, so the deployment gets a new id |
 
 ## Notes
 
