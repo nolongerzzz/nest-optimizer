@@ -71,7 +71,7 @@
   var picks = [];                       // faces named so far: { axisIdx, keepMin, plane, recessed }
   var plan = null;                      // what softenCompute last handed `commit`
   var refused = null, needPick = false, waiting = false, needsFaces = false, kind = null;
-  var seq = 0, rerun = false, dirty = false, raf = 0;
+  var seq = 0, rerun = false, dirty = false, raf = 0, bakeWhenReady = false;
   var drawn = { result: null, changed: null, edges: null };
   var ghostSaved = null, baseIdx = null;
   var press = null, tilesDrawn = false, liveHandle = null;
@@ -302,13 +302,21 @@
     var q = f ? nsoLocalPointFromRaw(f, p) : p;
     return new THREE.Vector3(q[0], q[1], q[2]);
   }
+  /* The edges a click can pick: a box's twelve, or on any other piece every sharp
+     straight edge (nso_mesh_edges.js, through app-finish.js's nsoMeshEdgeLines -
+     the same list, in the same order, the bake reads). */
   function edgeSegs() {
     var b = boxNow();
-    if (!b || !window.NSO_BoxEdges) return null;
-    return NSO_BoxEdges.segments(b.lo, b.hi).map(function (e) {
-      return { id: e.id, a: localOf(e.p), b: localOf(e.q) };
-    });
+    if (b && window.NSO_BoxEdges) {
+      return NSO_BoxEdges.segments(b.lo, b.hi).map(function (e) {
+        return { id: e.id, a: localOf(e.p), b: localOf(e.q) };
+      });
+    }
+    var lines = (typeof nsoMeshEdgeLines === 'function') ? nsoMeshEdgeLines(baseSoup()) : null;
+    if (!lines || !lines.length) return null;
+    return lines.map(function (l) { return { id: l.id, a: localOf(l.p0), b: localOf(l.p1), convex: l.convex }; });
   }
+  function edgeCount() { return boxNow() ? 12 : ((edgeSegs() || []).length); }
   function clearEdges() {
     if (!edgeDrawn) return;
     edgeDrawn.forEach(disposeObj);
@@ -356,7 +364,7 @@
     if (v === edgeOn) return edgeOn;
     edgeOn = v;
     if (on) {
-      if (edgeOn && !boxNow()) { say('Pick edges needs a plain box - this piece is not one', true); }
+      if (edgeOn && !edgeCount()) { say('Pick edges found no sharp straight edge on this piece', true); }
       drawEdges();
       if (style) dirty = true;
       readout();
@@ -367,7 +375,7 @@
 
   /* Name an edge (or take it back off). `id` is NSO_boxEdgeFaces's number. */
   function toggleEdge(id) {
-    if (!on || !(id >= 0 && id < 12)) return false;
+    if (!on || !(id >= 0 && id < edgeCount())) return false;
     var at = edgePicks.indexOf(id);
     if (at >= 0) edgePicks.splice(at, 1); else edgePicks.push(id);
     drawEdges(); syncEdgeUi();
@@ -409,9 +417,9 @@
     return best ? best.id : null;
   }
   function pickEdgeFromEvent(event) {
-    if (!boxNow()) { say('Pick edges needs a plain box - this piece is not one', true); return false; }
+    if (!edgeCount()) { say('Pick edges found no sharp straight edge on this piece', true); return false; }
     var id = edgeAtEvent(event);
-    if (id == null) { say('Soften: click right on an edge of the box - the white lines are the ones you can pick'); return false; }
+    if (id == null) { say('Soften: click right on an edge - the white lines are the ones you can pick'); return false; }
     return toggleEdge(id);
   }
 
@@ -427,6 +435,7 @@
       waiting = false; refused = null; needPick = false; needEdges = false;
       drawPlan();
       readout();
+      if (bakeWhenReady) { bakeWhenReady = false; bake(); }
     };
   }
 
@@ -461,7 +470,7 @@
       }
     }
     if (plan) say('Soften preview: ' + plan.text + '. Press Soften to bake it.');
-    else if (needEdges) say('Soften (' + NAMES[style] + '): click an edge of the box to ' + (style === 'chamfer' ? 'bevel' : 'round') + ' it - it previews here.');
+    else if (needEdges) say('Soften (' + NAMES[style] + '): click an edge to ' + (style === 'chamfer' ? 'bevel' : 'round') + ' it - it previews here.');
     else if (needPick) say('Soften (' + NAMES[style] + '): click the face to soften - it previews here.');
     readout();
   }
@@ -478,7 +487,7 @@
     else if (waiting) text = NAMES[style] + ' R ' + fmt(rNow()) + ' - working it out…';
     else if (plan) text = plan.text + ' — press Soften to bake it.';     // the engine's sentence already names the style and R
     else if (needEdges) text = NAMES[style] + ' R ' + fmt(rNow()) + ': click the edges to ' + (style === 'chamfer' ? 'bevel' : 'round') +
-                               ' on the box (white lines) — each click picks or un-picks one, and it previews here.';
+                               ' (the white lines) — each click picks or un-picks one, and it previews here.';
     else if (needPick) text = NAMES[style] + ' R ' + fmt(rNow()) + ': click the face to soften' +
                               (picks.length ? ' (' + picks.length + ' picked)' : '') + ' — it previews here.';
     else { text = NAMES[style] + ' R ' + fmt(rNow()) + ' refused — ' + (refused || 'nothing to preview'); bad = true; }
@@ -526,7 +535,7 @@
     seq++;                                       // anything still in the kernel is nobody's now
     closeView();
     showPanel(false);
-    on = false; style = null;
+    on = false; style = null; bakeWhenReady = false;
     state.softenArmed = false;
     if (!baked && typeof clearFacePick === 'function') clearFacePick();     // a bake leaves its own cage
     edgePicks = []; needEdges = false; syncEdgeUi();
@@ -564,7 +573,7 @@
     if (stale()) return;
     if (waiting && !state.nsoWrapBusy && !plan) {            // the kernel finished without a result: it refused
       waiting = false;
-      if (rerun) { rerun = false; dirty = true; } else { refused = hudText(); readout(); }
+      if (rerun) { rerun = false; dirty = true; } else { refused = hudText(); bakeWhenReady = false; readout(); }
     }
     if (dirty && !state.nsoWrapBusy) recompute();
     raf = requestAnimationFrame(tick);
@@ -623,10 +632,18 @@
   function bake() {
     if (!on) return { ok: false, reason: 'Soften is not open' };
     if (stale()) return { ok: false, reason: 'the piece changed - Soften put away' };
-    if (liveHandle && liveHandle.pending()) { liveHandle.cancel(); recompute(); }   // a slider move still waiting its turn
+    // a slider move still waiting its turn: re-run, unless the preview is already at that R
+    var current = plan && plan.R === rNow() && plan.style === style && !dirty;
+    if (liveHandle && liveHandle.pending()) { liveHandle.cancel(); if (!current) recompute(); }
     else if (dirty) recompute();
     if (!style) { say('Soften: pick a style first - Round, Corners, Corners+edges or Bevel', true); return { ok: false, reason: 'no style' }; }
-    if (waiting) { say('Soften: still working out the preview - press Soften again in a moment', true); return { ok: false, reason: 'working' }; }
+    if (waiting) {
+      // the kernel's preview (a pocket wrap, an edge round on a piece that is not a box) is
+      // still on its way: bake it the moment it lands, rather than asking for a second press
+      bakeWhenReady = true;
+      say('Soften: finishing the preview - it bakes as soon as it is ready');
+      return { ok: false, reason: 'working', queued: true };
+    }
     if (!plan) {
       var why = needPick ? 'click the face to soften first' : ('nothing to bake - ' + (refused || 'no preview'));
       say('Soften: ' + why, true);

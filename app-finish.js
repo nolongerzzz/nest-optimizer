@@ -4052,6 +4052,71 @@ function edgeRoundStatus(mode, b, nowCount) {
          ' (' + b.tris + ' tris, one bake from source)';
 }
 
+/* The sharp straight edges of a soup (nso_mesh_edges.js), read once per soup.
+   The live card draws them and softenMeshEdges bakes them, so both see the
+   same numbers. */
+const nsoMeshEdgeCache = new WeakMap();
+function nsoMeshEdgeLines(soup) {
+  if (!soup || typeof NSO_MeshEdges === 'undefined') return null;
+  let l = nsoMeshEdgeCache.get(soup);
+  if (!l) { l = NSO_MeshEdges.lines(soup); nsoMeshEdgeCache.set(soup, l); }
+  return l;
+}
+
+/* Pick edges on a piece that is not a plain box: a notch, a ledge, a wall
+   with a step in it. Each picked straight edge is rounded (or beveled) by a
+   prism the boolean kernel cuts away - or, for an inside corner, adds as a
+   fillet - and edges picked on an earlier bake of this run are kept at their
+   own radius, as on a box. The kernel is asynchronous, so this takes the
+   click and commits when the cut lands, the pocket wraps' way
+   (state.nsoWrapBusy). nso_mesh_edges.js does the geometry. */
+function softenMeshEdges(m, run, o, R, mode, firstOfRun, commit, refuse) {
+  if (typeof NSO_MeshEdges === 'undefined') return refuse('Pick edges needs nso_mesh_edges.js');
+  const lines = nsoMeshEdgeLines(run.base);
+  if (!lines || !lines.length) return refuse('Pick edges found no sharp straight edge on this piece. Piece unchanged');
+  const picked = (o.edges || []).filter(id => id >= 0 && id < lines.length);
+  if (!picked.length) return { ok: false, needEdges: true, reason: 'click an edge to round' };
+  const spec = new Map();
+  const before = run.jobs.find(j => j.edgeSpec && j.meshEdges);
+  if (before) before.edgeSpec.forEach(s => spec.set(s.id, s));
+  picked.forEach(id => spec.set(id, { id: id, R: R, mode: mode }));
+  const specList = Array.from(spec.values());
+  if (state.nsoWrapBusy) return refuse('Still working out the last edge round');
+  state.nsoWrapBusy = true;
+  const name = mode === 'chamfer' ? 'Bevel' : 'Round';
+  setStatus(name + ': working out ' + specList.length + ' edge' + (specList.length === 1 ? '' : 's') + '…');
+  const fail = function (why) {
+    state.nsoWrapBusy = false;
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    setStatus(why, true);
+  };
+  NSO_MeshEdges.run(run.base, specList, nsoUnionSoups, nsoSubtractSoups, { lines: lines }).then(function (res) {
+    if (!res.ok) return fail('Soften failed - ' + (res.reason || 'the boolean refused') + '. Piece unchanged');
+    const sB = nsoSealScore(run.base), sW = nsoSealScore(res.soup);
+    if (sW.open > sB.open || sW.nm > sB.nm) {
+      return fail('Soften failed - the edge round did not close cleanly (open ' + sB.open + '→' + sW.open +
+                  ', non-manifold ' + sB.nm + '→' + sW.nm + ') - try a smaller R. Piece unchanged');
+    }
+    state.nsoWrapBusy = false;
+    const b = res.build;
+    const by = new Map();
+    specList.forEach(s => { const k = s.R.toFixed(2); by.set(k, (by.get(k) || 0) + 1); });
+    const parts = Array.from(by.entries()).map(e => e[1] + ' at R ' + e[0]);
+    const clamp = b.clamped.length ? ' (' + b.clamped.length + ' clamped to the wall: ' +
+      b.clamped.map(c => 'R ' + c.got.toFixed(2)).join(', ') + ')' : '';
+    const shrunk = b.shrunk && b.shrunk < 1 ? ' (' + ((1 - b.shrunk) * 100).toFixed(1) + '% under, to close cleanly)' : '';
+    const inside = b.concave ? ', ' + b.concave + ' inside corner' + (b.concave === 1 ? '' : 's') + ' filled' : '';
+    const lead = picked.length + ' edge' + (picked.length === 1 ? '' : 's') + ' ' + (mode === 'chamfer' ? 'beveled' : 'rounded');
+    commit(m, run, res.soup, firstOfRun,
+           [{ wrap: true, R: R, mode: mode, edgeSpec: specList, meshEdges: true }],
+           name + ' ' + lead + ' - the piece carries ' + specList.length + ' (' + parts.join(', ') + ')' + inside +
+           clamp + shrunk + ' (' + (res.soup.length / 9) + ' tris, one bake from source)');
+  }, function (err) {
+    fail('Soften failed - ' + (err && err.message ? err.message : err) + '. Piece unchanged');
+  });
+  return { ok: true, kind: 'edges', pending: true };
+}
+
 // Wrap the pockets of a piece that is not a plain box and not a plain box
 // with one pocket - a Subtract into a real part. The hull is not
 // re-generated: the piece's own soup goes in and only the pockets are cut
@@ -4494,11 +4559,12 @@ function softenCompute(m, o, commit) {
   // faces wrap. Paint still counts - an edge on a painted-out face is left
   // sharp. nso_box_edges.js does the geometry.
   if (o.edgePick) {
-    if (!boxBase) return refuse('Pick edges needs a plain box - this piece is not one. Piece unchanged');
     if (mode !== 'fillet' && mode !== 'chamfer') {
       return refuse('Pick edges works with Round and Bevel - ' + (mode === 'corners' ? 'Corners' : 'Corners+edges') +
                     ' has no edge to pick. Piece unchanged');
     }
+    // Not a box: any straight sharp edge of the piece, through the boolean kernel (nso_mesh_edges.js)
+    if (!boxBase) return softenMeshEdges(m, run, o, R, mode, firstOfRun, commit, refuse);
     if (typeof NSO_boxEdgeRound !== 'function') return refuse('Pick edges needs nso_box_edges.js');
     const picked = (o.edges || []).filter(id => id >= 0 && id < 12);
     if (!picked.length) return { ok: false, needEdges: true, reason: 'click an edge to round' };

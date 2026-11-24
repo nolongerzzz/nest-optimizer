@@ -1889,7 +1889,7 @@
   api.sliceOptionsForPlate = sliceOptionsForPlate;
   api.card = { raftView: function () { return RAFT_VIEW.group ? { layers: RAFT_VIEW.group.children.length, lowered: RAFT_VIEW.lowered.length } : null; }, slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, adopt: adopt, fresh: function () { return isFresh(); }, report: function () { return isFresh() ? S.result.report || null : null; }, canSlice: function () { return !!profileFor(plateId()); }, readPieces: function () { return readPieces(); }, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
                exportSlice: exportSlice, exportFromCard: exportFromCard, indicesFor: indicesFor,
-               state: function () { return { busy: S.busy, result: S.result, fresh: isFresh() }; } };
+               state: function () { return { busy: S.busy, result: S.result, fresh: isFresh(), seeding: S.seeding != null, template: !!knownConfig() }; } };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
   else mount();
