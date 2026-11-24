@@ -123,6 +123,26 @@ It is asked once a 0.5 mm lattice point now and read between them; the body's ce
 
 10 of 11. Not in `testSteps` (as `support:gate` is not): about a minute.
 
+## 4b'. The same piece in PETG on the A1 mini (2026-11-23)
+
+Reference: `fixtures/supports/supporttest_petg_a1m.3mf` and the owner's Bambu Studio slice of it, `supporttest_petg_a1m_slim.gcode.3mf` - PETG,
+A1 mini, tree(auto) with `tree_slim`, threshold 45, 2 interface layers, top z distance 0.33 (the owner's: changed from the system 0.2 in both
+this project and the PLA one), bottom 0.2. Printed: every support broke off cleanly or fell off.
+
+`npm run support:gate-petg` (`--angle 45 --rest --interface 2 --gap 0.33`; the gate's `--interface` and `--gap` are new):
+
+| | Bambu's slice | NSO, gap 0.2 (the profile's) | NSO, gap 0.33 |
+|---|---|---|---|
+| contact mm2 | 717 | 773 | 714 |
+| one layer of air / two | 5 % / 95 % | 79 % / 21 % | 0 % / 100 % |
+| sheet carried | 90 % | 97 % | 97 % |
+| plate IoU / type IoU / layer heights met | - | 61 / 42 / 90 % | 87 / 86 / 93 % |
+| gate | - | 11 of 11 | 11 of 11 |
+
+At the owner's 0.33 NSO's interface is Bambu's: two layers of air under nearly all of the contact. At the profile's 0.2 most of it has one -
+what PLA releases from (section 4b), and tighter than the owner prints PETG with. The Print card starts its Top Z distance row at the
+printer profile's 0.2; a Studio project's support rows are not read in (only its filaments and its prime tower are).
+
 ## 4c. Advanced, and the saved settings
 
 The card's **Tree planner** section (docs/SUPPORTS-CARD.md) is these numbers, each with its default; only one that differs is sent (`opts.flowKnobs`), held to a

@@ -16,6 +16,8 @@
      --merged              (a build) the six heads as one piece, as a plate imported whole has them
      --fixture f.3mf       (a build) another piece than supp_ref, with --ref its own Bambu slice; --rest ticks May rest on the part
                            (npm run support:gate-rest: fixtures/supports/supporttest.3mf against the owner's printed slice, threshold 46)
+     --gap mm              (a build) the support's top gap (the reference's support_top_z_distance; the slicer's default otherwise)
+     --interface n         (a build) n interface layers (the reference's support_interface_top_layers; the card's 3 by default)
      --report              print, never fail
      --worst               the five layers per head that differ most from Bambu's
      --dump moves.json     (a build) every move, [head, role, feature, z, h, x0, y0, x1, y1], for a picture
@@ -72,9 +74,10 @@ async function buildAndSlice(opts) {
     const sups = app.supportsOf(ids[i]).map(m => ({ soup: Array.from(app.ctx.nsoSupportSliceSoup ? app.ctx.nsoSupportSliceSoup(m, app.soupOf(m.id)) : app.soupOf(m.id)), brim: !!m.nsoSupport.brim }));
     const objl = [{ name: 'part', soup: Float32Array.from(app.soupOf(ids[i])), key: 101, role: 'part' }]
       .concat(sups.map((s, k) => ({ name: 's' + k, soup: Float32Array.from(s.soup), key: 201 + k, role: s.brim ? 'brim' : 'support', hostKey: 101 })));
-    const so = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28 };
+    const so = { supportInterfaceLayers: opts.interfaceLayers ? +opts.interfaceLayers : 3, supportLayerMaxMm: 0.28 };
     if (opts.rule) so.supportInterfaceRule = opts.rule;
     if (opts.profile) { so.supportGapMm = 0.2; so.supportFirstLayerDensity = 0.9; }   /* --profile: the printer profile's two support numbers, where the Print card's rows start (docs/PRINT-CARD.md) */
+    if (opts.gap) so.supportGapMm = +opts.gap;                             /* --gap: the reference's support_top_z_distance */
     if (opts.angle) so.supportThresholdDeg = +opts.angle;                  /* the slicer's footprint at the angle the card detected at (the reference's own threshold) */
     const res = SL.sliceObjects(objl, SL.defaultsFor(0.4, so), WASM);
     res.objects.forEach(ob => (ob.layers || []).forEach(L => (L.paths || []).forEach(p => {
@@ -143,7 +146,7 @@ function reHead(moves, refMoves) {
   if (files.length) for (const f of files) { const mv = reHead(await readSliced(f), refMoves); runs.push([path.basename(f), GL.measureAll(mv), mv]); }
   else {
     const rule = arg('--rule') === 'sheet' ? null : 'column';                /* the app's default (the column rule); --rule sheet the sheet typing */
-    let mv = await buildAndSlice({ rule: rule, angle: arg('--angle'), merged: argv.includes('--merged'), fixture: arg('--fixture'), rest: argv.includes('--rest'), profile: argv.includes('--profile') });
+    let mv = await buildAndSlice({ rule: rule, angle: arg('--angle'), merged: argv.includes('--merged'), fixture: arg('--fixture'), rest: argv.includes('--rest'), profile: argv.includes('--profile'), interfaceLayers: arg('--interface'), gap: arg('--gap') });
     if (argv.includes('--merged') || arg('--fixture')) mv = reHead(mv, refMoves);     /* another fixture stands where the card put it: moved onto the reference by the parts' centres */
     if (arg('--dump')) fs.writeFileSync(arg('--dump'), JSON.stringify(mv.map(m => [m.head, m.role, m.feat, m.z, m.h, +m.x0.toFixed(3), +m.y0.toFixed(3), +m.x1.toFixed(3), +m.y1.toFixed(3)])));
     runs.push(['NSO build + NSO_Slicer (rule ' + (rule || 'sheet') + ')' + (argv.includes('--merged') ? ', the six as one piece' : ''), GL.measureAll(mv), mv]);
