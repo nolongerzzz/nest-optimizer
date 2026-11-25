@@ -2021,6 +2021,8 @@
        at the bridge's speed, as Studio's does; a filament can slow it on its own (CR-TPU: the owner's tower level of 2026-11-15, its front lip
        sagging at 42 mm/s). Never faster than the bridge's speed, and the max flow still holds it. */
     var coolWait = opts.coolWait > 0 ? +opts.coolWait : 0;
+    /* THE COOL PILLAR (opts.coolPillarObj: the index of the app's pillar object): printed first on each layer, the wait spent over it */
+    var pillarObj = opts.coolPillarObj != null && opts.coolPillarObj >= 0 ? +opts.coolPillarObj : -1;
     S.speed.hang = opts.hangSpeed > 0 ? Math.min(+opts.hangSpeed, S.speed.bridge) : S.speed.bridge;
     var F = S.filament, R = S.retract;
     var filA = Math.PI * F.diameter * F.diameter / 4;
@@ -2221,12 +2223,13 @@
     }
     /** COOL WAIT: retracted, up COOL_WAIT_LIFT, aside COOL_WAIT_AWAY off the layer's outline in X (to the right, else the left), and a wait of
      *  the rest of the layer's minimum time with the layer's fan still on. The next layer's own travel brings the nozzle back down. */
-    function coolWaitOff(w) {
+    function coolWaitOff(w, over) {
       if (!st.retracted && R.length > 0) { put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0)); st.retracted = true; st.retractLen = R.length; }
-      var ax = w.box.x1 + COOL_WAIT_AWAY <= bed.x - 2 ? w.box.x1 + COOL_WAIT_AWAY : Math.max(2, w.box.x0 - COOL_WAIT_AWAY);
-      var ay = Math.max(2, Math.min(bed.y - 2, (w.box.y0 + w.box.y1) / 2));
+      /* over the pillar's first point when the layer starts on it (the ooze goes into the pillar), else off the layer's outline */
+      var ax = over ? over[0] : w.box.x1 + COOL_WAIT_AWAY <= bed.x - 2 ? w.box.x1 + COOL_WAIT_AWAY : Math.max(2, w.box.x0 - COOL_WAIT_AWAY);
+      var ay = over ? over[1] : Math.max(2, Math.min(bed.y - 2, (w.box.y0 + w.box.y1) / 2));
       var zl = st.z + COOL_WAIT_LIFT;
-      put('; NSO cool wait: ' + w.seconds.toFixed(1) + ' s');
+      put('; NSO cool wait: ' + w.seconds.toFixed(1) + ' s' + (over ? ' over the cool pillar' : ''));
       accel(S.accel.travel);
       put('G1 Z' + fx(zl) + ' F' + fmt(S.speed.travel * 60, 0));
       put('G1 X' + gx(ax) + ' Y' + gy(ay) + ' F' + fmt(S.speed.travel * 60, 0));
@@ -2523,6 +2526,7 @@
           return order.indexOf(a.it.slot) - order.indexOf(b.it.slot) || a.i - b.i;
         }).map(function (x) { return x.it; });
       }
+      if (pillarObj >= 0 && !MC) items = items.filter(function (it) { return it.obj === pillarObj; }).concat(items.filter(function (it) { return it.obj !== pillarObj; }));
       var endPos = planTravels(items, S, startPos, first ? true : R.onLayerChange);
       items[items.length - 1].retractAfter = lastLayer ? true : R.onLayerChange;
       var hookAt = hookAtStart ? -2 : hookAfter(items);      /* -2: the timelapse goes at the layer change (HOOK_AT_LAYER_START) */
@@ -2584,7 +2588,7 @@
       } else {
         flushRetract();
         closeObject();
-        if (st.coolWait) { coolWaitOff(st.coolWait); st.coolWait = null; }
+        if (st.coolWait) { coolWaitOff(st.coolWait, items[0] && items[0].obj === pillarObj ? items[0].pts[0] : null); st.coolWait = null; }
         if (remainingOn) { var nowR = remainingAt(pj); if (nowR.length < remaining.length) putRemaining(nowR); }
       }
       put('; layer num/total_layer_count: ' + layerNo + '/' + totalLayers);
@@ -2720,7 +2724,10 @@
           var atHop = false;
           if (k - 1 === hookAt) {
             // the hook: lift in a circle, close the object, the photo, open the object again
-            if (R.hop > 0) { spiral(z + R.hop, first); atHop = true; }
+            /* the head leaves for the photo whatever the lift: the way back is a travel with its own F and Z, never a glide (with no z hop - CR-TPU
+               since 2026-11-25 - a top run's glide after the hook went at the hook's F18000) */
+            if (R.hop > 0) spiral(z + R.hop, first);
+            atHop = true;
             closeObject();
             emitHook(li, z);
             openObject(it.obj);

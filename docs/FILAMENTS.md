@@ -15,6 +15,7 @@ The Slice card now has a filament and the numbers a filament is tuned by.
 | **max flow** | `filament_max_volumetric_speed`, mm^3/s: every speed is held under it | the filament's own |
 | **temp step** / **every** | change the nozzle temperature by this much at every band of height | 0: off |
 | **cool wait** | a minimum layer time, s, kept by waiting off the part when slowing down cannot reach it ("CR-TPU prints straight up") | the filament's own (CR-TPU 8; else off) |
+| **cool pillar** | with a cool wait: a 6 mm pillar beside the part, printed first on each layer, the wait spent over it | the filament's own (CR-TPU on; else off) |
 
 Picking a filament fills the four number rows with that filament's values; they stay editable.
 `Profile values` puts everything back to the printer profile, the filament included. An untouched
@@ -357,6 +358,18 @@ spiralled up and back over it.
   the readout says how many layers waited and for how long. 0 turns it off; empty is the filament's.
 
 On the capsule rebuilt from Studio's G-code, the necks print in about 1 s and wait about 6 s; the 10 mm body about 4 s and waits about 4 s.
+
+- **Cool pillar** (the card's select under Printer and filament, `coolPillar`; CR-TPU's `tune`: on). The owner, the same day: coming back
+  from a wait - or from the wiper - brings a glob back with it, and a pillar gives more control. With a cool wait, the app slices the plate
+  once, finds the last layer that would print faster than the wait at `slow_down_min_speed` (its length over that speed), and slices again
+  with a **6 mm square pillar 12 mm to the right of the parts** (else the left; none when the bed has no room) up to that height
+  (`coolPillarFor` in `app-print.js`). The planner (`opts.coolPillarObj`) prints the pillar first on each layer, waits what is still
+  lacking hovering 1 mm over the pillar's first point, comes down onto it - the ooze goes into the pillar - and then goes to the part
+  clean. The pillar is no piece of the owner's: it is left out of the result's labels and objects, and the readout's time includes it.
+  On the rebuilt capsule: about 2.5 g of pillar (the part is 1.8 g), the waits down from about 40 min to about 3 min, the same 1 h 26 min.
+  "Off" keeps the wait 10 mm off the part.
+- With no z hop, the timelapse hook's way back is now always a travel of its own: a top run's glide after the hook had gone at the hook's
+  F18000 (found on the pillar's top).
 
 ### PETG's support gap (`tune`: `supTopZ` 0.33)
 

@@ -126,6 +126,9 @@
                            /* COOL WAIT (s): a layer still faster than this at the slowest speed waits the rest out off the part. null is the filament's own
                               (CR-TPU 8, its slow_down_layer_time), 0 none */
                            coolWait: null,
+                           /* COOL PILLAR: the cool wait spent over a small pillar beside the part, which takes the ooze. null is the filament's own
+                              (CR-TPU: on), true / false */
+                           coolPillar: null,
                            /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). They start at the printer profile's values (settingsFromConfig);
                               these are Bambu's own defaults, for a card with no profile. NSO's old numbers (top 0.18, first layer solid, a bridge of
                               5 mm not held) are the Print card's built-in saved setting "NSO classic" */
@@ -260,7 +263,9 @@
          made the lip no better and the bridges worse, so they print at the bridge's speed, as Studio's do. */
       /* COOL WAIT 8 s (its slow_down_layer_time): a layer still faster than that at 10 mm/s waits the rest out off the part - the capsule's necks
          printed in 2 s, stayed soft and wound into a knot under the nozzle */
-      tune: function () { return { coolWait: 8 }; },
+      /* COOL PILLAR: and the wait is spent over a 6 mm pillar beside the part, printed first on each layer - the owner, 2026-11-25: coming back
+         from a wait, or from the wiper, brings a glob back with it; into the pillar it goes */
+      tune: function () { return { coolWait: 8, coolPillar: true }; },
       /* ITS SLICER RULES: a fill piece under 1 mm is not laid (the slicer's NO CRUMBS) - at the tip of the tower level's roof a 0.03 mm corner
          of solid infill got the whole prime and retraction, and the owner's print of 2026-11-15 hung whole lines off that tip */
       slicer: { shortFillMm: 1 },
@@ -328,7 +333,7 @@
              rangeLow: S.temp.rangeLow, rangeHigh: S.temp.rangeHigh,
              flowRatio: S.filament.flow, retractLen: S.retract.length, retractSpeed: S.retract.speed, retractBefore: Math.round(S.retract.beforeWipe * 100), zHop: S.retract.hop,
              /* the bridge's rows: the profile's speed and flow, no bridge temperature - unless the filament brings its own (tune) */
-             bridgeSpeed: S.speed.bridge, bridgeFlow: S.filament.bridgeFlow, hangSpeed: null, bridgeTemp: null, coolWait: null,
+             bridgeSpeed: S.speed.bridge, bridgeFlow: S.filament.bridgeFlow, hangSpeed: null, bridgeTemp: null, coolWait: null, coolPillar: null,
              /* the support's top gap: the profile's, unless the filament brings its own (tune: PETG's 0.33) */
              supTopZ: numOf(cfgRaw(config, 'support_top_z_distance'), SETTINGS_DEFAULT.supTopZ) }, f.tune ? f.tune(config) : {});
   }
@@ -352,7 +357,7 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null,
+      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null,
       /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
          keys; a key the profile does not hold is this slicer's own default */
       supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
@@ -491,6 +496,7 @@
       flowRatio: opt(s.flowRatio, 0.8, 1.2, 3), retractLen: opt(s.retractLen, 0, 3, 2), retractSpeed: opt(s.retractSpeed, 5, 80, 0), retractBefore: opt(s.retractBefore, 0, 100, 0), zHop: opt(s.zHop, 0, 2, 2),
       bridgeTemp: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.max(170, Math.min(300, v))); })(s.bridgeTemp),   /* 0: none */
       bridgeTempFrom: (function (v) { v = parseFloat(v); return !isFinite(v) || v < 2 ? null : Math.round(Math.min(100000, v)); })(s.bridgeTempFrom),   /* under 2: none */
+      coolPillar: s.coolPillar === true || s.coolPillar === 'on' ? true : s.coolPillar === false || s.coolPillar === 'off' ? false : null,
       coolWait: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.min(60, v) * 10) / 10; })(s.coolWait),   /* 0: none */
       supDensity: Math.round(n(s.supDensity, D.supDensity, 10, 100)),
       supExpand: (function (v) { return v < 0 ? -1 : r2(v); })(n(s.supExpand, D.supExpand, -1, 10)),
@@ -624,6 +630,48 @@
     if (settings.hangSpeed != null) return settings.hangSpeed > 0 ? settings.hangSpeed : null;
     var fb = filamentBase(config, settings.filament);
     return fb && fb.hangSpeed ? fb.hangSpeed : null;
+  }
+  /** Whether a slice with a cool wait puts a pillar beside the part: the row's (true / false), else the filament's own, else no. */
+  function coolPillarOf(config, settings) {
+    if (!settings) return false;
+    if (settings.coolPillar === true || settings.coolPillar === false) return settings.coolPillar;
+    var fb = filamentBase(config, settings.filament);
+    return !!(fb && fb.coolPillar);
+  }
+  var PILLAR_MM = 6, PILLAR_GAP_MM = 12, PILLAR_EDGE_MM = 8;
+  /**
+   * THE COOL PILLAR for a first slice `res` of `objects` (bed coordinates): a PILLAR_MM square column PILLAR_GAP_MM to the right of the parts
+   * (else the left), as tall as the last layer that would print faster than `coolWait` s at the cooling's slowest speed (every line at
+   * slow_down_min_speed: the layer's length over it). null when no layer is that fast, or there is no room on the bed.
+   */
+  function coolPillarFor(objects, res, bed, coolWait, cooling, config) {
+    var vmin = +((cooling && cooling.slow_down_min_speed) || cfgRaw(config, 'slow_down_min_speed') || 10);
+    var top = -1;
+    res.planes.forEach(function (pl, li) {
+      if (li === 0) return;
+      var len = 0, any = false;
+      res.objects.forEach(function (ob) {
+        var L = ob.layers[li];
+        if (!L || !L.paths) return;
+        L.paths.forEach(function (p) { any = true; for (var k = 1; k < p.pts.length; k++) len += Math.hypot(p.pts[k][0] - p.pts[k - 1][0], p.pts[k][1] - p.pts[k - 1][1]); });
+      });
+      if (any && len / vmin < coolWait) top = Math.max(top, pl.printZ);
+    });
+    if (top <= 0) return null;
+    var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    objects.forEach(function (ob) { for (var i = 0; i < ob.soup.length; i += 3) {
+      if (ob.soup[i] < x0) x0 = ob.soup[i]; if (ob.soup[i] > x1) x1 = ob.soup[i]; if (ob.soup[i + 1] < y0) y0 = ob.soup[i + 1]; if (ob.soup[i + 1] > y1) y1 = ob.soup[i + 1]; } });
+    var h = PILLAR_MM / 2, cx = x1 + PILLAR_GAP_MM + h;
+    if (cx + h > bed.x - PILLAR_EDGE_MM) cx = x0 - PILLAR_GAP_MM - h;
+    if (cx - h < PILLAR_EDGE_MM) return null;
+    var cy = Math.max(PILLAR_EDGE_MM + h, Math.min(bed.y - PILLAR_EDGE_MM - h, (y0 + y1) / 2));
+    var zt = top + 0.01, c = [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]], t = [];
+    var P = function (i, z) { return [c[i][0], c[i][1], z]; };
+    var quad = function (a, b, d, e) { t.push.apply(t, a.concat(b, d, a, d, e)); };
+    quad(P(0, 0), P(3, 0), P(2, 0), P(1, 0)); quad(P(0, zt), P(1, zt), P(2, zt), P(3, zt));
+    for (var i = 0; i < 4; i++) { var j = (i + 1) % 4; quad(P(i, 0), P(j, 0), P(j, zt), P(i, zt)); }
+    return { object: { name: 'NSO cool pillar', soup: Float32Array.from(t), key: 'nso-cool-pillar', role: 'part', paint: null },
+             info: { x: +cx.toFixed(2), y: +cy.toFixed(2), size: PILLAR_MM, height: +top.toFixed(2) } };
   }
   /** The cool wait a slice is made with, s: the row's (0: none), else the filament's own; null for none. */
   function coolWaitOf(config, settings) {
@@ -926,12 +974,23 @@
     if (!SL) return Promise.resolve({ ok: false, reason: 'The slicer (nso_slicer.js) did not load - check console.' });
     if (!PL) return Promise.resolve({ ok: false, reason: 'The print planner (nso-print-planner.js) did not load - check console.' });
     var settings = opts.settings ? cleanSettings(opts.settings) : null, over = {}, config = assets.config;
+    var pillar = null, so = null;
     return Promise.resolve().then(function () {
-      var so = slicerOptions(SL, PL, objects, assets, settings);
+      so = slicerOptions(SL, PL, objects, assets, settings);
       over = so.over; config = so.config;
       if (opts.stacks) so.o.columnStacks = true;       /* the supports card's Generate: the supports as they print come back with the file */
       stage('slicing', { objects: objects.length });
       return SL.run(objects, so.o);
+    }).then(function (res) {
+      if (!res.ok) return res;
+      /* THE COOL PILLAR (docs/FILAMENTS.md "Cool pillar"): the layers too fast for the cool wait get a small pillar beside the part, up to the
+         last of them, printed first on each layer: the wait is spent over it and whatever oozes goes into it, not onto the part */
+      var ex0 = plannerExtras(config, settings);
+      if (!ex0.coolWait || !coolPillarOf(assets.config, settings)) return res;
+      pillar = coolPillarFor(objects, res, assets.printer.bed, ex0.coolWait, ex0.cooling, config);
+      if (!pillar) return res;
+      stage('slicing', { objects: objects.length + 1 });
+      return SL.run(objects.concat([pillar.object]), so.o);
     }).then(function (res) {
       if (!res.ok) return { ok: false, reason: 'Slice refused: ' + res.reason };
       var mixed = layerSlots(objects, res);
@@ -940,14 +999,15 @@
       var ex = plannerExtras(config, settings);
       /* a painted project's filaments go into the file's CONFIG_BLOCK as lists, under the card's own changes */
       if (assets.filamentOver) over = Object.assign({}, assets.filamentOver, over);
-      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps, bridgeTemp: ex.bridgeTemp, bridgeTempFrom: ex.bridgeTempFrom, hangSpeed: ex.hangSpeed, coolWait: ex.coolWait }).then(function (out) {
+      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps, bridgeTemp: ex.bridgeTemp, bridgeTempFrom: ex.bridgeTempFrom, hangSpeed: ex.hangSpeed, coolWait: ex.coolWait, coolPillarObj: pillar ? objects.length : undefined }).then(function (out) {
         var seen = {};
+        var labels = out.plan.labels.filter(function (l) { return !pillar || l.index !== objects.length; });   /* the pillar is no piece of the owner's */
         out.plan.layers.forEach(function (l) { l.features.forEach(function (f) { seen[f] = 1; }); });
         var st = out.plan.stats;
         return {
-          ok: true, reason: '', bytes: out.bytes, features: Object.keys(seen), objects: out.plan.labels.length,
-          labels: out.plan.labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
-          stats: { layers: st.layers, seconds: st.seconds.total, startSeconds: st.seconds.start, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ, tempBands: st.tempBands || null, bridgeTemp: st.bridgeTemp || null, coolWait: st.coolWait || null,
+          ok: true, reason: '', bytes: out.bytes, features: Object.keys(seen), objects: labels.length,
+          labels: labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
+          stats: { layers: st.layers, seconds: st.seconds.total, startSeconds: st.seconds.start, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ, tempBands: st.tempBands || null, bridgeTemp: st.bridgeTemp || null, coolWait: st.coolWait || null, coolPillar: pillar ? pillar.info : null,
                    changes: st.changes ? st.changes.length : 0, tower: st.tower || null, towerNote: st.towerNote || null },
           tune: settings ? tuneWords(config, ex.hangSpeed) : null,                                                             // the bridge and retraction numbers it prints with
           filament: filamentWords(config, settings),                                                             // what it prints with, in words
@@ -1094,7 +1154,7 @@
     SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
     configOverlay: configOverlay, withOverlay: withOverlay, plateProject: plateProject,
     qualityOverlay: qualityOverlay, qualitiesOf: qualitiesOf, nozzlesOf: nozzlesOf, presetConfig: presetConfig,
-    FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf, hangSpeedOf: hangSpeedOf, coolWaitOf: coolWaitOf
+    FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf, hangSpeedOf: hangSpeedOf, coolWaitOf: coolWaitOf, coolPillarOf: coolPillarOf, coolPillarFor: coolPillarFor
   };
 
   // ===========================================================================
@@ -1285,7 +1345,7 @@
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
       bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band'),
-      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'), coolWait: v('slice-set-cool-wait'),
+      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'), coolWait: v('slice-set-cool-wait'), coolPillar: v('slice-set-cool-pillar'),
       flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), retractBefore: v('slice-set-retract-before'), zHop: v('slice-set-zhop'),
       project: S.project
     }));
@@ -1316,6 +1376,7 @@
     /* the filament: a null row shows the filament's own value (empty until the template is fetched) */
     set('slice-set-filament', filamentOf(st.filament).id); set('slice-set-temp-step', st.tempStep == null ? 0 : st.tempStep); set('slice-set-temp-band', st.tempBand == null ? 10 : st.tempBand);
     set('slice-set-bridge-temp-from', st.bridgeTempFrom == null ? '' : st.bridgeTempFrom);
+    set('slice-set-cool-pillar', st.coolPillar == null ? '' : st.coolPillar ? 'on' : 'off');
     showFilamentRows();
     FILAMENT_ROWS.forEach(function (r) { if (st[r[1]] != null) set(r[0], st[r[1]]); });
     filamentNote(); bridgeNote();

@@ -213,7 +213,7 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, quality: '0.20mm Standard @BBL A1M', layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null,   /* the filament's own */
+        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null,   /* the filament's own */
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true,
@@ -569,11 +569,12 @@ async function main() {
         for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; q(P(i, 0), P(j, 0), P(j, h), P(i, h)); }
         return Float32Array.from(t); };
       const pObjs = PRINT.pieceObjects([{ name: 'pillar', file: 'pillar.stl', soup: pillar(1.5, 12), sourceId: 9 }], a1.bed);
-      const w0 = await PRINT.build(pObjs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu' }) });
+      const w0 = await PRINT.build(pObjs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', coolPillar: false }) });
+      const wPil = await PRINT.build(pObjs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu' }) });
       const w1 = await PRINT.build(pObjs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', coolWait: 0 }) });
       const wP = await PRINT.build(pObjs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });
-      check('a thin CR-TPU pillar slices with its cool wait, without it, and in the profile\'s PLA', w0.ok && w1.ok && wP.ok, w0.reason || w1.reason || wP.reason);
-      if (w0.ok && w1.ok && wP.ok) {
+      check('a thin CR-TPU pillar slices with its cool wait, without it, and in the profile\'s PLA', w0.ok && w1.ok && wP.ok && wPil.ok, w0.reason || w1.reason || wP.reason || wPil.reason);
+      if (w0.ok && w1.ok && wP.ok && wPil.ok) {
         const g = async r => L.text(await L.R.openZip(r.bytes).read('Metadata/plate_1.gcode')).split('\n');
         const g0 = await g(w0), g1 = await g(w1), gP = await g(wP);
         const waits = gl => gl.map((l, i) => l.startsWith('; NSO cool wait:') ? i : -1).filter(i => i >= 0);
@@ -586,7 +587,19 @@ async function main() {
           /^G1 E-/.test(g0[k - 1]) && /^M204/.test(g0[k + 1]) && Math.abs(zOf(g0[k + 2]) - (zBefore + 1)) < 1e-6 && /^G1 X[\d.]+ Y[\d.]+ F/.test(g0[k + 3]) && /^G4 P\d+$/.test(g0[k + 4]) &&
           +/P(\d+)/.exec(g0[k + 4])[1] > 3000 && +/P(\d+)/.exec(g0[k + 4])[1] < 8000 && Math.abs(w0.stats.grams - w1.stats.grams) < 1e-6, g0.slice(k - 1, k + 6).join(' | '));
         check('...the print\'s time counts the waits (' + Math.round(w1.stats.seconds) + ' s -> ' + Math.round(w0.stats.seconds) + ' s)', w0.stats.seconds - w1.stats.seconds > w0.stats.coolWait.total * 0.95);
-        check('...Cool wait 0 turns it off, and the profile\'s PLA has none', waits(g1).length === 0 && waits(gP).length === 0 && !w1.stats.coolWait && !wP.stats.coolWait);
+        check('...Cool wait 0 turns it off, and the profile\'s PLA has none', waits(g1).length === 0 && waits(gP).length === 0 && !w1.stats.coolWait && !wP.stats.coolWait && !w1.stats.coolPillar && !wP.stats.coolPillar);
+        /* THE COOL PILLAR (CR-TPU's own): beside the part, printed first on each layer, the wait spent over it */
+        const gq = await g(wPil), pi = wPil.stats.coolPillar;
+        const opened = []; gq.forEach(l => { const m = /^; start printing object, unique label id: (\d+)/.exec(l); if (m) opened.push(m[1]); });
+        const wq = waits(gq);
+        const nextOpen = i => { for (let j = i; j < gq.length; j++) { const m = /^; start printing object, unique label id: (\d+)/.exec(gq[j]); if (m) return m[1]; } return null; };
+        check('CR-TPU puts a 6 mm cool pillar 12 mm beside the part, as tall as the part\'s last fast layer (' + JSON.stringify(pi) + '), and the owner\'s pieces are still one object',
+          pi && pi.size === 6 && Math.abs(pi.x - (a1.bed.x / 2 + 1.5 + 12 + 3)) < 0.01 && pi.height > 11 && pi.height <= 12.01 && wPil.objects === 1 && wPil.labels.length === 1, JSON.stringify([pi, wPil.labels]));
+        check('...every wait is over the pillar and the pillar is what prints next (' + wq.length + ' waits), its layers first, then the part\'s',
+          wq.length > 0 && wq.every(i => / over the cool pillar$/.test(gq[i]) && nextOpen(i) === '1002'), gq.slice(wq[0], wq[0] + 12).join(' | '));
+        check('...the waits are shorter for it (' + w0.stats.coolWait.total.toFixed(0) + ' s off the part -> ' + wPil.stats.coolWait.total.toFixed(0) + ' s over the pillar), for ' + (wPil.stats.grams - w0.stats.grams).toFixed(2) + ' g of pillar',
+          wPil.stats.coolWait.total < w0.stats.coolWait.total / 2 && wPil.stats.grams > w0.stats.grams);
+        check('...Cool pillar off keeps the wait off the part, as above', w0.stats.coolPillar == null && waits(g0).every(i => !/pillar/.test(g0[i])));
       }
     }
 
@@ -872,7 +885,7 @@ async function main() {
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu', bridgeTemp: 212 }) });
     check('a bridge temperature on the P1S is refused: its park and wipe moves are not written yet', !p1sBt.ok && /written for the A1 mini only so far/.test(p1sBt.reason), p1sBt.reason);
     check('...the card\'s CR-TPU on the P1S is the owner\'s own P1S preset (fixtures/print-planner/p1s-0.4/studio-owner-cr-tpu-squishy): 220 C, first layer too, bed 30, 3 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 220, firstTemp: 220, bedTemp: 30, maxFlow: 3, rangeLow: 200, rangeHigh: 250,
-      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0, bridgeSpeed: 50, bridgeFlow: 1, hangSpeed: null, bridgeTemp: null, coolWait: 8, supTopZ: PRINT.settingsFromConfig(p1sCfg).supTopZ }), JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')));
+      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0, bridgeSpeed: 50, bridgeFlow: 1, hangSpeed: null, bridgeTemp: null, coolWait: 8, coolPillar: true, supTopZ: PRINT.settingsFromConfig(p1sCfg).supTopZ }), JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')));
     const p1sOwn = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu' }) });
     check('...and CR-TPU with every row empty slices for the P1S: the filament asks for no bridge temperature where the printer has no park (only a number typed in the row is refused)', p1sOwn.ok && p1sOwn.stats.bridgeTemp === null, p1sOwn.reason);
