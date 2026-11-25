@@ -82,7 +82,8 @@
     return {
       width: clampNum(p.width, MIN_WIDTH_MM, MAX_MM, DEFAULTS.width),
       depth: clampNum(p.depth, MIN_DEPTH_MM, MAX_MM, DEFAULTS.depth),
-      kerf: clampNum(p.kerf, MIN_KERF_MM, MAX_MM, DEFAULTS.kerf)
+      // the knife's own thickness is under the printable floor on purpose: it parts the strand, it leaves no slot
+      kerf: p.knife ? DICE_KERF_MM : clampNum(p.kerf, MIN_KERF_MM, MAX_MM, DEFAULTS.kerf)
     };
   }
 
@@ -281,7 +282,7 @@
     }
     var spec = {
       axis: a.axis, dAxis: a.dAxis, wAxis: a.wAxis, sign: a.sign, plane: a.plane,
-      wCentre: centre, dStart: edge, width: width, depth: a.depth, kerf: a.kerf
+      wCentre: centre, dStart: edge, width: width, depth: a.depth, kerf: a.kerf, knife: !!a.knife
     };
     return { box: bladeBox(spec), spec: spec, edge: edge, face: face };
   }
@@ -502,6 +503,7 @@
   function report(o) {
     if (o.dice) {
       return 'Dice cut - through the strand' + (o.strands > 1 ? ' (one of ' + o.strands + ' in the plane)' : '') +
+        ' - ' + round(o.removed) + ' mm³ (the ' + DICE_KERF_MM + ' mm blade)' +
         (o.parts > 1 ? '' : ' - nothing came off: the strand is joined round the other way, so the cut is a slit in it');
     }
     return (o.notch ? 'Notch cut - ' + round(o.kerf) + ' mm wide x ' + round(o.depth) + ' mm deep' +

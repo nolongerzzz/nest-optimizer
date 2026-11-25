@@ -96,7 +96,7 @@ withApp(async (page, logs) => {
   const probe = id => page.evaluate(id => __probe(id), id);
   const probeAll = () => page.evaluate(() => __probeAll());
   const status = () => page.evaluate(() => document.getElementById('status').textContent);
-  const waitCut = () => page.waitForFunction(() => /(Sized|Notch) cut|Cut not made/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+  const waitCut = () => page.waitForFunction(() => /(Sized|Notch|Dice) cut|Cut not made/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
   const SPIRAL = spiral({ R: 1.8, turns: 3, r0: 4, pitch: 6.5, ringSeg: 14, perTurn: 36 });
 
   async function fresh() {

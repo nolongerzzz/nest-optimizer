@@ -574,7 +574,7 @@ function cutBladeSpec(info) {
     // the whole strand, in from its edge on the side the click came from and out past its far side
     const through = strand.max[entry.dAxis] - strand.min[entry.dAxis] + 2 * NSO_Notch.NOTCH_MARGIN_MM;
     const nb = NSO_Notch.notchBox({ axis: k, dAxis: entry.dAxis, wAxis: entry.wAxis, sign: entry.sign,
-      plane: info.plane, depth: through, kerf: s.kerf }, strand);
+      plane: info.plane, depth: through, kerf: s.kerf, knife: true }, strand);
     box = nb.box;
     sizes = { width: nb.spec.width, depth: through, kerf: s.kerf };
   } else if (notch && strand && b.nturn && p) {
@@ -4066,6 +4066,126 @@ async function cutNotchAt(m, info) {
   } finally {
     gone.forEach(function (x) { try { x.delete(); } catch (e) { /* already gone */ } });
     cutNotchBusy = false;
+  }
+}
+
+// ===================== Dice: the knife =====================
+/* Dice cuts one strand clean through and leaves the rest of the plane's path alone - a short Chop, no kerf.
+
+   It is Chop's own cut, made in the kernel and then undone where it should not have been: the piece split at the
+   plane (Manifold splitByPlane), every part on either side read for the strands of the section it carries a face
+   of, and the parts that meet at any strand but the one clicked glued back (a union of solids that touch on an
+   exactly shared face is one solid, the face gone). What is left is two halves that meet only on the clicked
+   strand: they go through Chop's own commit (cutActiveModel with the pair, app-join.js) - two pieces, one Undo,
+   laid where they were (no gap: Follow strand slices on along the cord). A strand joined round the other way (a
+   ring) comes back one piece: nothing comes off, and the card says so. */
+let cutDiceBusy = false;
+async function cutDiceAt(m, info) {
+  if (cutDiceBusy) return null;
+  const say = function (msg, bad) { setStatus(msg, !!bad); };
+  const bl = info.blade;
+  if (!bl || bl.miss || !bl.strand) {
+    say('Cut not made: the plane crosses nothing here - slide it onto the piece. The piece is unchanged.', true);
+    return { ok: false, reason: 'no strand' };
+  }
+  const placed = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
+  if (!placed) { say('Cut not made: that piece is not on the plate', true); return { ok: false, reason: 'not placed' }; }
+  cutDiceBusy = true;
+  const gone = [];
+  const keep = function (x) { gone.push(x); return x; };
+  try {
+    placed.mesh.updateMatrixWorld(true);
+    const toLocal = new THREE.Matrix4().copy(placed.mesh.matrixWorld).invert();
+    const sol = (typeof nsoOverlap !== 'undefined' && nsoOverlap)
+      ? await nsoOverlap.solid(m, { geometry: placed.mesh.geometry, mesh: placed.mesh }) : { ok: true, merged: false };
+    if (!sol.ok) {
+      say(sol.cancelled ? 'Cut stopped - piece unchanged' : 'Cut not made: ' + sol.reason + '. The piece is unchanged.', !sol.cancelled);
+      return { ok: false, reason: sol.reason };
+    }
+    // in the piece's own frame - the frame cutSplitAt hands Chop its halves in
+    const soup = sol.merged ? NSO_Notch.transformSoup(sol.world, toLocal.elements) : displaySoupOf(m.geometry);
+    let wasm;
+    try { wasm = await NSO_CSG.load(); }
+    catch (err) { say('Cut not made: the CSG kernel failed to load - ' + ((err && err.message) || err), true); return { ok: false, reason: 'kernel' }; }
+    const A = keep(NSO_CSG.soupToManifold(wasm, soup));
+    if (A.status() !== 'NoError') {
+      say('Cut not made: the piece is not a closed solid the kernel can cut (' + A.status() + '). Run Check piece. The piece is unchanged.', true);
+      return { ok: false, reason: 'not solid' };
+    }
+    // the plane in the piece's frame: the cut frame's axis k at info.plane, carried through the mitre / bevel
+    const AX = ['x', 'y', 'z'], k = AX.indexOf(info.axis);
+    const F = info.frame ? info.frame : new THREE.Matrix4();
+    const at = new THREE.Vector3(); at.setComponent(k, info.plane); at.applyMatrix4(F);
+    const nrm = new THREE.Vector3(); nrm.setComponent(k, 1); nrm.transformDirection(F);
+    const halves = A.splitByPlane([nrm.x, nrm.y, nrm.z], nrm.dot(at));
+    const P = keep(halves[0]).decompose().map(keep), N = keep(halves[1]).decompose().map(keep);
+    if (!P.length || !N.length) { say('Cut not made: the blade is off the end of the piece. The piece is unchanged.', true); return { ok: false, reason: 'one side' }; }
+    // The strands of the section (cut frame), a few points of each outline carried into the piece's frame.
+    const clusters = cutSectionOf(m, info, k), S = clusters.indexOf(bl.strand);
+    const probes = clusters.map(function (c) {
+      const step = Math.max(1, Math.floor(c.pts.length / 6)), out = [];
+      for (let i = 0; i < c.pts.length; i += step) out.push(new THREE.Vector3().fromArray(c.pts[i]).applyMatrix4(F));
+      return out;
+    });
+    // Which strands a part carries a face of: its vertices on the plane, against the outline points.
+    function strandsOf(part) {
+      const mesh = part.getMesh(), vp = mesh.vertProperties, np = mesh.numProp || 3, on = [], d0 = nrm.dot(at);
+      for (let i = 0; i + 2 < vp.length; i += np) {
+        if (Math.abs(nrm.x * vp[i] + nrm.y * vp[i + 1] + nrm.z * vp[i + 2] - d0) < 1e-3) on.push([vp[i], vp[i + 1], vp[i + 2]]);
+      }
+      const has = new Set();
+      probes.forEach(function (pts, ci) {
+        for (let a = 0; a < pts.length && !has.has(ci); a++) {
+          for (let b = 0; b < on.length; b++) {
+            const dx = on[b][0] - pts[a].x, dy = on[b][1] - pts[a].y, dz = on[b][2] - pts[a].z;
+            if (dx * dx + dy * dy + dz * dz < 4e-4) { has.add(ci); break; }
+          }
+        }
+      });
+      return has;
+    }
+    const parts = P.concat(N), sideOf = parts.map(function (_, i) { return i < P.length ? 1 : -1; });
+    const has = parts.map(strandsOf);
+    // glued: parts either side that meet on a strand that is not the clicked one
+    const root = parts.map(function (_, i) { return i; });
+    const find = function (i) { while (root[i] !== i) { root[i] = root[root[i]]; i = root[i]; } return i; };
+    clusters.forEach(function (_, ci) {
+      if (ci === S) return;
+      let first = -1;
+      parts.forEach(function (_, i) { if (has[i].has(ci)) { if (first < 0) first = i; else { const a = find(first), b = find(i); if (a !== b) root[b] = a; } } });
+    });
+    const tipIdx = parts.findIndex(function (_, i) { return sideOf[i] > 0 && has[i].has(S); });
+    const baseIdx = parts.findIndex(function (_, i) { return sideOf[i] < 0 && has[i].has(S); });
+    if (tipIdx < 0 || baseIdx < 0) {
+      say('Cut not made: the blade does not cross the strand you clicked here - slide it onto it. The piece is unchanged.', true);
+      return { ok: false, reason: 'strand not crossed' };
+    }
+    if (find(tipIdx) === find(baseIdx)) {
+      say('Cut not made: that strand is joined round the other way, so nothing would come off - Dice cuts no slot. Notch takes a slot out of it; Chop cuts the whole piece. The piece is unchanged.', true);
+      return { ok: false, reason: 'joined round' };
+    }
+    // Two halves: the tip's group, and everything else (the rest of the piece, and any body the plane never met).
+    const tipRoot = find(tipIdx), tip = [], rest = [];
+    parts.forEach(function (p, i) { (find(i) === tipRoot ? tip : rest).push(p); });
+    const glue = function (list) { return list.length === 1 ? list[0] : keep(wasm.Manifold.union(list)); };
+    const left = cutDisplayGeometry(NSO_CSG.manifoldToSoup(glue(rest)));
+    const right = cutDisplayGeometry(NSO_CSG.manifoldToSoup(glue(tip)));
+    const others = clusters.length - 1;
+    const status = 'Dice cut - through the strand' + (others ? ' (one of ' + clusters.length + ' in the plane; the other ' + (others === 1 ? 'one is' : others + ' are') + ' left whole)' : '') + ', no kerf';
+    cutActiveModel({ pair: { left: left, right: right, engine: 'display' }, dice: true });
+    let followNote = '';
+    if (typeof cutFollowAfterCut === 'function') {
+      const fol = cutFollowAfterCut();
+      if (fol) followNote = fol.text;
+    }
+    say(status + ' - two pieces now, where they were; one Undo puts it back' + followNote);
+    return { ok: true, status: status, strands: clusters.length };
+  } catch (err) {
+    say('Cut not made: ' + ((err && err.message) || err) + '. The piece is unchanged.', true);
+    return { ok: false, reason: String((err && err.message) || err) };
+  } finally {
+    gone.forEach(function (x) { try { x.delete(); } catch (e) { /* already gone */ } });
+    cutDiceBusy = false;
   }
 }
 

@@ -1,4 +1,4 @@
-/* nso_cut_sever_drive_check.js - a sized cut that goes right through a finger:
+/* nso_cut_sever_drive_check.js - Dice (the knife) cuts right through a finger:
    it separates, it says what it is, and the blade spins in place.
      node tools/nso_cut_sever_drive_check.js        exit 0 = every gate held
 
@@ -12,10 +12,10 @@
    refuse. 10 mm thick, so the finger has a 10 x 10 section.
 
    WHAT IS PINNED
-   - A sized blade across the finger takes exactly kerf x 10 x 10, says "Sized cut"
-     (never "Notch cut"), and leaves TWO pieces; the dust is folded into the larger
-     part, not dropped (the volumes add up) and not refused.
-   - One Undo takes the separation back, a second takes the cut back, vertex for vertex.
+   - Dice on the finger cuts it clean through with no kerf (the two pieces add up to
+     the original exactly), says "Dice cut" (never "Notch cut"), and leaves TWO pieces;
+     the dust goes with the larger part, not dropped and not refused.
+   - One Undo takes the cut back, vertex for vertex.
    - The open / non-manifold edge note compares before and after: edges the piece
      already had are not blamed on the cut; edges the cut adds are.
    - Bevel 0..90 and mitre 0..90: the blade stays where it was clicked (the click is
@@ -68,14 +68,16 @@ const PROBE = `window.__probe = function (id) {
   for (let t = 0; t < n; t++) { const a = P(t * 3), b = P(t * 3 + 1), c = P(t * 3 + 2);
     vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6; }
   const adj = m.rawTris ? NSO_buildAdjacency(m.rawTris, { tol: 1e-4, rawTol: true }) : null;
-  return { vol: vol, tris: n, open: adj ? adj.openEdges : null, nm: adj ? adj.nmEdges : null, name: m.name };
+  // a piece Chop's commit made from display geometry has no raw soup: its edges are read off the geometry
+  const ef = adj ? null : cutEdgeFaults(displaySoupOf(g));
+  return { vol: vol, tris: n, open: adj ? adj.openEdges : ef.open, nm: adj ? adj.nmEdges : ef.nm, name: m.name };
 };`;
 
 withApp(async (page, logs) => {
   await page.addScriptTag({ content: PROBE });
   const probe = id => page.evaluate(id => __probe(id), id);
   const status = () => page.evaluate(() => document.getElementById('status').textContent);
-  const waitCut = () => page.waitForFunction(() => /(Sized|Notch) cut|Cut not made/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+  const waitCut = () => page.waitForFunction(() => /(Sized|Notch|Dice) cut|Cut not made/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
   const pieces = () => page.evaluate(() => state.models.map(m => ({ id: m.id, name: m.name })));
 
   async function fresh() {
@@ -101,12 +103,12 @@ withApp(async (page, logs) => {
     const h = rc.intersectObject(p.mesh, false)[0];
     return h ? [h.point.x, h.point.y, h.point.z] : null;
   }, alongFrac);
-  const setSized = (w, d, k) => page.evaluate(([w, d, k]) => {
+  // Dice has nothing to set: it fits the strand clicked and goes through it
+  const setDice = () => page.evaluate(() => {
     document.getElementById('btn-cut-blade-sized').click();
-    cutBladeState().follow = false; cutBladeRefresh();      // Follow strand is on by default; these drive the plain sized blade
-    const set = (id, v) => { const e = document.getElementById(id); e.value = String(v); e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); };
-    set('cut-blade-width', w); set('cut-blade-depth', d); set('cut-blade-kerf', k);
-  }, [w, d, k]);
+    cutBladeState().follow = false; cutBladeRefresh();      // Follow strand is on by default; these drive the plain knife
+  });
+  const TAKEN = 0;                                          // Dice is Chop's cut: no kerf
 
   console.log('the piece');
   let id = await fresh();
@@ -114,23 +116,23 @@ withApp(async (page, logs) => {
   const expected0 = 30 * 10 * 10 + 10 * 30 * 10 + 0.05 ** 3;
   check('an L with a stray 0.05 mm cube: 6000 mm^3, two bodies, closed', near(v0.vol, expected0, 1) && v0.open === 0 && v0.nm === 0, JSON.stringify(v0));
 
-  console.log('a sized cut through the finger');
-  await setSized(20, 20, 1);
+  console.log('Dice through the finger');
+  await setDice();
   const top = await fingerTop(0.6);
   check('found the finger to click', !!top, JSON.stringify(top));
   await clickAt(top);
   const ro = await page.evaluate(() => document.getElementById('cut-readout').textContent);
-  check('the readout calls it a sized blade', /SIZED BLADE/.test(ro) && !/NOTCH/.test(ro), ro);
+  check('the readout calls it Dice, through the strand', /DICE/.test(ro) && /through the strand/.test(ro) && !/NOTCH/.test(ro), ro);
   await page.click('#btn-cut'); await waitCut();
   await page.waitForTimeout(300);
   const st = await status(), ps = await pieces();
-  check('the status says Sized cut, never Notch cut', /^Sized cut/.test(st) && !/Notch cut/.test(st), st);
-  check('it takes exactly kerf x 10 x 10 = 100 mm^3', /100 mm³ removed/.test(st), st);
+  check('the status says Dice cut, never Notch cut', /^Dice cut/.test(st) && !/Notch cut/.test(st), st);
+  check('and says it took no kerf', /no kerf/.test(st), st);
   check('the finger is a piece of its own: two pieces now', ps.length === 2, JSON.stringify(ps));
-  check('and the status says it separated them', /separated into 2 pieces/.test(st), st);
+  check('and the status says two pieces, where they were', /two pieces now, where they were/.test(st), st);
   const vols = []; for (const p of ps) vols.push(await probe(p.id));
   const total = vols.reduce((a, b) => a + b.vol, 0);
-  check('nothing lost: the two pieces add up to the original less the kerf (the dust is kept, not dropped)', near(total, v0.vol - 100, 0.01), total.toFixed(5) + ' vs ' + (v0.vol - 100).toFixed(5));
+  check('nothing lost: the two pieces add up to the original exactly (no kerf; the dust is kept, not dropped)', near(total, v0.vol - TAKEN, 0.01), total.toFixed(5) + ' vs ' + (v0.vol - TAKEN).toFixed(5));
   // The palm piece carries the dust: its box reaches the stray cube at x = 36.05, the finger piece's does not.
   const sizes = await page.evaluate(ids => ids.map(i => { const m = state.models.find(x => x.id === i); return m.size.x; }), ps.map(p => p.id));
   const wide = sizes.filter(x => x > 35).length, narrow = sizes.filter(x => x <= 35).length;
@@ -140,14 +142,14 @@ withApp(async (page, logs) => {
 
   console.log('Undo');
   await page.click('#btn-undo');
-  check('the first Undo takes the separation back (one piece again)', (await pieces()).length === 1 && /Split to parts reverted/.test(await status()), await status());
-  await page.click('#btn-undo');
+  check('one Undo puts the finger back on: one piece again', (await pieces()).length === 1, await status());
   const back = await probe((await pieces())[0].id);
-  check('the second Undo takes the cut back, vertex for vertex', near(back.vol, v0.vol, 1e-4) && back.tris === v0.tris, JSON.stringify({ vol: back.vol, tris: back.tris, was: v0.tris }));
+  check('...vertex for vertex', near(back.vol, v0.vol, 1e-4) && back.tris === v0.tris, JSON.stringify({ vol: back.vol, tris: back.tris, was: v0.tris }));
 
   console.log('open edges: blamed on the cut only if the cut added them');
   id = await fresh();
-  await setSized(20, 20, 1);
+  // the box cut's edge note - Notch's, since Dice is Chop's cut now
+  await page.evaluate(() => { document.getElementById('btn-cut-blade-notch').click(); const b = cutBladeState(); b.nfollow = false; b.ndepth = 3; b.nwidth = 1; cutBladeRefresh(); });
   // make every adjacency read add 25 bad edges to a soup of the piece's own size or smaller than the cut result
   // cutEdgeFaults is read three times a cut: the piece as the kernel holds it, the kernel's result, the committed piece.
   // Make every read 25 worse: the piece "already had" them.
@@ -158,7 +160,7 @@ withApp(async (page, logs) => {
   const sOld = await status();
   check('edges the piece already had are not blamed on the cut', /already leaves 25 pinched edges in this piece before any cut.*the cut added none/.test(sOld) && !/WARNING/.test(sOld), sOld);
   await page.evaluate(() => { window.cutEdgeFaults = window.__realFaults; });
-  await page.click('#btn-undo'); await page.click('#btn-undo');
+  await page.click('#btn-undo');                           // a notch is one step (nothing separates)
   // now only the reads AFTER the cut are worse: the cut added 7
   await page.evaluate(() => { let n = 0; window.cutEdgeFaults = function (soup) { const r = window.__realFaults(soup); n++; return n >= 2 ? { open: r.open, nm: r.nm + 7, total: r.total + 7 } : r; }; });
   await clickAt(await fingerTop(0.6));
@@ -169,7 +171,7 @@ withApp(async (page, logs) => {
 
   console.log('spinning in place: bevel and mitre');
   id = await fresh();
-  await setSized(12, 8, 1);
+  await setDice();
   /* A point on the finger's top the blade's handle (ball and bar) does not cover on screen: the handle is drawn over
      everything, and a press on it takes hold of the blade instead of placing it (app-core.js) - on every blade. */
   let click = null;

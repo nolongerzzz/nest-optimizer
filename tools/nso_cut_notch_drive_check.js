@@ -145,7 +145,7 @@ withApp(async (page, logs) => {
   check('the readout names it', /SIZED BLADE/.test(await page.evaluate(() => document.getElementById('cut-readout').textContent)),
     await page.evaluate(() => document.getElementById('cut-readout').textContent));
   await cutNow();
-  await waitStatus(/(Sized|Notch) cut|Cut not made/);
+  await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
   const st1 = await status();
   const v1 = await probe(id);
   check('status reports a sized cut', /^Sized cut/.test(st1), st1);
@@ -168,13 +168,13 @@ withApp(async (page, logs) => {
   const w0 = await probe(id);
   await setBlade(4, 2, 1);
   await clickAt(await topPoint(id, 0.5));
-  await cutNow(); await waitStatus(/(Sized|Notch) cut|Cut not made/);
+  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
   const w1 = await probe(id);
   check('a 4 wide blade takes 4 x 2 x 1 and nothing more', near(w0.vol - w1.vol, 8, 0.05), (w0.vol - w1.vol).toFixed(4) + ' of 8');
   await page.click('#btn-undo');
   await setBlade(20, 2, 1);
   await clickAt(await topPoint(id, 0.5));
-  await cutNow(); await waitStatus(/(Sized|Notch) cut|Cut not made/);
+  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
   const w2 = await probe(id);
   check('a blade as wide as the piece takes 20 x 2 x 1', near(w0.vol - w2.vol, 40, 0.05), (w0.vol - w2.vol).toFixed(4) + ' of 40');
 
@@ -182,7 +182,7 @@ withApp(async (page, logs) => {
   await page.click('#btn-undo');
   await setBlade(30, 30, 2);
   await clickAt(await topPoint(id, 0.5));
-  await cutNow(); await waitStatus(/(Sized|Notch) cut|Cut not made/);
+  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
   const sv = await probeAll();
   const sst = await status();
   check('a blade over the whole section takes kerf x 20 x 20', near(w0.vol - sv.vol, 800, 0.1), (w0.vol - sv.vol).toFixed(3) + ' of 800');
@@ -195,7 +195,7 @@ withApp(async (page, logs) => {
   await setBlade(6, 3, 1);
   await clickAt(await topPoint(id, 0.5));
   await page.evaluate(() => setCutMiter(30));
-  await cutNow(); await waitStatus(/(Sized|Notch) cut|Cut not made/);
+  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
   const m1 = await probe(id);
   check('a blade at 30 degrees removes the same kerf x width x depth', near(m0.vol - m1.vol, 18, 0.1), (m0.vol - m1.vol).toFixed(4) + ' of 18; ' + await status());
   check('and the result is closed', m1.open === 0 && m1.nm === 0);
@@ -206,7 +206,7 @@ withApp(async (page, logs) => {
   await setBlade(6, 3, 1);
   await clickAt(await topPoint(id, 0.5));
   await page.evaluate(() => setCutBevel(20));
-  await cutNow(); await waitStatus(/(Sized|Notch) cut|Cut not made/);
+  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
   const b1 = await probe(id), bst = await status();
   // Leaned 20 degrees the blade meets the top face at a slant, but the slant averages out across the
   // kerf: it still takes exactly kerf x width x depth = 18 mm^3, and it must open to the outside - a
@@ -222,7 +222,7 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { const i = state.selectedIndex; if (i < 0) selectPlaced(state.placed.findIndex(p => p && p.sourceId === state.editId)); });
   await setBlade(6, 3, 1);
   await clickAt(await topPoint(id, 0.5));
-  await cutNow(); await waitStatus(/(Sized|Notch) cut|Cut not made/);
+  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
   const t1 = await probe(id);
   check('a piece turned on the plate takes the same 6 x 3 x 1', near(t0.vol - t1.vol, 18, 0.1), (t0.vol - t1.vol).toFixed(4) + ' of 18; ' + await status());
   check('and stays closed', t1.open === 0 && t1.nm === 0);
@@ -244,7 +244,7 @@ withApp(async (page, logs) => {
   check('the click on the side face captured that face\'s normal (+z)', !!sat && sat[2] > 0.99, JSON.stringify(sat));
   const sro = await page.evaluate(() => document.getElementById('cut-readout').textContent);
   check('the readout says the blade comes in from the side', /in from the side/.test(sro), sro);
-  await cutNow(); await waitStatus(/(Sized|Notch) cut|Cut not made/);
+  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
   const s1 = await probe(id);
   check('and it takes 10 x 3 x 1', near(s0.vol - s1.vol, 30, 0.1), (s0.vol - s1.vol).toFixed(4) + ' of 30; ' + await status());
   check('and stays closed', s1.open === 0 && s1.nm === 0);
