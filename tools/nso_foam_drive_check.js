@@ -657,7 +657,7 @@ withApp(async (page, logs) => {
   /* The seam: the foam fills along it on screen, inside the piece, then it is set. */
   await page.evaluate(() => {
     window.__fl = { seen: 0, inside: true };
-    const go = window.nsoFoamFloat.floatAt({ point: [-12, -15.036, 5], normal: [0, -1, 0] }, { point: [-8, -15.09, -3], normal: [0, -1, 0] });
+    const go = window.nsoFoamFloat.floatAt({ point: [-12, -15.036, 5], normal: [0, -1, 0] }, { point: [-8, -15.09, 3], normal: [0, -1, 0] });
     (function watch() {
       const o = window.nsoFoamFloat.objects();
       if (o.fill && o.mesh) {
@@ -675,7 +675,7 @@ withApp(async (page, logs) => {
   check('the foam is shown filling along the seam, ghosted, before it is set - and it is on the piece, not somewhere else',
         fw.seen >= 2 && fw.inside, JSON.stringify({ frames: fw.seen, inside: fw.inside }));
   const afterF = await raw(page), stF = await statusOf(page);
-  check('the seam between the two welded fronts floats, in the engine\'s words', rF.ok && rF.changed && /^Floated - 1\.9 mm³ .* along the dip\./.test(stF), stF);
+  check('the seam between the two welded fronts floats, in the engine\'s words', rF.ok && rF.changed && /^Floated - 1\.9 mm³ .* along 3\d\.\d mm of the dip\./.test(stF), stF);
   check('...one undo entry, the piece closed, the readout the volume, the ghost gone', (await undoDepth(page)) === depthF + 1 && (await census(page, afterF)).closed &&
         (await page.evaluate(() => window.nsoFoamFloat.info().readout)) === '+1.9 mm³ floated' &&
         (await page.evaluate(() => cutMeshOf(getActiveModel()).material.opacity === 1 && !window.nsoFoamFloat.objects().fill)));
