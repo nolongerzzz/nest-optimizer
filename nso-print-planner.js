@@ -1750,6 +1750,31 @@
    * @param {Array} lines  a frozen start / afterStart / beforeEnd / end
    * @param {object} v     { nozzle, nozzleT, bed, bedMax, box:{x,y,w,h}, cy, maxZ, filamentType, flushV, flushT, ow }
    */
+  /**
+   * THE START BLOCK FOR ANOTHER NOZZLE. The frozen start is the owner's Studio slice at a 0.4 nozzle; Bambu's start G-code for the P1S's other
+   * nozzles (Studio 02.09.01.70, "Bambu Lab P1S 0.x nozzle template machine_start_gcode") differs from its 0.4 one in three places, put here:
+   * the header line names the nozzle; at 0.2 and 0.6 the second chamber-fan line (PLA on a bed over 45) runs the fan full (S255) over a 50 C bed;
+   * at 0.6 the purge line lays more (E25 where 0.4's E15, E1.166 where its E0.7). The A1 mini's start is the same text for every nozzle.
+   */
+  function nozzleFrozen(Pr, config) {
+    if (!Pr || !config) return Pr;
+    var nz = String(raw(config, 'nozzle_diameter') || Pr.nozzle || '0.4');
+    if (!Pr.nozzle || +nz === +Pr.nozzle || !/P1S/i.test(String(Pr.printer || ''))) return Pr;
+    var plaHot = 0, start = Pr.start.map(function (l) {
+      if (typeof l !== 'string') return l;
+      if (/^;===== machine: P1S-[\d.]+ =/.test(l)) return l.replace(/P1S-[\d.]+/, 'P1S-' + nz);
+      if (/^\{\?PLAHOT\}\s*M106 P3 S180$/.test(l) && ++plaHot === 2 && (+nz === 0.2 || +nz === 0.6)) return l.replace('S180', 'S{CHF}');
+      if (+nz === 0.6) {
+        if (/^G0 X240 E15 /.test(l)) return l.replace('E15', 'E25');
+        if (/^G0 X18 E15 /.test(l)) return l.replace('E15', 'E25');
+        if (/^G0 Y11 E0\.700 /.test(l)) return l.replace('Y11 E0.700', 'Y15 E1.166');
+        if (/^G0 Y1\.5 E0\.700$/.test(l)) return 'G0 Y1.5 E1.166';
+      }
+      return l;
+    });
+    return Object.assign({}, Pr, { start: start, nozzle: nz });
+  }
+
   function thaw(lines, v, opts) {
     opts = opts || {};
     var pla = String(v.filamentType || 'PLA') === 'PLA';
@@ -1775,6 +1800,7 @@
         .replace(/\{BX\}/g, gnum(v.box.x)).replace(/\{BY\}/g, gnum(v.box.y))
         .replace(/\{BW\}/g, gnum(v.box.w)).replace(/\{BH\}/g, gnum(v.box.h))
         .replace(/\{CY\}/g, tnum(v.cy))
+        .replace(/\{CHF\}/g, ((v.bedMax != null ? v.bedMax : v.bed) > 50) ? '255' : '180')
         .replace(/\{Z\+0\.4\}/g, tnum(v.maxZ + 0.4)).replace(/\{Z\+0\.5\}/g, tnum(v.maxZ + 0.5))
         .replace(/\{Z\+100\}/g, tnum(v.maxZ + 100)).replace(/\{Z\+98\}/g, tnum(v.maxZ + 98));
     };
@@ -1887,6 +1913,8 @@
       var sp = sep || (value.every(function (x) { return /^(-?[\d.]+%?|nil)$/.test(String(x)); }) ? ',' : ';');
       return value.map(quote).join(sp);
     }
+    /* a single value Studio did not quote (a plain string option: printer_settings_id = Bambu Lab A1 mini 0.6 nozzle) stays bare */
+    if (slots.length < 2 && was.charAt(0) !== '"') return String(value).replace(/\n/g, '\\n');
     var text = quote(value);
     if (slots.length < 2) return text;
     return slots.map(function () { return text; }).join(sep);
@@ -1976,7 +2004,7 @@
     res = alignGrids(res);
     if (!opts.config) return { ok: false, reason: 'the printer template\'s project settings (opts.config) are required' };
     if (!opts.printer) return { ok: false, reason: 'the printer\'s frozen start / end (opts.printer) is required' };
-    var Pr = opts.printer;
+    var Pr = nozzleFrozen(opts.printer, opts.config);
     var cooling = opts.cooling == null ? Cooling.DEFAULT_PROFILE_ID : opts.cooling;
     var S = settingsFrom(opts.config, cooling);
     S.coolingId = cooling;

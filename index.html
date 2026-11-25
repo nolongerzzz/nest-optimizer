@@ -192,12 +192,25 @@
               <label class="vp-bend-field print-printer" for="print-printer">Printer
                 <select id="print-printer" class="vp-select" autocomplete="off"
                         title="The plate's printer and size: the same choice as the Plate panel's. The settings below start at this printer's profile."></select></label>
+              <label class="vp-bend-field print-printer print-nozzle" for="slice-set-nozzle">Nozzle
+                <select id="slice-set-nozzle" class="vp-select" autocomplete="off"
+                        title="The nozzle on the printer: Bambu's printer preset for it (line widths, layer limits, retraction, the start's purge line). The A1 mini: 0.2 / 0.4 / 0.6 / 0.8; the P1S: 0.2 / 0.4 / 0.6. Picking one starts the rows at its standard quality.">
+                    <option value="0.4" selected>0.4 mm</option>
+                  </select></label>
               <label class="vp-bend-field print-printer print-filament" for="slice-set-filament">Filament
                 <select class="vp-select" id="slice-set-filament" title="The filament the plate prints with. Profile is the printer profile's own (PLA). Another filament brings its own temperatures, max flow, retraction, fan and start G-code, and the file names it so the printer knows what is loaded. Its own settings fill the rows under Printer and filament (and the support's top gap); a number typed there wins." autocomplete="off">
                     <option value="profile" selected>Profile (PLA)</option>
                     <option value="cr-tpu">Creality CR-TPU 95A</option>
                     <option value="elegoo-petg">ELEGOO PETG</option>
                   </select></label>
+              <label class="vp-bend-field print-printer print-quality" for="slice-set-quality">Quality
+                <select id="slice-set-quality" class="vp-select" autocomplete="off"
+                        title="Bambu's quality presets for this printer and nozzle: the layer height and everything that goes with it (speeds, walls, line widths). Extra Draft is fastest, Extra Fine finest; Strength adds walls and infill; High Quality slows the outer wall. Picking one starts the rows at it; a row changed afterwards wins.">
+                    <option value="0.20mm Standard @BBL A1M" selected>0.20 mm Standard</option>
+                  </select></label>
+              <label class="vp-bend-field print-printer print-maxflow" for="slice-set-max-flow">Max flow
+                <input type="number" id="slice-set-max-flow" min="0.5" max="40" step="0.2" placeholder="auto" inputmode="decimal"
+                         title="The most filament the hotend is asked to melt, mm³ a second. Every speed is held under it (and the start's purge line follows it). Empty: the filament's own (a 0.2 nozzle holds it to Bambu's 1.6 for PLA, 1 for PETG). Raise it once a max flow test on the spool says the hotend melts more: on a big part it is what sets the time." autocomplete="off"><span>mm&sup3;/s</span></label>
               <label class="vp-check print-on print-first" for="sup-on" title="On: Slice builds the supports first (again, when a setting, the piece or its tips changed) and slices the plate with them - laid by the Supports section below. Off: Slice takes the plate's supports off and slices the pieces alone. One Undo puts them back.">
                 <input type="checkbox" id="sup-on" checked autocomplete="off"> Supports</label>
               <p id="slice-profile" class="bend-readout slice-profile" title="The printer profile the plate is sliced for.">&nbsp;</p>
@@ -230,11 +243,6 @@
               <details class="vp-sec print-sec" id="print-sec-printer">
                 <summary class="vp-sec-head" title="The printer profile's nozzle, the filament and its temperatures. An empty temperature is the filament's own.">Printer and filament</summary>
                 <div class="vp-sec-body">
-                  <label class="vp-bend-field" for="slice-set-nozzle">Nozzle
-                    <select class="vp-select" id="slice-set-nozzle" title="The printer profile's nozzle. A 0.6 nozzle needs its own profile (start and end G-code), which this printer does not have yet." autocomplete="off">
-                        <option value="0.4" selected>0.4</option>
-                        <option value="0.6" disabled>0.6</option>
-                      </select></label>
                   <label class="vp-bend-field" for="slice-set-nozzle-temp">Nozzle temp
                     <input type="number" id="slice-set-nozzle-temp" min="170" max="300" step="5" placeholder="auto" inputmode="numeric"
                              title="Nozzle temperature after the first layer, °C. Empty: the filament's own. With a temp step, this is the temperature the steps start from." autocomplete="off"><span>&deg;C</span></label>
@@ -244,9 +252,6 @@
                   <label class="vp-bend-field" for="slice-set-bed-temp">Bed temp
                     <input type="number" id="slice-set-bed-temp" min="0" max="110" step="5" placeholder="auto" inputmode="numeric"
                              title="Bed temperature, °C. Empty: the filament's own for this plate." autocomplete="off"><span>&deg;C</span></label>
-                  <label class="vp-bend-field" for="slice-set-max-flow">Max flow
-                    <input type="number" id="slice-set-max-flow" min="0.5" max="40" step="0.2" placeholder="auto" inputmode="decimal"
-                             title="The most filament the hotend is asked to melt, mm³ a second. Every speed is held under it (and the start's purge line follows it). Empty: the filament's own." autocomplete="off"><span>mm&sup3;/s</span></label>
                   <label class="vp-bend-field" for="slice-set-flow-ratio">Flow ratio
                     <input type="number" id="slice-set-flow-ratio" min="0.8" max="1.2" step="0.01" placeholder="auto" inputmode="decimal"
                              title="How much of the computed filament is extruded (1 = all of it). A little under 1 thins every line: less ooze, fewer blobs and strings. Empty: the filament's own." autocomplete="off"></label>
@@ -3576,7 +3581,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=be9ef05a"></script>
+  <script src="app-supports-card.js?v=e1890c48"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3584,9 +3589,11 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=be87b4fd"></script>
+  <script src="nso-print-planner.js?v=cdb3a6fc"></script>
   <script src="nso-gcode3mf-write.js?v=bd4593c7"></script>
-  <script src="app-print.js?v=0a399043"></script>
+  <!-- Bambu's nozzles and quality presets for the A1 mini and the P1S (app-print.js qualityOverlay; docs/PRINT-CARD.md "Nozzle and quality") -->
+  <script src="nso-bambu-presets.js?v=0f5f48d7"></script>
+  <script src="app-print.js?v=5df90638"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

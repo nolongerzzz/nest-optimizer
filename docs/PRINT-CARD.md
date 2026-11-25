@@ -15,8 +15,11 @@ There is one now. The card kept its file and its ids (`sup-*`, `slice-set-*`), s
 |---|---|
 | Saved settings | the row at the top: every lever of the card under a name (section 5) |
 | Printer | `#print-printer`: the Plate panel's choice (`#plate-select`), shown here too. Either one changes the plate; the other follows |
+| Nozzle | `#slice-set-nozzle`, under Printer (2026-11-25): the A1 mini 0.2 / 0.4 / 0.6 / 0.8, the P1S 0.2 / 0.4 / 0.6 - Bambu's printer preset for it (section "Nozzle and quality") |
 | Filament | `#slice-set-filament`, right under Printer (2026-11-23): the second of the two first choices. It fills the filament's rows (under Printer and filament) and the support rows it holds (PETG: Top Z distance 0.33) |
-| Supports | the **Supports** tick (`#sup-on`), under Filament: on, Slice builds them first; off, the plate is sliced bare |
+| Quality | `#slice-set-quality`, under Filament: Bambu's quality presets for the printer and nozzle (0.28 mm Extra Draft ... 0.08 mm Extra Fine); picking one starts the rows at it |
+| Max flow | `#slice-set-max-flow`, beside Quality (it was under Printer and filament): the filament's own when empty - on a big part it is what sets the time |
+| Supports | the **Supports** tick (`#sup-on`), under Max flow: on, Slice builds them first; off, the plate is sliced bare |
 | **Slice** | `#btn-sup-all`: the one button that makes the plate's slice (section 2) |
 | **Preview** | `#btn-sup-slice`: opens that slice in G-scope |
 | **Export** | `#btn-slice-export`: saves it as `.gcode.3mf` |
@@ -166,3 +169,24 @@ surface row before them (`surface`, the three surfaces as one) is gone; a saved 
 The surfaces take Monotonic line, Monotonic, Rectilinear, Concentric, Archimedean chords, Hilbert curve, Octagram spiral (Studio's Aligned
 Rectilinear is drawn as Rectilinear). Bambu's profiles: the top Monotonic line, the bottom Monotonic, the solid infill Rectilinear - and
 those are now sliced as themselves ([SLICER.md "Monotonic"](SLICER.md)); before, every surface was NSO's rectilinear.
+
+## Nozzle and quality (2026-11-25)
+
+The owner has the A1 mini's 0.2, 0.4, 0.6 and 0.8 nozzles and the P1S's 0.2, 0.4 and 0.6, and asked for Studio's quality presets
+("Extra Draft knocked an hour off") on the card. `nso-bambu-presets.js` is Bambu Studio 02.09.01.70's own profiles, flattened through their
+inherits (`tools/nso_bambu_presets_make.py` regenerates it from the Studio tag):
+
+- **a nozzle** is Bambu's printer preset for it laid over the 0.4 template: `nozzle_diameter`, the layer limits, the retraction (0.4 at
+  0.2, 1.4 at 0.6, 3 at 0.8), `printer_settings_id`. On a 0.2 the filament's max flow is held to Bambu's Generic 0.2 presets' (PLA 1.6,
+  PETG 1 mm^3/s). The P1S's start G-code differs by nozzle in three places, which the planner puts into the frozen start
+  (`nozzleFrozen`): the header names the nozzle, at 0.2 and 0.6 the second chamber-fan line runs full over a 50 C bed, at 0.6 the purge
+  line lays E25 / E1.166 (0.4: E15 / E0.7). The A1 mini's start is one text for every nozzle.
+- **a quality** is Bambu's process preset for that printer and nozzle (the P1S's are the X1C's): what it changes of 0.20mm Standard -
+  the layer height, line widths, speeds, walls, shells. 10 at 0.4, 8 at 0.2, 6 at 0.6, 5 at 0.8 (A1 mini). Picking a nozzle starts at its
+  standard quality (0.10 / 0.20 / 0.30 / 0.40 mm); picking a quality starts every row at it - the filament, its rows and the project stay.
+  A row changed afterwards is written over the preset, as over the profile.
+
+An untouched card writes no preset: the template is 0.4 at its own 0.20mm Standard, and slices as before. `print-slice-check` 5f slices a
+box on every nozzle of both printers: Bambu's standard quality, its line (0.22 / 0.42 / 0.62 / 0.82), its retraction, the file's
+nozzle_diameter and slice_info, the P1S's purge (E25 at 0.6) and header; Extra Draft is layer_height 0.28; a nozzle with no profile is refused.
+Not checked against a Studio slice at another nozzle yet - one from the owner would pin the start block and the speeds.

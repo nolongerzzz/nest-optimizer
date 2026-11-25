@@ -211,7 +211,7 @@ async function main() {
   {
     const base = PRINT.settingsFromConfig(tpl);
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
-      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
+      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, quality: '0.20mm Standard @BBL A1M', layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
         bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null,   /* the filament's own */
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
@@ -230,8 +230,8 @@ async function main() {
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));
     check('an untouched card changes nothing in the template', Object.keys(PRINT.configOverlay(tpl, base)).length === 0 && PRINT.withOverlay(tpl, {}) === tpl);
     let threw = '';
-    try { PRINT.configOverlay(tpl, Object.assign({}, base, { nozzle: 0.6 })); } catch (e) { threw = e.message; }
-    check('a nozzle the profile is not is refused, not sliced with the 0.4 blocks', /0\.6 mm nozzle needs its own profile/.test(threw), threw);
+    try { PRINT.configOverlay(tpl, Object.assign({}, base, { nozzle: 1.0 })); } catch (e) { threw = e.message; }
+    check('a nozzle the printer has no profile for is refused (a 1.0 on the A1 mini; its 0.2 / 0.6 / 0.8 are Bambu\'s presets, section 5f)', /no 1 mm nozzle profile/.test(threw), threw);
     const cl = PRINT.cleanSettings({ layer: '9', walls: '0', density: '150', pattern: 'no-such-pattern', angle: '0', brim: 'x', interfaceRule: 'column' });
     check('each row is clamped to what it takes, and an unknown pattern / brim is the default', cl.layer === 0.3 && cl.walls === 0 && cl.density === 100 && cl.pattern === 'grid' && cl.angle === 1 && cl.brim === 'auto' && cl.interfaceRule === 'column', JSON.stringify(cl));
     {
@@ -1181,6 +1181,41 @@ async function main() {
   }
 
   // ===========================================================================
+  section('5f. Nozzles and quality presets: the A1 mini 0.2 / 0.4 / 0.6 / 0.8, the P1S 0.2 / 0.4 / 0.6, Bambu\'s presets (docs/PRINT-CARD.md "Nozzle and quality")');
+  // ===========================================================================
+  {
+    const { readSTL } = require('./nso_stl_io.js');
+    const box = readSTL(path.join(ROOT, 'fixtures/box-20mm.stl'));
+    const WANT = { '0.2': { w: 0.22, retr: '0.4', std: '0.10mm Standard' }, '0.4': { w: 0.42, retr: '0.8', std: '0.20mm Standard' }, '0.6': { w: 0.62, retr: '1.4', std: '0.30mm Standard' }, '0.8': { w: 0.82, retr: '3', std: '0.40mm Standard' } };
+    check('the nozzles: the A1 mini 0.2 / 0.4 / 0.6 / 0.8, the P1S 0.2 / 0.4 / 0.6 - and each has Bambu\'s qualities (the A1 mini at 0.4: 10, Extra Fine 0.08 to Extra Draft 0.28)',
+      PRINT.nozzlesOf(tpl).join() === '0.2,0.4,0.6,0.8' && PRINT.nozzlesOf(p1sCfg).join() === '0.2,0.4,0.6' &&
+        PRINT.qualitiesOf(tpl, '0.4').length === 10 && PRINT.qualitiesOf(tpl, '0.4')[0].layer === 0.08 && PRINT.qualitiesOf(tpl, '0.4').slice(-1)[0].layer === 0.28,
+      PRINT.qualitiesOf(tpl, '0.4').map(q => q.name).join(', '));
+    check('...an untouched card writes no preset (the template is 0.4 at its own 0.20mm Standard)', Object.keys(PRINT.qualityOverlay(tpl, '0.4', '0.20mm Standard @BBL A1M')).length === 0);
+    for (const [cfg, pr, name] of [[tpl, a1, 'A1 mini'], [p1sCfg, p1sPrinter, 'P1S']]) {
+      for (const nz of PRINT.nozzlesOf(cfg)) {
+        const st = Object.assign({}, PRINT.settingsFromConfig(PRINT.presetConfig(cfg, nz, null)), { nozzle: +nz });
+        const r = await PRINT.build(PRINT.pieceObjects([{ name: 'box', soup: Float32Array.from(box) }], pr.bed), { config: cfg, printer: pr }, { settings: st });
+        if (!r.ok) { check(name + ' ' + nz + ' slices', false, r.reason); continue; }
+        const z = L.R.openZip(r.bytes), g = L.text(await z.read('Metadata/plate_1.gcode')), si = L.text(await z.read('Metadata/slice_info.config'));
+        const cb = k => ((new RegExp('^; ' + k + ' = (.*)$', 'm').exec(g)) || [])[1] || '';
+        const w = WANT[nz], widths = new Set((g.match(/^; LINE_WIDTH: .*/mg) || []).map(l => +l.slice(14)));
+        const exe = g.slice(g.indexOf('EXECUTABLE_BLOCK_START'));
+        let ok = cb('nozzle_diameter').split(',')[0] === nz && cb('print_settings_id').startsWith(w.std) && cb('retraction_length').split(',')[0] === w.retr &&
+          widths.has(w.w) && new RegExp('key="nozzle_diameters" value="' + nz + '"').test(si) && cb('printer_settings_id').endsWith(nz + ' nozzle');
+        let note = '';
+        if (nz === '0.2') { ok = ok && +cb('filament_max_volumetric_speed').split(',')[0] <= 2; note = ', max flow ' + cb('filament_max_volumetric_speed'); }
+        if (name === 'P1S') { ok = ok && exe.includes(';===== machine: P1S-' + nz + ' ') && /^G0 X240 E(\d+)/m.exec(exe)[1] === (nz === '0.6' ? '25' : '15'); note += ', purge ' + /^G0 X240 E(\d+)/m.exec(exe)[1]; }
+        check(name + ' ' + nz + ' nozzle: Bambu\'s ' + w.std + ', the ' + w.w + ' line, retraction ' + w.retr + ' (' + PRINT.describe(r) + note + ')', ok,
+          [cb('nozzle_diameter'), cb('print_settings_id'), cb('retraction_length'), [...widths].join('/'), cb('printer_settings_id')].join(' | '));
+      }
+    }
+    const xd = PRINT.configOverlay(p1sCfg, Object.assign({}, PRINT.settingsFromConfig(PRINT.presetConfig(p1sCfg, '0.4', '0.28mm Extra Draft @BBL X1C')), { quality: '0.28mm Extra Draft @BBL X1C' }));
+    check('a quality preset is Bambu\'s: Extra Draft on the P1S writes layer_height 0.28 and print_settings_id "0.28mm Extra Draft @BBL X1C"', xd.layer_height === '0.28' && xd.print_settings_id === '0.28mm Extra Draft @BBL X1C', JSON.stringify(xd).slice(0, 300));
+    let threw = ''; try { PRINT.configOverlay(p1sCfg, Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { nozzle: 0.8 })); } catch (e) { threw = e.message; }
+    check('...and a nozzle the printer has no profile for is refused (the P1S 0.8)', /no 0\.8 mm nozzle profile/.test(threw), threw);
+  }
+
   section('5b. The slice worker\'s load: the files in a global with no DOM and no module');
   // ===========================================================================
   {

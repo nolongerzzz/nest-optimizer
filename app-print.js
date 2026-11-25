@@ -98,7 +98,7 @@
   // The files the slice worker loads, in order: the page's own <script> tags
   // (a ?v= bump is picked up), so each must be one of them.
   var ENGINE = ['nso-cooling-profiles.js', 'nso-3mf.js', 'nso-3mf-read.js', 'nso_paint.js', 'nso_paint_segment.js', 'nso_csg.js', 'nso_slicer.js',
-                'nso-print-planner.js', 'nso-gcode3mf-write.js', 'app-print.js'];
+                'nso-print-planner.js', 'nso-gcode3mf-write.js', 'nso-bambu-presets.js', 'app-print.js'];
 
   // ---- the card's Slice settings ---------------------------------------------
   //
@@ -111,7 +111,7 @@
   // settings (configOverlay), so the engine, the planner, the G-code's CONFIG_BLOCK and
   // the file's project_settings.config all read the same number. The nozzle is the
   // profile's: another nozzle needs its own start / end blocks.
-  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
+  var SETTINGS_DEFAULT = { nozzle: 0.4, quality: '0.20mm Standard @BBL A1M', layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
                            /* the filament: the profile's own; a null row is the filament's value (filamentBase); no temperature steps */
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
                            /* TUNING (docs/FILAMENTS.md "Bridges and stringing"): the bridge's speed and flow are the process's (the profile's 50 mm/s
@@ -339,7 +339,7 @@
     if (!config || !PL) return Object.assign({}, SETTINGS_DEFAULT);
     var eng = PL.engineOptions(config), o = eng.over, D0 = SETTINGS_DEFAULT;
     return Object.assign({
-      nozzle: eng.nozzleMm, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
+      nozzle: eng.nozzleMm, quality: cfgRaw(config, 'print_settings_id') || null, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
       pattern: PATTERN_FROM_CONFIG[cfgRaw(config, 'sparse_infill_pattern')] || o.sparsePattern,
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
@@ -409,6 +409,45 @@
              objects: (reg[files[0]].objects || []).map(function (o) { return { name: o.name, keys: Object.keys(o.keys) }; }) };
   }
 
+  // ---- nozzle and quality (docs/PRINT-CARD.md "Nozzle and quality") ------------------------------------------------------------------
+  //
+  // The owner's nozzles: the A1 mini's 0.2 / 0.4 / 0.6 / 0.8, the P1S's 0.2 / 0.4 / 0.6. The templates are 0.4 projects at "0.20mm Standard";
+  // another nozzle is Bambu's printer preset for it laid over the template (nso-bambu-presets.js machine[nozzle]: nozzle_diameter, the layer
+  // limits, the retraction ...), and a quality is Bambu's process preset laid over that (what it changes of 0.20mm Standard). The card's rows
+  // then start at the result, as they start at the profile's own values; a row moved off it is written over it as before.
+  function presetsOf() { return lazy('nso-bambu-presets.js', 'NSO_BAMBU_PRESETS'); }
+  function printerKeyOf(config) { var m = cfgRaw(config, 'printer_model'); return /A1 mini/i.test(m) ? 'a1mini' : /P1S/i.test(m) ? 'p1s' : null; }
+  function nozzleName(n) { var v = parseFloat(n); return isFinite(v) ? String(Math.round(v * 10) / 10) : '0.4'; }
+  /** The nozzles a template's printer has a preset for (the template's own when there is no table). */
+  function nozzlesOf(config) {
+    var P = presetsOf(), pk = printerKeyOf(config);
+    return P && pk && P[pk] ? P[pk].nozzles.slice() : [nozzleName(cfgRaw(config, 'nozzle_diameter') || '0.4')];
+  }
+  /** Bambu's quality presets for this printer and nozzle: [{ name, layer }], finest first; the nozzle's standard one is `standard`. */
+  function qualitiesOf(config, nozzle) {
+    var P = presetsOf(), pk = printerKeyOf(config), D = P && pk ? P[pk] : null, nz = nozzleName(nozzle);
+    if (!D) return [];
+    return D.process.filter(function (q) { return q.nozzle === nz; }).map(function (q) { return { name: q.name, layer: q.layer, standard: q.name === D.standard[nz] }; });
+  }
+  /** The config keys a nozzle and a quality preset write over the template: { key: value } (each value the preset's first, as the rows write). */
+  function qualityOverlay(config, nozzle, quality) {
+    var P = presetsOf(), pk = printerKeyOf(config), D = P && pk ? P[pk] : null, nz = nozzleName(nozzle), out = {};
+    if (!D || D.nozzles.indexOf(nz) < 0) return out;
+    var first = function (v) { return Array.isArray(v) ? String(v[0]) : String(v); };
+    var put = function (k, v) { if (config[k] === undefined || k.charAt(0) === '_') return; v = first(v); if (cfgRaw(config, k) !== v) out[k] = v; };
+    if (nz !== '0.4') Object.keys(D.machine[nz] || {}).forEach(function (k) { put(k, D.machine[nz][k]); });
+    var q = D.process.filter(function (p) { return p.nozzle === nz && p.name === quality; })[0] || D.process.filter(function (p) { return p.name === D.standard[nz]; })[0];
+    if (q) { Object.keys(q.keys).forEach(function (k) { put(k, q.keys[k]); }); put('print_settings_id', q.name); }
+    /* a 0.2 nozzle melts little: Bambu's Generic presets for it hold PLA to 1.6 mm^3/s and PETG to 1 */
+    if (nz === '0.2' && P.flow02) {
+      var cap = P.flow02[cfgRaw(config, 'filament_type')] || 1, had = numOf(cfgRaw(config, 'filament_max_volumetric_speed'), cap);
+      if (had > cap) out.filament_max_volumetric_speed = String(cap);
+    }
+    return out;
+  }
+  /** The template as the nozzle and quality make it - what the card's rows start at. */
+  function presetConfig(config, nozzle, quality) { var o = qualityOverlay(config, nozzle, quality); return Object.keys(o).length ? withOverlay(config, o) : config; }
+
   /** The settings, each clamped to what its row takes. */
   function cleanSettings(s) {
     s = s || {};
@@ -418,6 +457,7 @@
     var D = SETTINGS_DEFAULT, r2 = function (v) { return Math.round(v * 100) / 100; };
     return Object.assign({
       nozzle: n(s.nozzle, D.nozzle, 0.1, 2),
+      quality: typeof s.quality === 'string' && s.quality ? s.quality : null,   /* Bambu's quality preset by name; null: the nozzle's standard */
       layer: Math.round(n(s.layer, D.layer, 0.05, 0.3) * 1000) / 1000,
       walls: Math.round(n(s.walls, D.walls, 0, 10)),   /* 0: no walls, the infill to the outline (Studio's wall_loops = 0) */
       density: Math.round(n(s.density, D.density, 0, 100)),
@@ -478,11 +518,13 @@
     /* A PROJECT'S CHANGES FIRST: every key it changed, as it has it - the rows then start at the project's values, and a row moved off
        one writes its own over it */
     var s = cleanSettings(settings), proj = s.project ? s.project.keys : null, out = {};
+    /* THE NOZZLE AND THE QUALITY FIRST (qualityOverlay): Bambu's printer preset for the nozzle and its quality preset over the template - none
+       when they are the template's own (an untouched card writes nothing) */
+    var nz = nozzleName(s.nozzle), tplNz = nozzleName(cfgRaw(config, 'nozzle_diameter') || '0.4');
+    if (nozzlesOf(config).indexOf(nz) < 0) throw new Error('This printer has no ' + nz + ' mm nozzle profile (' + nozzlesOf(config).join(' / ') + ' mm).');
+    if (nz !== tplNz || (s.quality && s.quality !== cfgRaw(config, 'print_settings_id'))) Object.assign(out, qualityOverlay(config, nz, s.quality));
     if (proj) Object.keys(proj).forEach(function (k) { if (cfgRaw(config, k) !== proj[k].trim()) out[k] = proj[k]; });
-    var base = settingsFromConfig(proj && Object.keys(out).length ? withOverlay(config, out) : config);
-    if (Math.abs(s.nozzle - base.nozzle) > 1e-6) {
-      throw new Error('This printer profile is for a ' + base.nozzle + ' mm nozzle; a ' + s.nozzle + ' mm nozzle needs its own profile.');
-    }
+    var base = settingsFromConfig(Object.keys(out).length ? withOverlay(config, out) : config);
     if (Math.abs(s.layer - base.layer) > 1e-6) out.layer_height = String(s.layer);
     if (s.walls !== base.walls) out.wall_loops = String(s.walls);
     if (s.density !== base.density) out.sparse_infill_density = s.density + '%';
@@ -1028,6 +1070,7 @@
     fileName: fileName, gcodeName: gcodeName, build: build, withProjectFilaments: withProjectFilaments, layerSlots: layerSlots, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
     SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
     configOverlay: configOverlay, withOverlay: withOverlay, plateProject: plateProject,
+    qualityOverlay: qualityOverlay, qualitiesOf: qualitiesOf, nozzlesOf: nozzlesOf, presetConfig: presetConfig,
     FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf, hangSpeedOf: hangSpeedOf
   };
 
@@ -1078,7 +1121,7 @@
 
   // ---- the card's Slice settings -----------------------------------------------
 
-  var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern'].concat(EXTRA_ROWS.map(function (R) { return R.id; })).concat([
+  var SET_IDS = ['slice-set-nozzle', 'slice-set-quality', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern'].concat(EXTRA_ROWS.map(function (R) { return R.id; })).concat([
                  'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface-angle', 'slice-set-iface',
                  'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow',
                  'slice-set-temp-step', 'slice-set-temp-band',
@@ -1130,10 +1173,48 @@
     el.hidden = !text;
   }
 
-  /** The plate's printer's template settings, once the card has fetched them (else null). */
+  /** The plate's printer's template settings as the card's Nozzle and Quality make them, once the card has fetched them (else null). */
   function knownConfig() {
+    var t = templateConfig();
+    if (!t) return null;
+    var nz = $('slice-set-nozzle'), q = $('slice-set-quality');
+    return presetConfig(t, nz ? nz.value : null, q ? q.value : null);
+  }
+  /** The plate's printer's template settings, as the template has them. */
+  function templateConfig() {
     var p = profileFor(plateId()), a = p && S.assets[p.id];
     return a ? a.config : null;
+  }
+
+  /* NOZZLE AND QUALITY (docs/PRINT-CARD.md "Nozzle and quality"): the two pickers' choices for the plate's printer, the quality's labelled
+     as Studio's without its printer ("0.28 mm Extra Draft") */
+  function qualityLabel(name) { var m = /^([\d.]+)mm (.*?) @BBL/.exec(name || ''); return m ? (+m[1]).toFixed(2) + ' mm ' + m[2] : name; }
+  function fillNozzleRows(nozzle, quality) {
+    var t = templateConfig(), nzEl = $('slice-set-nozzle'), qEl = $('slice-set-quality');
+    if (!nzEl || !qEl || !t) return;
+    var nz = nozzleName(nozzle != null ? nozzle : nzEl.value), list = nozzlesOf(t);
+    if (list.indexOf(nz) < 0) nz = nozzleName(cfgRaw(t, 'nozzle_diameter') || '0.4');
+    nzEl.innerHTML = list.map(function (n) { return '<option value="' + n + '">' + n + ' mm</option>'; }).join('');
+    nzEl.value = nz;
+    var qs = qualitiesOf(t, nz);
+    if (!qs.length) { qEl.innerHTML = '<option value="">' + (cfgRaw(t, 'print_settings_id') || 'the profile\'s') + '</option>'; qEl.disabled = true; return; }
+    qEl.disabled = false;
+    qEl.innerHTML = qs.map(function (q) { return '<option value="' + q.name + '">' + qualityLabel(q.name) + (q.standard ? ' (default)' : '') + '</option>'; }).join('');
+    var want = qs.some(function (q) { return q.name === quality; }) ? quality : (qs.filter(function (q) { return q.standard; })[0] || qs[0]).name;
+    qEl.value = want;
+  }
+  /** A nozzle or quality just picked: the rows start again at it - the filament and its rows, and the project, stay. */
+  function reseedQuality(nozzleChanged) {
+    var t = templateConfig();
+    if (!t) return;
+    var st = readSettings();
+    if (nozzleChanged) fillNozzleRows(st.nozzle, null);
+    var nz = $('slice-set-nozzle').value, q = $('slice-set-quality').value;
+    var fresh = settingsFromConfig(presetConfig(t, nz, q));
+    fresh.nozzle = +nz; fresh.quality = q; fresh.filament = st.filament; fresh.project = st.project;
+    S.seedForce = true;
+    try { showSettings(fresh); } finally { S.seedForce = false; }
+    showFilamentRows();
   }
 
   /** The four filament rows at the picked filament's own values (a filament just picked, or the template just fetched). */
@@ -1175,7 +1256,7 @@
     var sup = {}; SUP_ROWS.concat(WALL_ROWS).forEach(function (r) { sup[r[1]] = v(r[0]); });
     EXTRA_ROWS.forEach(function (R) { if ($(R.id)) sup[R.key] = v(R.id); });
     return cleanSettings(Object.assign(sup, {
-      nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
+      nozzle: v('slice-set-nozzle'), quality: v('slice-set-quality') || null, layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
       pattern: v('slice-set-pattern'), angle: $('slice-set-angle') ? v('slice-set-angle') : v('sup-angle'), brim: v('slice-set-brim'),   /* ONE angle: with no row of its own, the Print card's */
       raft: v('slice-set-raft'), raftGap: v('slice-set-raft-gap'), ifaceAngle: v('slice-set-iface-angle'),
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
@@ -1193,7 +1274,8 @@
     var full = cleanSettings(st); SUP_ROWS.concat(WALL_ROWS).forEach(function (r) { set(r[0], full[r[1]]); });
     EXTRA_ROWS.forEach(function (R) { set(R.id, full[R.key]); });
     wallRows();
-    set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
+    fillNozzleRows(st.nozzle, st.quality);
+    set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
     set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-angle', st.angle);
     /* ONE angle: the Print card's Angle starts at the profile's support threshold too (the card reads its areas again at it). The rows are
        seeded more than once - when the page opens, and again when the printer's template has been fetched - so an angle changed since the
@@ -1535,7 +1617,7 @@
     S.shownPlate = plateId();
     var line = $('slice-profile');
     if (line) {
-      line.textContent = p ? p.label : 'No printer profile for the ' + ((typeof PLATES !== 'undefined' && PLATES[plateId()]) ? PLATES[plateId()].name : 'selected') +
+      line.textContent = p ? p.label.replace(/[\d.]+ nozzle$/, (($('slice-set-nozzle') || {}).value || '0.4') + ' nozzle') + ((($('slice-set-quality') || {}).value) ? ', ' + qualityLabel($('slice-set-quality').value) : '') : 'No printer profile for the ' + ((typeof PLATES !== 'undefined' && PLATES[plateId()]) ? PLATES[plateId()].name : 'selected') +
         ' plate yet. Slice works on the A1 mini and the P1S plates.';
       line.classList.toggle('is-bad', !p);
     }
@@ -1866,6 +1948,7 @@
         if (id !== 'slice-set-iface') S.touched = true;           // the interface is a preference, not a profile value
         if (id === 'slice-set-iface' && typeof root.nsoSetSupportInterfaceRule === 'function') root.nsoSetSupportInterfaceRule(el.value);
         if (id === 'slice-set-filament') showFilamentRows();      // another filament: its own temperatures, max flow, flow ratio and retraction in its rows
+        if (id === 'slice-set-nozzle' || id === 'slice-set-quality') reseedQuality(id === 'slice-set-nozzle');   // Bambu's preset: the rows start at it
         if (id === 'slice-set-wall-gen') wallRows();              // Arachne: its levers; Classic: none
         filamentNote(); bridgeNote();
         refresh();
