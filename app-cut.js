@@ -4164,12 +4164,43 @@ async function cutDiceAt(m, info) {
       say('Cut not made: that strand is joined round the other way, so nothing would come off - Dice cuts no slot. Notch takes a slot out of it; Chop cuts the whole piece. The piece is unchanged.', true);
       return { ok: false, reason: 'joined round' };
     }
-    // Two halves: the tip's group, and everything else (the rest of the piece, and any body the plane never met).
+    /* Two halves: the tip's group, and everything else (the rest of the piece, and any body the plane never met).
+       Glued EXACTLY, not by a union: both sides of a split share their rim points to the last bit (one split made
+       them), so dropping the cap faces on every strand but the clicked one leaves the two sides' rims meeting point
+       for point - one closed surface. (A union of the touching parts welds them too, but where a cap's edge lies
+       along a flat face of the strand it leaves that edge shared by four faces: a pinch an STL carries.) */
     const tipRoot = find(tipIdx), tip = [], rest = [];
     parts.forEach(function (p, i) { (find(i) === tipRoot ? tip : rest).push(p); });
-    const glue = function (list) { return list.length === 1 ? list[0] : keep(wasm.Manifold.union(list)); };
-    const left = cutDisplayGeometry(NSO_CSG.manifoldToSoup(glue(rest)));
-    const right = cutDisplayGeometry(NSO_CSG.manifoldToSoup(glue(tip)));
+    const Finv = F.clone().invert(), d0 = nrm.dot(at), cv = new THREE.Vector3();
+    function soupKeepingCut(list) {
+      const out = [];
+      list.forEach(function (part) {
+        const mesh = part.getMesh(), vp = mesh.vertProperties, tv = mesh.triVerts, np = mesh.numProp || 3;
+        for (let t = 0; t < tv.length; t += 3) {
+          const a = tv[t] * np, b = tv[t + 1] * np, c = tv[t + 2] * np;
+          const onPlane = [a, b, c].every(function (o) { return Math.abs(nrm.x * vp[o] + nrm.y * vp[o + 1] + nrm.z * vp[o + 2] - d0) < 1e-5; });
+          if (onPlane) {
+            // a cap face: kept only on the strand that is cut
+            cv.set((vp[a] + vp[b] + vp[c]) / 3, (vp[a + 1] + vp[b + 1] + vp[c + 1]) / 3, (vp[a + 2] + vp[b + 2] + vp[c + 2]) / 3).applyMatrix4(Finv);
+            const near = NSO_Notch.nearestCluster(clusters, cv.toArray());
+            if (!near || near.index !== S) continue;
+          }
+          out.push(vp[a], vp[a + 1], vp[a + 2], vp[b], vp[b + 1], vp[b + 2], vp[c], vp[c + 1], vp[c + 2]);
+        }
+      });
+      return new Float32Array(out);
+    }
+    const restSoup = soupKeepingCut(rest), tipSoup = soupKeepingCut(tip);
+    // each half must come out one closed solid: checked in the kernel before anything is committed
+    for (const half of [restSoup, tipSoup]) {
+      const chk = keep(NSO_CSG.soupToManifold(wasm, half)), f = cutEdgeFaults(half);
+      if (chk.status() !== 'NoError' || f.total) {
+        say('Cut not made: the strand would not part cleanly here (' + (f.total ? f.total + ' bad edges' : chk.status()) + ') - nudge the blade and try again. The piece is unchanged.', true);
+        return { ok: false, reason: 'not clean' };
+      }
+    }
+    const left = cutDisplayGeometry(restSoup);
+    const right = cutDisplayGeometry(tipSoup);
     const others = clusters.length - 1;
     const status = 'Dice cut - through the strand' + (others ? ' (one of ' + clusters.length + ' in the plane; the other ' + (others === 1 ? 'one is' : others + ' are') + ' left whole)' : '') + ', no kerf';
     cutActiveModel({ pair: { left: left, right: right, engine: 'display' }, dice: true });

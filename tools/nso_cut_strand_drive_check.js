@@ -1,5 +1,5 @@
-/* nso_cut_strand_drive_check.js - the Cut card on a SPIRAL OF CORD: the sized
-   blade taking one strand and not the whole spiral, Notch mode, and the two
+/* nso_cut_strand_drive_check.js - the Cut card on a SPIRAL OF CORD: Dice
+   cutting one strand and not the whole spiral, Notch mode, and the two
    Rotate piece switch. Real app, real Chromium, real
    manifold kernel, real mouse.
      node tools/nso_cut_strand_drive_check.js        exit 0 = every gate held
@@ -9,16 +9,14 @@
    crosses six strands.
 
    WHAT IS PINNED
-   - Single strand: a sized blade over several turns takes ONE. Checked against
-     an independent derivation, not against itself: the same blade, strand
-     detection off, made just wide enough for that strand alone, must take the
-     same volume.
-   - The cut is clean: 0 open, 0 non-manifold edges. (A cut that subtracts the
-     strand's own piece leaves a pinched edge; one that subtracts a blade does not.)
+   - Dice, the knife: on a plane that crosses six turns it cuts the ONE clicked,
+     through, with no kerf - two pieces that add back to the spiral; one Undo
+     puts it back. (Chop at the same plane cuts every turn.)
+   - The cut is clean: 0 open, 0 non-manifold edges.
    - Notch: fitted to the strand, from its edge; its volume grows in step with
      the notch width and depth, and the strand is not severed.
-   - Sliders: width, depth and kerf for the Sized blade, width and depth for Notch -
-     each a slider beside its number box, ranged to the piece, and the same number.
+   - Sliders: width and depth for Notch, each a slider beside its number box,
+     ranged to the piece, and the same number. Dice has none.
    - Rotate piece: the rings appear and a real drag on one turns the piece, the
      blade follows, and a cut still works afterwards. Arrow keys are not
      answered twice.                                                          */
@@ -82,7 +80,8 @@ const PROBE = `window.__probe = function (id) {
   for (let t = 0; t < n; t++) { const a = P(t * 3), b = P(t * 3 + 1), c = P(t * 3 + 2);
     vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6; }
   const adj = m.rawTris ? NSO_buildAdjacency(m.rawTris, { tol: 1e-4, rawTol: true }) : null;
-  return { vol: vol, tris: n, open: adj ? adj.openEdges : null, nm: adj ? adj.nmEdges : null };
+  const ef = adj ? null : cutEdgeFaults(displaySoupOf(g));         // a piece Chop's commit made has no raw soup
+  return { vol: vol, tris: n, open: adj ? adj.openEdges : ef.open, nm: adj ? adj.nmEdges : ef.nm };
 };
 window.__probeAll = function () {
   // everything on the plate: a cut that goes right through separates the piece, so the original id is gone
@@ -124,13 +123,6 @@ withApp(async (page, logs) => {
     }
     return hits.length ? hits[Math.min(hits.length - 1, Math.max(0, Math.floor(hits.length / 2) + dz))] : null;
   }, [id, dz]);
-  const setSized = (w, d, k, strand) => page.evaluate(([w, d, k, strand]) => {
-    document.getElementById('btn-cut-blade-sized').click();
-    cutBladeState().follow = false; cutBladeRefresh();      // Follow strand is on by default; these drive the plain sized blade
-    const set = (id, v) => { const e = document.getElementById(id); e.value = String(v); e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); };
-    set('cut-blade-width', w); set('cut-blade-depth', d); set('cut-blade-kerf', k);
-    cutBladeState().strand = !!strand; cutBladeRefresh();      // the card's one box is Follow strand now; the isolation alone is driven here
-  }, [w, d, k, strand]);
   const setNotch = (w, d) => page.evaluate(([w, d]) => {
     document.getElementById('btn-cut-blade-notch').click();
     const set = (id, v) => { const e = document.getElementById(id); e.value = String(v); e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); };
@@ -152,43 +144,37 @@ withApp(async (page, logs) => {
   check('a closed solid of about the cord\'s volume', v0.open === 0 && v0.nm === 0 && Math.abs(v0.vol / (Math.PI * 1.8 * 1.8 * Lcord) - 1) < 0.05,
     'vol ' + v0.vol.toFixed(1) + ', open ' + v0.open + ', nm ' + v0.nm);
 
-  console.log('sized blade: one strand, not the spiral');
-  await setSized(60, 8, 1, true);
+  console.log('Dice: one strand, not the spiral');
+  // Dice is a knife: nothing to set; it fits the strand clicked and cuts it through, no kerf
+  const setDice = () => page.evaluate(() => { document.getElementById('btn-cut-blade-sized').click(); cutBladeState().follow = false; cutBladeRefresh(); });
+  await setDice();
   const crown = await crownNear(id, 0);
   check('found a strand to click', !!crown, JSON.stringify(crown));
   await clickAt(crown);
   const sp = await spec();
   check('the plane crosses several strands and one is picked', sp && sp.isolate && sp.strands >= 5, JSON.stringify({ isolate: sp && sp.isolate, strands: sp && sp.strands }));
-  check('the readout says single strand', /single strand \(1 of \d+\)/.test(sp.ro), sp.ro);
+  check('the readout says Dice, through the strand clicked, 1 of several', /DICE .*through the strand you clicked \(1 of \d+ in the plane/.test(sp.ro), sp.ro);
   check('the strand is outlined in the helper', await page.evaluate(() => !!state.cutHelper.children.find(c => c.userData.cutStrand)));
-
-  await setSized(60, 8, 1, false);
-  let r = await cutOnce(); let vOff = await probeAll();
-  const removedAll = v0.vol - vOff.vol, bodiesAll = /(?:separated into|severs the piece into) (\d+) (?:pieces|bodies)/.exec(r.st);
-  check('with Single strand off the blade takes every turn it holds', removedAll > 40 && bodiesAll && Number(bodiesAll[1]) >= 4, removedAll.toFixed(2) + ' mm3; ' + r.st);
-  await undo();
-
-  await setSized(60, 8, 1, true);
-  await clickAt(crown);
-  r = await cutOnce(); const vOn = await probeAll();
-  const removedOne = v0.vol - vOn.vol;
-  check('with it on, the same blade takes less than half of that', removedOne > 0 && removedOne < 0.5 * removedAll, removedOne.toFixed(3) + ' vs ' + removedAll.toFixed(3));
-  check('and says it took one strand of several', /one strand of \d+ in the blade/.test(r.st), r.st);
-  check('the cut is clean: 0 open, 0 non-manifold edges', vOn.open === 0 && vOn.nm === 0, 'open ' + vOn.open + ', nm ' + vOn.nm);
+  let r = await cutOnce();
+  const after = await probeAll();
+  check('it cuts that one turn: two pieces, not one per turn the plane crosses', after.n === 2, after.n + ' pieces; ' + r.st);
+  check('no kerf: the pieces add up to the spiral exactly', near(after.vol, v0.vol, 1e-3), after.vol.toFixed(4) + ' vs ' + v0.vol.toFixed(4));
+  check('the status says Dice, one of several, the others left whole', /^Dice cut - through the strand \(one of \d+ in the plane; the other \d+ are left whole\), no kerf/.test(r.st), r.st);
+  check('the cut is clean: 0 open, 0 non-manifold edges', after.open === 0 && after.nm === 0, 'open ' + after.open + ', nm ' + after.nm);
   check('no warning on the status line', !/WARNING/.test(r.st), r.st);
-  await undo();
-
-  // Independent derivation: the same blade, detection OFF, narrowed to just that strand's own width.
-  await setSized(60, 8, 1, true);
+  await page.click('#btn-undo');
+  const back = await probeAll();
+  check('one Undo puts the spiral back whole', back.n === 1 && near(back.vol, v0.vol, 1e-3), back.n + ' pieces, ' + back.vol.toFixed(3));
+  // Chop at the same plane, for contrast: every turn it crosses
+  await page.evaluate(() => { document.getElementById('btn-cut-blade-full').click(); });
   await clickAt(crown);
-  const s2 = await spec();
-  const half = Math.max(s2.strand.hi[s2.wAxis] - s2.wCentre, s2.wCentre - s2.strand.lo[s2.wAxis]) + 0.3;
-  await setSized(2 * half, 8, 1, false);
-  r = await cutOnce(); const vNarrow = await probeAll();
-  const removedNarrow = v0.vol - vNarrow.vol;
-  check('same volume as a plain blade made just wide enough for that strand (independent of the detection)',
-    Math.abs(removedNarrow - removedOne) <= 0.01 * removedOne + 0.01, removedNarrow.toFixed(4) + ' vs ' + removedOne.toFixed(4) + ' (half-width ' + half.toFixed(2) + ')');
-  await undo();
+  await page.click('#btn-cut');
+  await page.waitForFunction(() => /Cut @|Cut not made|Split failed/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+  const chop = await page.evaluate(() => { let bodies = 0; state.models.forEach(m => { bodies += 1; }); return bodies; });
+  const chopVol = await probeAll();
+  check('(Chop at the same plane cuts the whole spiral: more pieces\' worth of turns, all of it)', chopVol.n === 2 && near(chopVol.vol, v0.vol, 1e-2), chop + ' pieces (each half holds the several cut turns)');
+  await page.click('#btn-undo');
+  // a cut that severs is two Undo steps for the box cuts (the separation, then the cut); Notch never severs
 
   console.log('notch mode');
   await setNotch(1, 1);
@@ -199,7 +185,6 @@ withApp(async (page, logs) => {
   check('the readout says nick, depth and which strand', /NOTCH .* 1 wide x 1 deep into the strand's edge, down from the top \(1 of \d+ strands\)/.test(sn.ro), sn.ro);
   r = await cutOnce(); const n1 = await probe(id); const V11 = v0.vol - n1.vol;
   check('a 1 x 1 nick comes out', /^Notch cut - 1 mm wide x 1 mm deep nick/.test(r.st) && V11 > 0.5 && V11 < 12, V11.toFixed(3) + ' mm3; ' + r.st);
-  check('it takes far less than the strand-through cut', V11 < 0.4 * removedOne, V11.toFixed(3) + ' vs ' + removedOne.toFixed(3));
   check('clean: 0 open, 0 non-manifold edges', n1.open === 0 && n1.nm === 0, 'open ' + n1.open + ', nm ' + n1.nm);
   check('still one body: a nick does not sever the cord', !/severs/.test(r.st), r.st);
   await undo();
@@ -212,40 +197,13 @@ withApp(async (page, logs) => {
   check('Undo said what it undid', /Notch reverted/.test(await status()), await status());
   check('and the piece is back', near((await probe(id)).vol, v0.vol, 1e-3));
 
-  console.log('sliders: width, depth, kerf; notch width and depth');
-  await setSized(60, 8, 1, true);
-  await clickAt(crown);
+  console.log('sliders: notch width and depth; Dice has none');
   const rng = id => page.evaluate(id => { const e = document.getElementById(id); return e ? { v: Number(e.value), min: Number(e.min), max: Number(e.max), shown: !!e.offsetParent } : null; }, id);
-  const ext = await page.evaluate(() => { const i = getCutPlaneLocal(getActiveModel()), k = ['x', 'y', 'z'].indexOf(i.axis), z = i.bbox.getSize(new THREE.Vector3()); return Math.max(...[0, 1, 2].filter(q => q !== k).map(q => z.getComponent(q))); });
-  const wS = await rng('cut-blade-width-s'), dS = await rng('cut-blade-depth-s'), kS = await rng('cut-blade-kerf-s');
-  check('Sized shows a slider for each of width, depth and kerf', wS.shown && dS.shown && kS.shown, JSON.stringify({ wS, dS, kS }));
-  check('the sliders sit at the numbers in the boxes (60, 8, 1), never pegged short of them', wS.v === 60 && dS.v === 8 && kS.v === 1 && wS.max >= 60, JSON.stringify({ w: wS, d: dS, k: kS }));
-  check('their ranges have room to breathe: width to twice the piece\'s biggest section, depth to 1.5x, kerf to 3/4 of its length (or the number given)',
-    wS.max >= Math.max(60, Math.ceil(2 * ext)) && dS.max >= Math.ceil(1.5 * ext) && kS.max >= Math.ceil(0.75 * 40), JSON.stringify({ ext: +ext.toFixed(2), wMax: wS.max, dMax: dS.max, kMax: kS.max }));
-  // The box's own three sizes (the cut frame can be turned, so its world-axis extent is not its size).
-  const bladeBox = () => page.evaluate(() => { const p = state.cutHelper.children.find(c => c.userData.cutBlade).geometry.parameters;
-    return [p.width, p.height, p.depth].map(v => +v.toFixed(3)).sort((a, b) => a - b); });
-  // a real mouse press on the width slider, a third of the way along its track
-  const wRect = await page.evaluate(() => { const r = document.getElementById('cut-blade-width-s').getBoundingClientRect(); return { x: r.left, y: r.top + r.height / 2, w: r.width }; });
-  await page.mouse.click(wRect.x + wRect.w * 0.3, wRect.y);
-  const wAfter = await page.evaluate(() => ({ s: Number(document.getElementById('cut-blade-width-s').value), n: Number(document.getElementById('cut-blade-width').value), st: state.cutBlade.width }));
-  check('a real click on the width slider sets the width, the box beside it and the blade setting together', wAfter.s === wAfter.n && wAfter.n === wAfter.st && wAfter.st > wS.min + 3 && wAfter.st < wS.max, JSON.stringify(wAfter));
-  const drawn = await bladeBox();
-  check('and the blade drawn in the viewport is that wide: kerf x (depth + 1 clear) x width', near(drawn[0], 1, 0.01) && near(drawn[1], 9, 0.01) && near(drawn[2], wAfter.st, 0.01), JSON.stringify({ drawn, width: wAfter.st }));
-  await page.evaluate(() => { const e = document.getElementById('cut-blade-depth-s'); e.value = '5.5'; e.dispatchEvent(new Event('input')); });
-  const dAfter = await page.evaluate(() => ({ n: Number(document.getElementById('cut-blade-depth').value), st: state.cutBlade.depth, ro: document.getElementById('cut-readout').textContent }));
-  check('the depth slider moves the depth, its box and the readout', dAfter.n === 5.5 && dAfter.st === 5.5 && /5\.5 deep/.test(dAfter.ro), JSON.stringify(dAfter));
-  await page.evaluate(() => { const e = document.getElementById('cut-blade-kerf-s'); e.value = '2.5'; e.dispatchEvent(new Event('input')); });
-  check('the kerf slider moves the kerf', await page.evaluate(() => state.cutBlade.kerf === 2.5 && Number(document.getElementById('cut-blade-kerf').value) === 2.5 && /kerf 2\.5/.test(document.getElementById('cut-readout').textContent)));
-  await page.focus('#cut-blade-width');          // typing into the box, as a user does (the slider the mouse used loses focus)
-  await page.evaluate(() => { const e = document.getElementById('cut-blade-width'); e.value = '500'; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); });
-  check('typing past the slider\'s end still works: the box takes 500, and the slider\'s range grows to hold it', await page.evaluate(() => state.cutBlade.width === 500 && Number(document.getElementById('cut-blade-width-s').max) >= 500 && Number(document.getElementById('cut-blade-width-s').value) === 500));
-  // Reported: a 15 mm notch could not be dialled in - the notch width and kerf sliders stopped at 10.
-  await page.evaluate(() => { const e = document.getElementById('cut-blade-kerf-s'); e.value = '15'; e.dispatchEvent(new Event('input')); });
-  check('the kerf slider can be set to 15 mm', await page.evaluate(() => state.cutBlade.kerf === 15 && Number(document.getElementById('cut-blade-kerf').value) === 15 && Number(document.getElementById('cut-blade-kerf-s').max) >= 20));
+  await setDice(); await clickAt(crown);
+  check('Dice shows no sizes: Width, Depth and Kerf are gone', await page.evaluate(() => !document.getElementById('cut-blade-width') && !document.getElementById('cut-blade-depth') && !document.getElementById('cut-blade-kerf')));
   await setNotch(1, 1); await clickAt(crown);
   const nW = await rng('cut-notch-width-s'), nD = await rng('cut-notch-depth-s');
-  check('Notch shows a slider for its width and its depth, and not the sized ones', nW.shown && nD.shown && !(await rng('cut-blade-width-s')).shown, JSON.stringify({ nW, nD }));
+  check('Notch shows a slider for its width and its depth', nW.shown && nD.shown, JSON.stringify({ nW, nD }));
   await page.evaluate(() => { const e = document.getElementById('cut-notch-width-s'); e.value = '15'; e.dispatchEvent(new Event('input')); });
   check('the notch width slider can be set to 15 mm, and the readout says so', await page.evaluate(() => state.cutBlade.nwidth === 15 && Number(document.getElementById('cut-notch-width').value) === 15 && Number(document.getElementById('cut-notch-width-s').max) >= 20 && /15 wide/.test(document.getElementById('cut-readout').textContent)), await page.evaluate(() => document.getElementById('cut-readout').textContent));
   await page.evaluate(() => { const e = document.getElementById('cut-notch-width-s'); e.value = '2'; e.dispatchEvent(new Event('input')); });
@@ -258,7 +216,7 @@ withApp(async (page, logs) => {
 
   console.log('Rotate piece');
   id = await fresh();
-  await setSized(60, 8, 1, true);
+  await setDice();
   await clickAt(await crownNear(id, 0));
   check('the rotate rings are not an option on the card any more', await page.evaluate(() => !document.getElementById('chk-cut-rotate') && !document.getElementById('cut-rotate-rings') && !document.getElementById('chk-cut-ring-fb') && !/Rotate rings/.test(document.getElementById('edit-card').textContent)));
   check('and none are drawn while Cut is open', await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return !g || !g.visible || !g.children.length; }));
@@ -285,7 +243,7 @@ withApp(async (page, logs) => {
   await clickAt(await crownNear(id, 0));
   const vr0 = await probe(id);
   const rc = await cutOnce(); const vr1 = await probeAll();
-  check('and a cut after turning it works', /^Sized cut/.test(rc.st) && vr1.vol < vr0.vol && vr1.open === 0 && vr1.nm === 0, rc.st);
+  check('and a cut after turning it works: Dice through the strand, two pieces, nothing lost, clean', /^Dice cut/.test(rc.st) && vr1.n === 2 && near(vr1.vol, vr0.vol, 1e-2) && vr1.open === 0 && vr1.nm === 0, rc.st + ' | ' + JSON.stringify(vr1));
   await page.evaluate(() => closeCutter(true));
   await page.waitForTimeout(150);
   check('closing Cut leaves no ring group behind', await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return !g || !g.visible || !g.children.length; }));

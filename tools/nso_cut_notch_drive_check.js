@@ -1,21 +1,18 @@
-/* nso_cut_notch_drive_check.js - the Cut card's SIZED blade, driven through the
-   real app (index.html + every app-*.js) in real Chromium, against the real
-   manifold kernel.
+/* nso_cut_notch_drive_check.js - the Cut card's DICE (the knife) and NOTCH on a
+   bar, driven through the real app (index.html + every app-*.js) in real
+   Chromium, against the real manifold kernel.
      node tools/nso_cut_notch_drive_check.js        exit 0 = every gate held
 
    What is pinned
-   - A real mouse click on a piece's top face anchors the blade there and it
-     goes in DOWN against that face.
-   - The Cut button takes out exactly kerf x width x depth - read off the
-     piece's own volume before and after, not off the status line - and leaves
-     the piece one closed solid (0 open, 0 non-manifold edges).
-   - It is one Undo step, and Undo gives the piece back vertex for vertex.
-   - A blade that covers the section severs it, and says so; the kerf is what is lost.
-   - A MITRED sized blade (the cut plane turned) removes the same volume: the
-     blade rides the same cut frame the full blade does.
+   - The card: Chop is the default; Dice shows nothing to set; Notch shows its own.
+   - Dice, clicked on the bar's top: it goes clean through - two pieces that add
+     back to the bar exactly (no kerf), both closed - in ONE Undo, which gives the
+     bar back vertex for vertex. Mitred, bevelled and on a turned piece the same.
+   - Notch clicked on a side face goes in from the side, takes exactly
+     nwidth x ndepth x the face's height, and the bar stays one piece.
+   - A notch width under the floor is refused and the piece is left alone.
    - The FULL blade is untouched: it still splits one piece into two that add
      back to the original.
-   - A kerf under the floor is refused and the piece is left alone.
 
    The bar is 60 (x) x 20 x 20, 24000 mm^3, lying on the plate.            */
 
@@ -62,8 +59,8 @@ const PROBE = `window.__probe = function (id) {
     vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
   }
   const adj = m.rawTris ? NSO_buildAdjacency(m.rawTris, { tol: 1e-4, rawTol: true }) : null;
-  const sorted = g.index ? null : Float32Array.from({ length: pos.count * 3 }, (_, i) => pos.array[i]);
-  return { vol: vol, tris: n, open: adj ? adj.openEdges : null, nm: adj ? adj.nmEdges : null,
+  const ef = adj ? null : cutEdgeFaults(displaySoupOf(g));        // a piece Chop's commit made has no raw soup
+  return { vol: vol, tris: n, open: adj ? adj.openEdges : ef.open, nm: adj ? adj.nmEdges : ef.nm,
            size: [m.size.x, m.size.y, m.size.z], posHash: Array.from(pos.array.slice(0, 600)).map(v => Math.round(v * 1e4)).join(',') };
 };
 window.__probeAll = function () {
@@ -107,132 +104,69 @@ withApp(async (page, logs) => {
     const b = new THREE.Box3().setFromObject(p.mesh);
     return [b.min.x + (b.max.x - b.min.x) * frac, b.max.y, (b.min.z + b.max.z) / 2];
   }, [id, frac]);
-  const setBlade = (w, d, k) => page.evaluate(([w, d, k]) => {
+  const setDice = () => page.evaluate(() => {
     document.getElementById('btn-cut-blade-sized').click();
-    cutBladeState().follow = false; cutBladeRefresh();      // Follow strand is on by default; these drive the plain sized blade
+    cutBladeState().follow = false; cutBladeRefresh();        // Follow strand is on by default; these drive the plain knife
+  });
+  const setNotch = (w, d) => page.evaluate(([w, d]) => {
+    document.getElementById('btn-cut-blade-notch').click();
+    const b = cutBladeState(); b.nfollow = false; b.nturn = false;
     const set = (id, v) => { const e = document.getElementById(id); e.value = String(v); e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); };
-    set('cut-blade-width', w); set('cut-blade-depth', d); set('cut-blade-kerf', k);
-  }, [w, d, k]);
-  const cutNow = async () => {
-    await page.evaluate(() => { window.__cutRes = null; });
-    await page.click('#btn-cut');
-  };
+    set('cut-notch-width', w); set('cut-notch-depth', d);
+  }, [w, d]);
+  const cutAndWait = async re => { await page.click('#btn-cut'); await waitStatus(re); await page.waitForTimeout(300); };
+  const DICE_DONE = /Dice cut|Cut not made/;
 
   console.log('card');
   let id = await fresh(bar(60, 20, 20), 'bar.stl');
   const v0 = await probe(id);
   check('the bar is 24000 mm^3, closed', near(v0.vol, 24000, 1) && v0.open === 0 && v0.nm === 0, JSON.stringify({ vol: v0.vol, open: v0.open, nm: v0.nm }));
-  check('Full blade is the default and the size fields are hidden',
+  check('Chop is the default and no blade fields show',
     await page.evaluate(() => document.getElementById('btn-cut-blade-full').getAttribute('aria-pressed') === 'true' &&
-      document.getElementById('cut-blade-fields').hidden === true));
-  await setBlade(10, 3, 1);
-  check('Sized blade shows its three fields', await page.evaluate(() => !document.getElementById('cut-blade-fields').hidden));
+      document.getElementById('cut-blade-fields').hidden === true && document.getElementById('cut-notch-fields').hidden === true));
+  await setDice();
+  check('Dice shows nothing to set (Width / Depth / Kerf are gone)', await page.evaluate(() =>
+    !document.getElementById('cut-blade-width') && !document.getElementById('cut-blade-depth') && !document.getElementById('cut-blade-kerf')));
 
-  console.log('notch from the top face (real click)');
-  const tp = await topPoint(id, 0.4);
-  await clickAt(tp);
-  const at = await page.evaluate(() => state.cutBladeAt ? { n: state.cutBladeAt.normal && state.cutBladeAt.normal.toArray(), l: state.cutBladeAt.local.toArray() } : null);
+  console.log('Dice through the bar (real click)');
+  await clickAt(await topPoint(id, 0.4));
+  const at = await page.evaluate(() => state.cutBladeAt ? { n: state.cutBladeAt.normal && state.cutBladeAt.normal.toArray() } : null);
   check('the click anchored the blade on the top face', !!at && !!at.n && at.n[1] > 0.99, JSON.stringify(at));
-  const sheet = await page.evaluate(() => {
-    const b = state.cutHelper && state.cutHelper.children.find(c => c.userData.cutBlade);
-    if (!b) return null;
-    const bb = new THREE.Box3().setFromObject(b), s = bb.getSize(new THREE.Vector3());
-    return s.toArray();
-  });
-  const dims = sheet && sheet.slice().sort((a, b) => a - b);
-  check('the blade drawn is the box, not the section: 1 x 4 x 10 (kerf, depth + 1 clear, width)',
-    !!dims && near(dims[0], 1, 0.05) && near(dims[1], 4, 0.05) && near(dims[2], 10, 0.05), JSON.stringify(dims));
-  check('the readout names it', /SIZED BLADE/.test(await page.evaluate(() => document.getElementById('cut-readout').textContent)),
-    await page.evaluate(() => document.getElementById('cut-readout').textContent));
-  await cutNow();
-  await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
-  const st1 = await status();
-  const v1 = await probe(id);
-  check('status reports a sized cut', /^Sized cut/.test(st1), st1);
-  check('exactly kerf x width x depth came out (read off the piece)', near(v0.vol - v1.vol, 30, 0.05), (v0.vol - v1.vol).toFixed(4) + ' of 30');
-  check('still one closed solid', v1.open === 0 && v1.nm === 0, 'open ' + v1.open + ', nm ' + v1.nm);
-  check('the outline is unchanged (a notch, not a trim)', v1.size.every((s, i) => near(s, v0.size[i], 0.01)), JSON.stringify(v1.size));
-  check('it is still one piece', await page.evaluate(() => state.models.length) === 1);
-  check('the cutter is still live on it, blade back at its default', await page.evaluate(() => !!state.cutHelper && state.cutterOpen));
+  const ro = await page.evaluate(() => document.getElementById('cut-readout').textContent);
+  check('the readout names it Dice, through the strand', /^DICE @ .* through the strand you clicked/.test(ro), ro);
+  await cutAndWait(DICE_DONE);
+  const st1 = await status(), d1 = await probeAll();
+  check('status: a Dice cut, no kerf', /^Dice cut - through the strand, no kerf/.test(st1), st1);
+  check('two pieces now', d1.n === 2, d1.n + ' pieces');
+  check('they add back to the bar exactly: no kerf', near(d1.vol, 24000, 0.01), d1.vol.toFixed(4));
+  check('both closed', d1.open === 0 && d1.nm === 0, 'open ' + d1.open + ', nm ' + d1.nm);
 
   console.log('Undo');
   await page.click('#btn-undo');
-  const v2 = await probe(id);
-  check('one Undo gives the piece back vertex for vertex', near(v2.vol, v0.vol, 1e-3) && v2.tris === v0.tris && v2.posHash === v0.posHash,
-    'vol ' + v2.vol + ', tris ' + v2.tris + ' vs ' + v0.tris);
-  check('Undo says what it undid', /Notch reverted/.test(await status()), await status());
+  const u1 = await probeAll();
+  const back = await page.evaluate(() => state.models.length === 1 ? __probe(state.models[0].id) : null);
+  check('one Undo gives the bar back, vertex for vertex', u1.n === 1 && back && near(back.vol, v0.vol, 1e-3) && back.tris === v0.tris && back.posHash === v0.posHash,
+    JSON.stringify({ n: u1.n, vol: back && back.vol, tris: back && back.tris, was: v0.tris }));
 
-  console.log('between things: a narrow blade leaves the rest of the path alone');
-  // On a plain bar: a narrow blade takes only its own volume; a blade as wide as the piece takes the whole width.
-  id = await fresh(bar(60, 20, 20), 'bar2.stl');
-  const w0 = await probe(id);
-  await setBlade(4, 2, 1);
-  await clickAt(await topPoint(id, 0.5));
-  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
-  const w1 = await probe(id);
-  check('a 4 wide blade takes 4 x 2 x 1 and nothing more', near(w0.vol - w1.vol, 8, 0.05), (w0.vol - w1.vol).toFixed(4) + ' of 8');
-  await page.click('#btn-undo');
-  await setBlade(20, 2, 1);
-  await clickAt(await topPoint(id, 0.5));
-  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
-  const w2 = await probe(id);
-  check('a blade as wide as the piece takes 20 x 2 x 1', near(w0.vol - w2.vol, 40, 0.05), (w0.vol - w2.vol).toFixed(4) + ' of 40');
+  console.log('mitred, bevelled, on a turned piece');
+  for (const [name, turn] of [['a mitre of 30', () => page.evaluate(() => setCutMiter(30))],
+                              ['a bevel of 20', () => page.evaluate(() => setCutBevel(20))],
+                              ['a piece turned on the plate', () => page.evaluate(() => { rotateSelected(1); const i = state.selectedIndex; if (i < 0) selectPlaced(state.placed.findIndex(p => p && p.sourceId === state.editId)); })]]) {
+    id = await fresh(bar(60, 20, 20), 'bar-' + name.replace(/\W+/g, '') + '.stl');
+    await setDice();
+    if (name === 'a piece turned on the plate') await turn();
+    await clickAt(await topPoint(id, 0.5));
+    if (name !== 'a piece turned on the plate') await turn();
+    await cutAndWait(DICE_DONE);
+    const r = await probeAll(), st = await status();
+    check('Dice with ' + name + ': two pieces, nothing lost, closed', /^Dice cut/.test(st) && r.n === 2 && near(r.vol, 24000, 0.05) && r.open === 0 && r.nm === 0,
+      JSON.stringify({ n: r.n, vol: r.vol, open: r.open, nm: r.nm }) + ' ' + st);
+  }
 
-  console.log('severing');
-  await page.click('#btn-undo');
-  await setBlade(30, 30, 2);
-  await clickAt(await topPoint(id, 0.5));
-  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
-  const sv = await probeAll();
-  const sst = await status();
-  check('a blade over the whole section takes kerf x 20 x 20', near(w0.vol - sv.vol, 800, 0.1), (w0.vol - sv.vol).toFixed(3) + ' of 800');
-  check('and, as the full blade does, separates it: two pieces', /separated into 2 pieces/.test(sst) && sv.n === 2, sst + ' (' + sv.n + ' pieces)');
-  check('both pieces are closed', sv.open === 0 && sv.nm === 0, 'open ' + sv.open + ', nm ' + sv.nm);
-
-  console.log('mitred sized blade');
-  id = await fresh(bar(60, 20, 20), 'bar3.stl');
-  const m0 = await probe(id);
-  await setBlade(6, 3, 1);
-  await clickAt(await topPoint(id, 0.5));
-  await page.evaluate(() => setCutMiter(30));
-  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
-  const m1 = await probe(id);
-  check('a blade at 30 degrees removes the same kerf x width x depth', near(m0.vol - m1.vol, 18, 0.1), (m0.vol - m1.vol).toFixed(4) + ' of 18; ' + await status());
-  check('and the result is closed', m1.open === 0 && m1.nm === 0);
-
-  console.log('bevelled sized blade');
-  id = await fresh(bar(60, 20, 20), 'bar3b.stl');
-  const b0 = await probe(id);
-  await setBlade(6, 3, 1);
-  await clickAt(await topPoint(id, 0.5));
-  await page.evaluate(() => setCutBevel(20));
-  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
-  const b1 = await probe(id), bst = await status();
-  // Leaned 20 degrees the blade meets the top face at a slant, but the slant averages out across the
-  // kerf: it still takes exactly kerf x width x depth = 18 mm^3, and it must open to the outside - a
-  // blade that ended up buried would take the whole 24 mm^3 box and leave a void ("2 bodies").
-  const took = b0.vol - b1.vol;
-  check('a blade leaned 20 degrees takes exactly 6 x 3 x 1', near(took, 18, 0.1), took.toFixed(3) + ' of 18; ' + bst);
-  check('it opens to the outside: no void, one body', !/bod(y|ies)/.test(bst) && b1.open === 0 && b1.nm === 0, bst);
-
-  console.log('a turned piece, and a click on its side');
-  id = await fresh(bar(60, 20, 20), 'bar6.stl');
-  const t0 = await probe(id);
-  await page.evaluate(() => rotateSelected(1));          // a quarter turn on the plate
-  await page.evaluate(() => { const i = state.selectedIndex; if (i < 0) selectPlaced(state.placed.findIndex(p => p && p.sourceId === state.editId)); });
-  await setBlade(6, 3, 1);
-  await clickAt(await topPoint(id, 0.5));
-  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
-  const t1 = await probe(id);
-  check('a piece turned on the plate takes the same 6 x 3 x 1', near(t0.vol - t1.vol, 18, 0.1), (t0.vol - t1.vol).toFixed(4) + ' of 18; ' + await status());
-  check('and stays closed', t1.open === 0 && t1.nm === 0);
-  await page.click('#btn-undo');
-  // The +z side face of an unturned bar, clear of the blade (which stands at mid-length): the blade
-  // must go in horizontally. Asserted on the captured face normal and the readout, not on volume
-  // alone - a 10 x 3 x 1 notch is 30 mm^3 from the top as well.
-  id = await fresh(bar(60, 20, 20), 'bar7.stl');
-  const s0 = await probe(id);
-  await setBlade(10, 3, 1);
+  console.log('Notch from the side');
+  id = await fresh(bar(60, 20, 20), 'bar-notch.stl');
+  const n0 = await probe(id);
+  await setNotch(1, 3);
   const side = await page.evaluate(id => {
     const p = state.placed.find(q => q && q.sourceId === id);
     p.mesh.updateMatrixWorld(true);
@@ -243,35 +177,33 @@ withApp(async (page, logs) => {
   const sat = await page.evaluate(() => state.cutBladeAt && state.cutBladeAt.normal ? state.cutBladeAt.normal.toArray() : null);
   check('the click on the side face captured that face\'s normal (+z)', !!sat && sat[2] > 0.99, JSON.stringify(sat));
   const sro = await page.evaluate(() => document.getElementById('cut-readout').textContent);
-  check('the readout says the blade comes in from the side', /in from the side/.test(sro), sro);
-  await cutNow(); await waitStatus(/(Sized|Notch|Dice) cut|Cut not made/);
-  const s1 = await probe(id);
-  check('and it takes 10 x 3 x 1', near(s0.vol - s1.vol, 30, 0.1), (s0.vol - s1.vol).toFixed(4) + ' of 30; ' + await status());
-  check('and stays closed', s1.open === 0 && s1.nm === 0);
+  check('the readout says the notch comes in from the side', /in from the side/.test(sro), sro);
+  await cutAndWait(/Notch cut|Cut not made/);
+  const n1 = await probe(id);
+  check('it takes 1 x 3 x 20 (the face\'s height) and the bar stays one piece', near(n0.vol - n1.vol, 60, 0.1) && await page.evaluate(() => state.models.length) === 1,
+    (n0.vol - n1.vol).toFixed(4) + ' of 60; ' + await status());
+  check('and stays closed', n1.open === 0 && n1.nm === 0);
+  await page.click('#btn-undo');
 
   console.log('refusals');
-  id = await fresh(bar(60, 20, 20), 'bar4.stl');
   const r0 = await probe(id);
-  await setBlade(6, 3, 1);
-  await clickAt(await topPoint(id, 0.5));
-  await page.evaluate(() => { state.cutBlade.kerf = 0.05; });
-  await cutNow();
+  await page.evaluate(() => { state.cutBlade.nwidth = 0.05; });
+  await page.click('#btn-cut');
   await page.waitForTimeout(400);
   const rs = await status();
-  check('a kerf under the floor is refused in words', /Cut not made: the kerf is under/.test(rs), rs);
+  check('a notch width under the floor is refused in words', /Cut not made: the notch width is under/.test(rs), rs);
   check('and the piece is untouched', near((await probe(id)).vol, r0.vol, 1e-6));
 
   console.log('the full blade is untouched');
   id = await fresh(bar(60, 20, 20), 'bar5.stl');
   await page.evaluate(() => document.getElementById('btn-cut-blade-full').click());
   await clickAt(await topPoint(id, 0.5));
-  await cutNow();
+  await page.click('#btn-cut');
   // The plate still holds the earlier bars: follow THIS piece - gone, replaced by its two halves.
   await page.waitForFunction(id => !state.models.some(m => m.id === id), id, { timeout: 30000 });
   const vols = await page.evaluate(() => state.models.filter(m => /^bar5-[AB]/.test(m.name)).map(m => __probe(m.id).vol));
   check('it made exactly two halves', vols.length === 2, String(vols.length));
   check('the full blade still splits into two pieces that add back to 24000', near(vols[0] + vols[1], 24000, 1), JSON.stringify(vols));
-  check('...with no kerf', !/Notch/.test(await status()), await status());
 
   const errs = logs.filter(l => /error|exception/i.test(l) && !/favicon|Failed to load resource/i.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
