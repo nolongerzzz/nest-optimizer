@@ -435,12 +435,18 @@
     if (!D || D.nozzles.indexOf(nz) < 0) return out;
     var first = function (v) { return Array.isArray(v) ? String(v[0]) : String(v); };
     var put = function (k, v) { if (config[k] === undefined || k.charAt(0) === '_') return; v = first(v); if (cfgRaw(config, k) !== v) out[k] = v; };
-    if (nz !== '0.4') Object.keys(D.machine[nz] || {}).forEach(function (k) { put(k, D.machine[nz][k]); });
+    if (nz !== '0.4') {
+      Object.keys(D.machine[nz] || {}).forEach(function (k) { put(k, D.machine[nz][k]); });
+      /* ...and the nozzle's names where Studio's own file has them (the owner's Studio slices at 0.2 / 0.6 / 0.8, 2026-11-25) */
+      put('printer_variant', nz); put('extruder_nozzle_diameter', nz); put('default_print_profile', D.standard[nz]);
+    }
     var q = D.process.filter(function (p) { return p.nozzle === nz && p.name === quality; })[0] || D.process.filter(function (p) { return p.name === D.standard[nz]; })[0];
     if (q) { Object.keys(q.keys).forEach(function (k) { put(k, q.keys[k]); }); put('print_settings_id', q.name); }
     /* a 0.2 nozzle melts little: Bambu's Generic presets for it hold PLA to 1.6 mm^3/s and PETG to 1 */
     if (nz === '0.2' && P.flow02) {
-      var cap = P.flow02[cfgRaw(config, 'filament_type')] || 1, had = numOf(cfgRaw(config, 'filament_max_volumetric_speed'), cap);
+      /* Bambu's own PLA Basic 0.2 preset allows 2 (the owner's Studio slices at 0.2, both printers); Generic PLA 1.6, PETG 1 */
+      var cap = /^Bambu PLA Basic/.test(cfgRaw(config, 'filament_settings_id')) ? 2 : P.flow02[cfgRaw(config, 'filament_type')] || 1;
+      var had = numOf(cfgRaw(config, 'filament_max_volumetric_speed'), cap);
       if (had > cap) out.filament_max_volumetric_speed = String(cap);
     }
     return out;
