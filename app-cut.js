@@ -555,18 +555,51 @@ function cutBladeSpec(info) {
     if (Math.abs(nd) >= NSO_Notch.LEAN_MIN) dStart = p.getComponent(entry.dAxis) - nrm.getComponent(k) * (info.plane - p.getComponent(k)) / nd;
   }
   const notch = b.mode === 'notch';
+  /* Dice is a knife: a short Chop. It takes the one strand under the click - a finger, an arm, a cord - and goes
+     clean through it, the rest of the plane's path left alone. No size to set: it fits the strand. (It is a box
+     DICE_KERF_MM thick, fitted through the strand: a cut of no thickness cannot be made in one solid.) */
+  const dice = b.mode === 'sized';
   const s = NSO_Notch.sizes(b);
   // The point on the plane the click meets: which strand is "the" strand.
   const q = [0, 0, 0];
   q[k] = info.plane; q[entry.wAxis] = wCentre; q[entry.dAxis] = dStart;
   let strand = null, strands = 0;
-  if ((notch || cutStrandOn(b)) && m) {
+  if ((notch || dice) && m) {
     const clusters = cutSectionOf(m, info, k);
     const near = NSO_Notch.nearestCluster(clusters, q);
     if (near) { strand = clusters[near.index]; strands = clusters.length; }
   }
-  let box, sizes = s, miss = false;
-  if (notch && strand) {
+  let box, sizes = s, miss = false, turned = false;
+  if (dice && strand) {
+    // the whole strand, in from its edge on the side the click came from and out past its far side
+    const through = strand.max[entry.dAxis] - strand.min[entry.dAxis] + 2 * NSO_Notch.NOTCH_MARGIN_MM;
+    const nb = NSO_Notch.notchBox({ axis: k, dAxis: entry.dAxis, wAxis: entry.wAxis, sign: entry.sign,
+      plane: info.plane, depth: through, kerf: s.kerf }, strand);
+    box = nb.box;
+    sizes = { width: nb.spec.width, depth: through, kerf: s.kerf };
+  } else if (notch && strand && b.nturn && p) {
+    /* Turned 90: the kerf runs ACROSS the face, centred on the click, and the notch runs the face's whole length the
+       other way - a tape pocket down the back of a part, a groove along a rail. It is the plain notch laid in the
+       other plane: the section through the click square to the face's run, the face run found along the blade's
+       own travel in it (nso_notch.js notchBox, faceRun), so it stops flush at inside corners and goes through
+       outside ones the same way. */
+    const turnSoup = cutSoupInFrame(m, info);
+    const cl2 = NSO_Notch.sectionClusters(turnSoup, entry.wAxis, wCentre);
+    const q2 = [0, 0, 0];
+    q2[k] = info.plane; q2[entry.wAxis] = wCentre; q2[entry.dAxis] = dStart;
+    const near2 = NSO_Notch.nearestCluster(cl2, q2);
+    if (near2) {
+      const nb = NSO_Notch.notchBox({ axis: entry.wAxis, dAxis: entry.dAxis, wAxis: k, sign: entry.sign,
+        plane: wCentre, depth: s.depth, kerf: s.kerf, wCentre: info.plane, dStart: dStart }, cl2[near2.index]);
+      box = nb.box;
+      sizes = { width: nb.spec.width, depth: s.depth, kerf: s.kerf };
+      turned = true;
+    } else {
+      box = NSO_Notch.bladeBox({ axis: k, dAxis: entry.dAxis, wAxis: entry.wAxis, sign: entry.sign,
+        plane: info.plane, wCentre: wCentre, dStart: dStart, width: s.width, depth: s.depth, kerf: s.kerf });
+      miss = true;
+    }
+  } else if (notch && strand) {
     const nb = NSO_Notch.notchBox({ axis: k, dAxis: entry.dAxis, wAxis: entry.wAxis, sign: entry.sign,
       plane: info.plane, depth: s.depth, kerf: s.kerf,
       // the click on the plane: a section with an inside (a channel, a U) is notched at the face clicked, not its outer edge
@@ -576,13 +609,13 @@ function cutBladeSpec(info) {
   } else {
     box = NSO_Notch.bladeBox({ axis: k, dAxis: entry.dAxis, wAxis: entry.wAxis, sign: entry.sign,
       plane: info.plane, wCentre: wCentre, dStart: dStart, width: s.width, depth: s.depth, kerf: s.kerf });
-    if (notch) miss = true;                              // nothing under the plane to notch
+    if (notch || dice) miss = true;                      // nothing under the plane to notch, or to cut through
   }
   /* Notch From / To (app-cut-notch-span.js): the ends typed are kept exactly. The slider steps in 0.1 mm, so the
      middle they ask for can sit off its grid; the notch carries that remainder (b.nshift) along the plane's normal -
      for as long as the slider stays where From / To put it. */
   let shift = 0;
-  if (notch && b.nshift && b.nshiftAt != null && Math.abs(b.nshiftAt - info.mm) < 1e-9) {
+  if (notch && !turned && b.nshift && b.nshiftAt != null && Math.abs(b.nshiftAt - info.mm) < 1e-9) {
     shift = b.nshift;
     box = { min: box.min.slice(), max: box.max.slice() };
     box.min[k] += shift; box.max[k] += shift;
@@ -590,12 +623,13 @@ function cutBladeSpec(info) {
   const r = v => Math.round(v * 1000) / 1000;
   const lat = [0, 1, 2].filter(i => i !== k);
   const key = b.mode + ':' + k + ':' + sizes.kerf + ':' + r(shift) + ':' + lat.map(i => r(box.min[i]) + '~' + r(box.max[i])).join(':') +
-    (strand ? ':S' + lat.map(i => r(strand.min[i]) + '~' + r(strand.max[i])).join(':') : '');
+    (strand ? ':S' + lat.map(i => r(strand.min[i]) + '~' + r(strand.max[i])).join(':') : '') +
+    (turned ? ':T' + r(box.min[k] - info.plane) + '~' + r(box.max[k] - info.plane) : '');
   const up = info.upCut.getComponent(entry.dAxis);
   const from = Math.abs(up) > 0.7 ? (entry.sign * up < 0 ? 'down from the top' : 'up from below') : 'in from the side';
   return { box: box, entry: entry, sizes: sizes, key: key, from: from, wCentre: wCentre, dStart: dStart,
-           q: q, notch: notch, miss: miss, strand: strand, strands: strands, shift: shift,
-           isolate: !!strand && (notch || cutStrandOn(b)) };
+           q: q, notch: notch, dice: dice, turned: turned, miss: miss, strand: strand, strands: strands, shift: shift,
+           isolate: !!strand && (notch || dice) };
 }
 
 /** For Cut: the plane the blade is drawn at - the same frame, the same number. */
@@ -785,12 +819,19 @@ function syncCutUI() {
   if (readout && info.blade && fol) {
     const bl = info.blade, r1 = v => (Math.round(v * 10) / 10).toFixed(1);
     readout.textContent = (bl.notch ? 'NOTCH, FOLLOWING THE STRAND - ' : 'FOLLOWING THE STRAND - ') + r1(fol.val) + ' of ' + r1(fol.len) + ' mm along this stretch (let go and it moves on from here); ' +
-      (bl.notch ? 'a nick ' + bl.sizes.kerf + ' wide, ' + bl.sizes.depth + ' deep' : 'kerf ' + bl.sizes.kerf + ', ' + bl.sizes.width + ' wide, ' + bl.sizes.depth + ' deep') +
+      (bl.notch ? 'a nick ' + bl.sizes.kerf + ' wide, ' + bl.sizes.depth + ' deep' : 'Dice, clean through it') +
       (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
   } else if (readout && info.blade) {
     const bl = info.blade;
     const tail = (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
-    if (bl.notch) {
+    if (bl.dice) {
+      readout.textContent = bl.miss
+        ? 'DICE @ ' + mm.toFixed(1) + ' mm - the plane crosses nothing here; slide it onto the piece'
+        : 'DICE @ ' + mm.toFixed(1) + ' mm - through the strand you clicked' + (bl.strands > 1 ? ' (1 of ' + bl.strands + ' in the plane; the others are left alone)' : '') + tail;
+    } else if (bl.notch && bl.turned) {
+      readout.textContent = 'NOTCH, TURNED - ' + bl.sizes.kerf + ' wide across the face (centred on your click) x ' + bl.sizes.depth +
+        ' deep, the length of the face (' + (Math.round(bl.sizes.width * 10) / 10) + ' mm)' + tail;
+    } else if (bl.notch) {
       readout.textContent = bl.miss
         ? 'NOTCH @ ' + mm.toFixed(1) + ' mm - the plane crosses nothing here; slide it onto a strand'
         : 'NOTCH @ ' + mm.toFixed(1) + ' mm - ' + bl.sizes.kerf + ' wide x ' + bl.sizes.depth + ' deep into the strand\'s edge, ' +
@@ -3736,8 +3777,7 @@ function syncCutBladeUI() {
     : mode === 'notch'
     ? 'Cut the notch: a nick of your width and depth in from the edge of the strand under the click. Only that strand is touched, and it stops short of the far side. One Undo puts it back.'
     : mode === 'sized'
-      ? 'Cut the sized blade\'s slot out of the piece: only what the blade box holds comes out, kerf and all' +
-        (cutStrandOn(b) ? ' - and of that, only the strand under the click' : '') + '. One Undo puts it back.'
+      ? 'Dice: cut clean through the strand you clicked - a finger, an arm, a cord - and nothing else in the plane. What comes off is a piece of its own. One Undo puts it back.'
       : 'Split the piece at the blade: two pieces that meet exactly at the plane and add back to the original - no kerf. One Undo puts it back.';
   cutApplyHide();
 }
@@ -3972,6 +4012,7 @@ async function cutNotchAt(m, info) {
     const severs = parts.length > 1;
     const status = NSO_Notch.report({ width: info.blade.sizes.width, depth: info.blade.sizes.depth,
       kerf: info.blade.sizes.kerf, removed: removed, shells: severs ? 0 : 1, notch: info.blade.notch,
+      dice: info.blade.dice, turned: info.blade.turned, parts: parts.length,
       strands: info.blade.isolate ? strands : 0 }) +
       (dropped ? ' - welded away ' + dropped + ' seam sliver' + (dropped === 1 ? '' : 's') : '') +
       edgeNote + (sol.merged && sol.note ? ' - ' + sol.note : '');

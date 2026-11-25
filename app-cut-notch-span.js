@@ -45,6 +45,11 @@ function cutNotchSpanSync() {
   const from = document.getElementById('cut-notch-from'), to = document.getElementById('cut-notch-to');
   const label = document.getElementById('cut-notch-span-label');
   const b = state.cutBlade, m = getActiveModel();
+  // Turn 90: the button shows it, and From / To - ends along the blade's travel - have nothing to say then
+  const turn = document.getElementById('btn-cut-notch-turn');
+  if (turn && b) turn.setAttribute('aria-pressed', b.nturn ? 'true' : 'false');
+  const spanRow = from && from.closest('.cut-slide-row');
+  if (spanRow && b) spanRow.hidden = !!b.nturn;
   if (!from || !to || !b || b.mode !== 'notch' || !m) return;
   const info = getCutPlaneLocal(m), map = cutNotchSpanMap(m);
   if (!info || !map) return;
@@ -91,6 +96,16 @@ function cutNotchSpanWire() {
   from.addEventListener('change', apply);
   to.addEventListener('change', apply);
   [from, to].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } }));
+  const turn = document.getElementById('btn-cut-notch-turn');
+  if (turn) turn.addEventListener('click', () => cutNotchTurn());
+}
+
+/** Notch Turn 90: the width runs across the face (centred on the click) and the notch runs the face's length, or back. */
+function cutNotchTurn(on) {
+  const b = cutBladeState();
+  b.nturn = on == null ? !b.nturn : !!on;
+  cutBladeRefresh();
+  return b.nturn;
 }
 
 if (typeof document !== 'undefined') {

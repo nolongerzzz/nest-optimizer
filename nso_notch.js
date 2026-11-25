@@ -64,9 +64,14 @@
   var NOTCH_DEFAULTS = { width: 1, depth: 1 };
   var NOTCH_MARGIN_MM = 0.5;
 
+  /* Dice: the knife. It fits the strand it cuts and goes through it, so it has no size of its own to set - only
+     this thickness, which a cut needs in a solid: far under anything a printer draws, the two sides part flat. */
+  var DICE_KERF_MM = 0.01;
+
   /* The blade's three sizes, clamped to what can be built. */
   function sizes(p) {
     p = p || {};
+    if (p.mode === 'sized') return { width: DEFAULTS.width, depth: DEFAULTS.depth, kerf: DICE_KERF_MM };   // fitted (app-cut.js)
     if (p.mode === 'notch') {
       return {
         width: DEFAULTS.width,          // replaced by the strand's own width (notchBox)
@@ -167,6 +172,7 @@
   /* Why this blade cannot be used, or '' when it can. */
   function refusal(p) {
     p = p || {};
+    if (p.mode === 'sized') return '';                   // Dice sets nothing: it fits the strand
     var notch = p.mode === 'notch';
     var w = notch ? 1 : Number(p.width), d = Number(notch ? p.ndepth : p.depth), k = Number(notch ? p.nwidth : p.kerf);
     if (!(k >= MIN_KERF_MM)) return 'the ' + (notch ? 'notch width' : 'kerf') + ' is under ' + MIN_KERF_MM + ' mm - a slot that thin cannot be printed or cut';
@@ -494,7 +500,12 @@
 
   /* The status line for a finished notch. */
   function report(o) {
-    return (o.notch ? 'Notch cut - ' + round(o.kerf) + ' mm wide x ' + round(o.depth) + ' mm deep nick into the strand\'s edge'
+    if (o.dice) {
+      return 'Dice cut - through the strand' + (o.strands > 1 ? ' (one of ' + o.strands + ' in the plane)' : '') +
+        (o.parts > 1 ? '' : ' - nothing came off: the strand is joined round the other way, so the cut is a slit in it');
+    }
+    return (o.notch ? 'Notch cut - ' + round(o.kerf) + ' mm wide x ' + round(o.depth) + ' mm deep' +
+                      (o.turned ? ' pocket along the face' : ' nick into the strand\'s edge')
                     : 'Sized cut - blade ' + round(o.width) + ' wide x ' + round(o.depth) + ' deep, kerf ' + round(o.kerf) + ' mm') +
       ' - ' + round(o.removed) + ' mm³ removed' +
       (o.strands > 1 ? ' - one strand of ' + o.strands + ' in the blade' : '') +
@@ -502,7 +513,7 @@
   }
 
   var api = {
-    MIN_KERF_MM: MIN_KERF_MM, MIN_WIDTH_MM: MIN_WIDTH_MM, MIN_DEPTH_MM: MIN_DEPTH_MM,
+    MIN_KERF_MM: MIN_KERF_MM, DICE_KERF_MM: DICE_KERF_MM, MIN_WIDTH_MM: MIN_WIDTH_MM, MIN_DEPTH_MM: MIN_DEPTH_MM,
     OVERSHOOT_MM: OVERSHOOT_MM, LEAN_MIN: LEAN_MIN, DEFAULTS: DEFAULTS,
     sizes: sizes, entryFor: entryFor, sectionClusters: sectionClusters, nearestCluster: nearestCluster, notchBox: notchBox, edgeEntry: edgeEntry, faceRun: faceRun, sectionConvex: sectionConvex,
     NOTCH_DEFAULTS: NOTCH_DEFAULTS, NOTCH_MARGIN_MM: NOTCH_MARGIN_MM, bladeBox: bladeBox, boxSoup: boxSoup,

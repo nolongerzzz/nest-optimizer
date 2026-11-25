@@ -320,11 +320,7 @@ function cutFollowPlace(c, t, why, quiet) {
   const off = cutFollowAim(m, tL);
   // The blade must reach through the cord: as wide as it is across, and in far enough from the top to clear the underside.
   const b = cutBladeState(), notes = [];
-  if (b.mode === 'sized') {                                  // (a notch stops short: its depth is the one you set, its width the strand's own)
-    const needD = Math.ceil((tr.h + 0.5) * 10) / 10, needW = Math.ceil((tr.w + 1) * 10) / 10;
-    if (b.depth < needD) { b.depth = needD; notes.push('depth raised to ' + needD + ' mm to go through the strand'); }
-    if (b.width < needW) { b.width = needW; notes.push('width raised to ' + needW + ' mm'); }
-  }
+  // (Dice fits the strand and goes through it by itself - app-cut.js cutBladeSpec; a notch's depth is the one you set)
   state.cutBladeAt = { modelId: m.id, local: topL, normal: upL.clone() };
   const f = cutFrame(m);
   const want = f.normal.dot(cL) - f.origin;

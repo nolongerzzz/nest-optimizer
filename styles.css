@@ -1400,6 +1400,8 @@ select:focus, input:focus {
 .cut-slide-row input[type="range"] { width: 100%; min-width: 0; margin: 0; }
 .cut-slide-row input[type="number"] { width: 100%; min-width: 0; box-sizing: border-box; }
 .cut-slide-row.cut-notch-span { grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr); }
+.cut-slide-row[hidden] { display: none; }
+.cut-notch-turn { width: 100%; margin: 4px 0; }
 .cut-blade-fields label.cut-strand { flex: 1 1 100%; flex-direction: row; align-items: center; gap: 6px; }
 /* Cut card: the two switches over the blade */
 .cut-switches { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 2px 0 6px; }
