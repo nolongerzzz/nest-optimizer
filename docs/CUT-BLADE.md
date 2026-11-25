@@ -15,12 +15,17 @@ the ids `btn-cut-blade-full` / `-sized` and the modes `full` / `sized` are uncha
   click) and cuts clean **through** it; what comes off is a piece of its own.
   Everything else the plane crosses is left alone. There is nothing to set
   (Width / Depth / Kerf are gone - it was never meant to be a box of any size).
-  In a solid a cut needs a thickness, so it is a box `DICE_KERF_MM` (0.01 mm)
-  thick fitted through the strand: far under anything a printer draws. A strand
-  joined round the other way (a ring) does not part: the cut is a slit, and
-  the status line says so. **Follow strand** turns it square across a cord and
-  walks it along ([CUT-FOLLOW.md](CUT-FOLLOW.md)); off, it stays square to the
-  piece and still cuts only the strand clicked.
+  It is Chop's own cut with **no kerf** (`cutDiceAt`, app-cut.js): the piece
+  split at the plane in the kernel, each part read for the strands it carries
+  a cut face of, and the parts that meet on every strand but the clicked one
+  joined back exactly - their cap faces dropped, the two sides' rims meeting
+  point for point (one split made them). The two halves go through Chop's
+  commit: two pieces, one Undo, left where they were. A strand joined round
+  the other way (a ring) cannot come off, and Dice says so. **Follow strand**
+  turns it square across a cord and walks it along, a slice at a time with no
+  kerf between ([CUT-FOLLOW.md](CUT-FOLLOW.md)); a place already cut is not
+  offered. Off, the blade stays square to the piece and still cuts only the
+  strand clicked.
 - **Notch**: click a face or an edge. The notch **rides** it and cuts **into**
   it - `Notch width` (its kerf) and `Notch depth` - never through. By default
   the width runs along the blade's travel (From / To) and the notch runs
