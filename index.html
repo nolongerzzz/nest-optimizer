@@ -267,6 +267,9 @@
                   <label class="vp-bend-field" for="slice-set-zhop">Z hop
                     <input type="number" id="slice-set-zhop" min="0" max="2" step="0.1" placeholder="auto" inputmode="decimal"
                              title="How far the nozzle lifts for a travel after retracting, mm. 0: no lift - the nozzle stays on the surface and wipes its ooze off there, at the risk of dragging on the part. Empty: the filament's own." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-cool-wait">Cool wait
+                    <input type="number" id="slice-set-cool-wait" min="0" max="60" step="1" placeholder="off" inputmode="decimal"
+                             title="A minimum layer time, s, that is kept even when slowing down cannot reach it: a layer that still prints faster than this at the slowest speed is followed by a wait - the nozzle lifts 1 mm, moves 10 mm off the part and waits out the rest with the fan on - so a thin tip has set before the next layer goes on it. No filament is spent. A filament can bring its own (CR-TPU: 8); empty is the filament's, 0 turns it off." autocomplete="off"><span>s</span></label>
                   <label class="vp-bend-field" for="slice-set-temp-step">Temp step
                     <input type="number" id="slice-set-temp-step" value="0" min="-25" max="25" step="1" inputmode="numeric"
                              title="Change the nozzle temperature by this much at every band of height: -5 with temp 240 prints 240, 235, 230 ... up the model (a temperature tower from any model). 0: off. The change is made without stopping, at the layer change." autocomplete="off"><span>&deg;C</span></label>
@@ -3574,7 +3577,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=e1890c48"></script>
+  <script src="app-supports-card.js?v=ac03911a"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3582,11 +3585,11 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=cdb3a6fc"></script>
+  <script src="nso-print-planner.js?v=e3da82d7"></script>
   <script src="nso-gcode3mf-write.js?v=bd4593c7"></script>
   <!-- Bambu's nozzles and quality presets for the A1 mini and the P1S (app-print.js qualityOverlay; docs/PRINT-CARD.md "Nozzle and quality") -->
   <script src="nso-bambu-presets.js?v=0f5f48d7"></script>
-  <script src="app-print.js?v=516dc37a"></script>
+  <script src="app-print.js?v=2c2f691a"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

@@ -84,6 +84,13 @@
   var BRIDGE_TEMP_JOIN = 2;            // warm layers between two cold stretches that are not worth coming up for
   var BRIDGE_TEMP_LIFT = 0.4;          // mm the nozzle is lifted to leave for the park (the timelapse hook's own)
   var BRIDGE_TEMP_PRIME = 1;           // mm of filament primed at the park once the temperature is reached, beyond the retraction
+  /* COOL WAIT (opts.coolWait, s): a layer that, slowed to slow_down_min_speed, still prints faster than this is followed by a wait off the part -
+     lifted, moved aside, the fan on - for the rest of it, so the next layer goes down on plastic that has set. The owner's CR-TPU capsule
+     (A1 mini, 2026-11-25): necks 1.5 mm across printed in 2 s a layer at 10 mm/s, the tip stayed soft, bent under the nozzle and wound into a knot
+     at the same height twice. No filament is spent on it (a sacrificial pillar would be). */
+  var COOL_WAIT_LIFT = 1;              // mm above the layer just printed
+  var COOL_WAIT_AWAY = 10;             // mm off the layer's own outline, in X
+  var COOL_WAIT_MIN = 0.5;             // s: a shorter wait is not worth the moves
   var BRIDGE_TEMP_SECONDS = 15;        // what one change is counted as in the print's time: the owner timed the wait at 10-12 s (A1 mini, 235 <-> 215), plus the moves
   /* Where a printer waits for a nozzle temperature in the middle of a print, by its frozen id: its own moves, off its own G-code.
      A1 mini: the purge position at the left end of the gantry (the start block purges at X-13.5; the timelapse hook goes there every
@@ -512,6 +519,8 @@
       var s = lines[li], m;
       if (typeof s !== 'string') { times[li] = t; continue; }
       if (s.charCodeAt(0) === 77 && (m = /^M204 S(\d+)/.exec(s))) { A = +m[1]; times[li] = t; continue; }
+      /* a dwell in ms (NSO's cool wait writes G4 P; Studio's own dwells are G4 S and stay uncounted, as its estimate leaves them) */
+      if (s.charCodeAt(0) === 71 && (m = /^G4 P(\d+)/.exec(s))) { flush(); t += +m[1] / 1000; times[li] = t; continue; }
       if (!/^G[0123] /.test(s)) { times[li] = t; continue; }
       var w = {};
       s.replace(/([XYZEFIJP])(-?[\d.]+)/g, function (a, k, v) { w[k] = +v; return a; });
@@ -2011,6 +2020,7 @@
     /* HANGING WALL SPEED (opts.hangSpeed, docs/FILAMENTS.md): a wall that hangs over open air from end to end (the slicer's path.span) prints
        at the bridge's speed, as Studio's does; a filament can slow it on its own (CR-TPU: the owner's tower level of 2026-11-15, its front lip
        sagging at 42 mm/s). Never faster than the bridge's speed, and the max flow still holds it. */
+    var coolWait = opts.coolWait > 0 ? +opts.coolWait : 0;
     S.speed.hang = opts.hangSpeed > 0 ? Math.min(+opts.hangSpeed, S.speed.bridge) : S.speed.bridge;
     var F = S.filament, R = S.retract;
     var filA = Math.PI * F.diameter * F.diameter / 4;
@@ -2048,6 +2058,7 @@
       }
     }
     var bridgeStat = { temp: bridgeT, changes: 0, layers: 0 };
+    var waitStat = { seconds: coolWait, layers: 0, total: 0 };
     /* THE STRETCH (the owner's print, 2026-11-14: cooled for the bridge lines, back up for the fill beside and over them, layer after layer).
        A layer with bridges prints whole at the bridge temperature - its walls over the gap and the fill beside the bridge too - and so do the
        BRIDGE_TEMP_COVER layers over it, which are laid straight onto the bridge. Stretches a few layers apart are one. So the nozzle changes
@@ -2207,6 +2218,21 @@
         put('M625');
         st.openObj = -1;
       }
+    }
+    /** COOL WAIT: retracted, up COOL_WAIT_LIFT, aside COOL_WAIT_AWAY off the layer's outline in X (to the right, else the left), and a wait of
+     *  the rest of the layer's minimum time with the layer's fan still on. The next layer's own travel brings the nozzle back down. */
+    function coolWaitOff(w) {
+      if (!st.retracted && R.length > 0) { put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0)); st.retracted = true; st.retractLen = R.length; }
+      var ax = w.box.x1 + COOL_WAIT_AWAY <= bed.x - 2 ? w.box.x1 + COOL_WAIT_AWAY : Math.max(2, w.box.x0 - COOL_WAIT_AWAY);
+      var ay = Math.max(2, Math.min(bed.y - 2, (w.box.y0 + w.box.y1) / 2));
+      var zl = st.z + COOL_WAIT_LIFT;
+      put('; NSO cool wait: ' + w.seconds.toFixed(1) + ' s');
+      accel(S.accel.travel);
+      put('G1 Z' + fx(zl) + ' F' + fmt(S.speed.travel * 60, 0));
+      put('G1 X' + gx(ax) + ' Y' + gy(ay) + ' F' + fmt(S.speed.travel * 60, 0));
+      put('G4 P' + Math.round(w.seconds * 1000));
+      st.x = ax; st.y = ay; st.z = zl;
+      waitStat.layers++; waitStat.total += w.seconds;
     }
     function spiral(zUp, first) {
       put('G17');
@@ -2533,6 +2559,15 @@
           else it.v = Math.min(it.v, Math.max(cool.cap, Math.min(S.cooling.slow_down_min_speed, it.v)));
         });
       }
+      /* COOL WAIT: what this layer still lacks of opts.coolWait at the speeds it now prints at, waited out off the part before the next one */
+      if (coolWait && !first && !lastLayer) {
+        var lackS = coolWait - (layerSecondsOf(items, S, cool.mode, null) + changeSec);
+        if (lackS >= COOL_WAIT_MIN) {
+          var wb = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+          items.forEach(function (it) { it.pts.forEach(function (q) { if (q[0] < wb.x0) wb.x0 = q[0]; if (q[0] > wb.x1) wb.x1 = q[0]; if (q[1] < wb.y0) wb.y0 = q[1]; if (q[1] > wb.y1) wb.y1 = q[1]; }); });
+          st.coolWait = { seconds: lackS, box: wb };
+        }
+      }
       var rec = { index: li, number: layerNo, z: pl.printZ, h: pl.h, seconds: cool.seconds, slowdownCap: cool.cap, fan: fan,
                   features: [], items: items.length, lineFrom: W.lines.length };
       layers.push(rec);
@@ -2549,6 +2584,7 @@
       } else {
         flushRetract();
         closeObject();
+        if (st.coolWait) { coolWaitOff(st.coolWait); st.coolWait = null; }
         if (remainingOn) { var nowR = remainingAt(pj); if (nowR.length < remaining.length) putRemaining(nowR); }
       }
       put('; layer num/total_layer_count: ' + layerNo + '/' + totalLayers);
@@ -2862,6 +2898,7 @@
         /* the prime tower: where it stands (plate coordinates, its brim's edge) and on how many layers; or why there is none */
         tower: TW ? { x: TW.x, y: TW.y, width: TW.W, depth: TW.D, box: [TW.box.x0, TW.box.y0, TW.box.x1, TW.box.y1], layers: TW.last + 1, moved: TW.moved } : null,
         towerNote: towerNote,
+        coolWait: coolWait ? { seconds: coolWait, layers: waitStat.layers, total: +waitStat.total.toFixed(1) } : null,
         bridgeTemp: bridgeT != null ? { temp: bridgeT, changes: bridgeStat.changes, layers: bridgeStat.layers, secondsEach: BRIDGE_TEMP_SECONDS, fromLayer: +opts.bridgeTempFrom >= 2 ? +opts.bridgeTempFrom : null } : null,
         tempBands: steps ? bands : null,                       // the temperature steps as written: [{ temp, fromZ, layer }]
         seconds: { start: startS, body: bodySeconds, end: Pr.timing.endSeconds, total: totalSeconds }

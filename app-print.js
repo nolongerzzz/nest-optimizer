@@ -123,6 +123,9 @@
                            /* the layer (Bambu's numbers, the first is 1) from which every layer to the top prints at the bridge temperature: null is
                               only the bridges' own stretches */
                            bridgeTempFrom: null,
+                           /* COOL WAIT (s): a layer still faster than this at the slowest speed waits the rest out off the part. null is the filament's own
+                              (CR-TPU 8, its slow_down_layer_time), 0 none */
+                           coolWait: null,
                            /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). They start at the printer profile's values (settingsFromConfig);
                               these are Bambu's own defaults, for a card with no profile. NSO's old numbers (top 0.18, first layer solid, a bridge of
                               5 mm not held) are the Print card's built-in saved setting "NSO classic" */
@@ -239,7 +242,10 @@
         supertack_plate_temp: '0', supertack_plate_temp_initial_layer: '0',
         filament_max_volumetric_speed: '3.2', filament_flow_ratio: '1', filament_retraction_length: '0.4',
         filament_density: '1.24', temperature_vitrification: '30', filament_adhesiveness_category: '600', filament_cost: '20',
-        close_fan_the_first_x_layers: '1', additional_cooling_fan_speed: '70', close_additional_fan_first_x_layers: '1'
+        close_fan_the_first_x_layers: '1', additional_cooling_fan_speed: '70', close_additional_fan_first_x_layers: '1',
+        /* STRAIGHT UP (the owner's capsule, 2026-11-25): no wipe and no z hop - each layer's wipe across and spiral lift and back over a 1.5 mm
+           TPU neck nudged it; the retraction stays */
+        filament_wipe: '0', filament_z_hop: '0'
       },
       cooling: function (config) {
         var c = { fan_min_speed: '100', fan_max_speed: '100', fan_cooling_layer_time: '100', slow_down_layer_time: '8', slow_down_min_speed: '10' };
@@ -252,7 +258,9 @@
          temperature that had held the roof at 235, so the filament asks for no bridge temperature of its own: no stop at the park. */
       /* No Hanging wall speed of its own: 10 mm/s on those walls (the window's lip) was tried on the owner's 215 level of 2026-11-15 and
          made the lip no better and the bridges worse, so they print at the bridge's speed, as Studio's do. */
-      tune: function () { return {}; },
+      /* COOL WAIT 8 s (its slow_down_layer_time): a layer still faster than that at 10 mm/s waits the rest out off the part - the capsule's necks
+         printed in 2 s, stayed soft and wound into a knot under the nozzle */
+      tune: function () { return { coolWait: 8 }; },
       /* ITS SLICER RULES: a fill piece under 1 mm is not laid (the slicer's NO CRUMBS) - at the tip of the tower level's roof a 0.03 mm corner
          of solid infill got the whole prime and retraction, and the owner's print of 2026-11-15 hung whole lines off that tip */
       slicer: { shortFillMm: 1 },
@@ -320,7 +328,7 @@
              rangeLow: S.temp.rangeLow, rangeHigh: S.temp.rangeHigh,
              flowRatio: S.filament.flow, retractLen: S.retract.length, retractSpeed: S.retract.speed, retractBefore: Math.round(S.retract.beforeWipe * 100), zHop: S.retract.hop,
              /* the bridge's rows: the profile's speed and flow, no bridge temperature - unless the filament brings its own (tune) */
-             bridgeSpeed: S.speed.bridge, bridgeFlow: S.filament.bridgeFlow, hangSpeed: null, bridgeTemp: null,
+             bridgeSpeed: S.speed.bridge, bridgeFlow: S.filament.bridgeFlow, hangSpeed: null, bridgeTemp: null, coolWait: null,
              /* the support's top gap: the profile's, unless the filament brings its own (tune: PETG's 0.33) */
              supTopZ: numOf(cfgRaw(config, 'support_top_z_distance'), SETTINGS_DEFAULT.supTopZ) }, f.tune ? f.tune(config) : {});
   }
@@ -344,7 +352,7 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null,
+      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null,
       /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
          keys; a key the profile does not hold is this slicer's own default */
       supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
@@ -483,6 +491,7 @@
       flowRatio: opt(s.flowRatio, 0.8, 1.2, 3), retractLen: opt(s.retractLen, 0, 3, 2), retractSpeed: opt(s.retractSpeed, 5, 80, 0), retractBefore: opt(s.retractBefore, 0, 100, 0), zHop: opt(s.zHop, 0, 2, 2),
       bridgeTemp: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.max(170, Math.min(300, v))); })(s.bridgeTemp),   /* 0: none */
       bridgeTempFrom: (function (v) { v = parseFloat(v); return !isFinite(v) || v < 2 ? null : Math.round(Math.min(100000, v)); })(s.bridgeTempFrom),   /* under 2: none */
+      coolWait: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.min(60, v) * 10) / 10; })(s.coolWait),   /* 0: none */
       supDensity: Math.round(n(s.supDensity, D.supDensity, 10, 100)),
       supExpand: (function (v) { return v < 0 ? -1 : r2(v); })(n(s.supExpand, D.supExpand, -1, 10)),
       supWalls: Math.round(n(s.supWalls, D.supWalls, -1, 5)),
@@ -616,6 +625,13 @@
     var fb = filamentBase(config, settings.filament);
     return fb && fb.hangSpeed ? fb.hangSpeed : null;
   }
+  /** The cool wait a slice is made with, s: the row's (0: none), else the filament's own; null for none. */
+  function coolWaitOf(config, settings) {
+    if (!settings) return null;
+    if (settings.coolWait != null) return settings.coolWait > 0 ? settings.coolWait : null;
+    var fb = filamentBase(config, settings.filament);
+    return fb && fb.coolWait ? fb.coolWait : null;
+  }
   function bridgeTempOf(config, settings) {
     if (!settings) return null;
     if (settings.bridgeTemp != null) return settings.bridgeTemp > 0 ? settings.bridgeTemp : null;
@@ -625,7 +641,7 @@
 
   /** What the planner is told beside the config: the filament's cooling (undefined: NSO's default profile), its start G-code, the temperature steps. */
   function plannerExtras(config, settings) {
-    if (!settings) return { cooling: undefined, filamentStart: undefined, tempSteps: undefined, bridgeTemp: undefined, bridgeTempFrom: undefined, hangSpeed: undefined };
+    if (!settings) return { cooling: undefined, filamentStart: undefined, tempSteps: undefined, bridgeTemp: undefined, bridgeTempFrom: undefined, hangSpeed: undefined, coolWait: undefined };
     var f = filamentOf(settings.filament), PL = lazy('nso-print-planner.js', 'NSOPrintPlanner'), CP = lazy('nso-cooling-profiles.js', 'NSOCoolingProfiles');
     var S = PL.settingsFrom(config);
     return {
@@ -634,7 +650,8 @@
       tempSteps: settings.tempStep ? { stepC: settings.tempStep, bandMm: settings.tempBand } : undefined,
       bridgeTemp: bridgeTempOf(config, settings) || undefined,
       bridgeTempFrom: bridgeTempOf(config, settings) && settings.bridgeTempFrom ? settings.bridgeTempFrom : undefined,
-      hangSpeed: hangSpeedOf(config, settings) || undefined
+      hangSpeed: hangSpeedOf(config, settings) || undefined,
+      coolWait: coolWaitOf(config, settings) || undefined
     };
   }
 
@@ -923,14 +940,14 @@
       var ex = plannerExtras(config, settings);
       /* a painted project's filaments go into the file's CONFIG_BLOCK as lists, under the card's own changes */
       if (assets.filamentOver) over = Object.assign({}, assets.filamentOver, over);
-      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps, bridgeTemp: ex.bridgeTemp, bridgeTempFrom: ex.bridgeTempFrom, hangSpeed: ex.hangSpeed }).then(function (out) {
+      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps, bridgeTemp: ex.bridgeTemp, bridgeTempFrom: ex.bridgeTempFrom, hangSpeed: ex.hangSpeed, coolWait: ex.coolWait }).then(function (out) {
         var seen = {};
         out.plan.layers.forEach(function (l) { l.features.forEach(function (f) { seen[f] = 1; }); });
         var st = out.plan.stats;
         return {
           ok: true, reason: '', bytes: out.bytes, features: Object.keys(seen), objects: out.plan.labels.length,
           labels: out.plan.labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
-          stats: { layers: st.layers, seconds: st.seconds.total, startSeconds: st.seconds.start, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ, tempBands: st.tempBands || null, bridgeTemp: st.bridgeTemp || null,
+          stats: { layers: st.layers, seconds: st.seconds.total, startSeconds: st.seconds.start, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ, tempBands: st.tempBands || null, bridgeTemp: st.bridgeTemp || null, coolWait: st.coolWait || null,
                    changes: st.changes ? st.changes.length : 0, tower: st.tower || null, towerNote: st.towerNote || null },
           tune: settings ? tuneWords(config, ex.hangSpeed) : null,                                                             // the bridge and retraction numbers it prints with
           filament: filamentWords(config, settings),                                                             // what it prints with, in words
@@ -1077,7 +1094,7 @@
     SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
     configOverlay: configOverlay, withOverlay: withOverlay, plateProject: plateProject,
     qualityOverlay: qualityOverlay, qualitiesOf: qualitiesOf, nozzlesOf: nozzlesOf, presetConfig: presetConfig,
-    FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf, hangSpeedOf: hangSpeedOf
+    FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf, hangSpeedOf: hangSpeedOf, coolWaitOf: coolWaitOf
   };
 
   // ===========================================================================
@@ -1159,7 +1176,7 @@
   var FILAMENT_SUP_ROWS = [['slice-set-sup-topz', 'supTopZ']];
   var FILAMENT_ROWS = [['slice-set-nozzle-temp', 'nozzleTemp'], ['slice-set-first-temp', 'firstTemp'], ['slice-set-bed-temp', 'bedTemp'], ['slice-set-max-flow', 'maxFlow'],
                        ['slice-set-flow-ratio', 'flowRatio'], ['slice-set-retract-len', 'retractLen'], ['slice-set-retract-speed', 'retractSpeed'], ['slice-set-retract-before', 'retractBefore'], ['slice-set-zhop', 'zHop'],
-                       ['slice-set-bridge-speed', 'bridgeSpeed'], ['slice-set-bridge-flow', 'bridgeFlow'], ['slice-set-hang-speed', 'hangSpeed'], ['slice-set-bridge-temp', 'bridgeTemp']];
+                       ['slice-set-bridge-speed', 'bridgeSpeed'], ['slice-set-bridge-flow', 'bridgeFlow'], ['slice-set-hang-speed', 'hangSpeed'], ['slice-set-bridge-temp', 'bridgeTemp'], ['slice-set-cool-wait', 'coolWait']];
 
   /** The line under the bridge rows: the speed a bridge will really print at (the row's, or what the filament's max flow allows). */
   function bridgeNote() {
@@ -1268,7 +1285,7 @@
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
       bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band'),
-      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'),
+      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'), coolWait: v('slice-set-cool-wait'),
       flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), retractBefore: v('slice-set-retract-before'), zHop: v('slice-set-zhop'),
       project: S.project
     }));
@@ -1710,7 +1727,8 @@
       var tuned = (r.changed || []).some(function (k) { return /^(bridge_|filament_(flow_ratio|retraction_|deretraction_|z_hop))/.test(k); });
       readout(describe(r) + ' - ' + pieces.length + ' object' + (pieces.length === 1 ? '' : 's') + (sup ? ' (' + sup + ' support' + (sup === 1 ? '' : 's') + ')' : '') +
               (procChanged.length ? ' - ' + settingsWords(settings) : '') + (filChanged && r.filament ? ' - ' + r.filament : '') + (tuned && r.tune ? ' - ' + r.tune : '') +
-              (steps ? ' - ' + steps : '') + (r.stats.bridgeTemp ? ' - ' + bridgeTempWords(r.stats.bridgeTemp) : ''), false);
+              (steps ? ' - ' + steps : '') + (r.stats.bridgeTemp ? ' - ' + bridgeTempWords(r.stats.bridgeTemp) : '') +
+              (r.stats.coolWait && r.stats.coolWait.layers ? ' - cool wait on ' + r.stats.coolWait.layers + ' layer' + (r.stats.coolWait.layers === 1 ? '' : 's') + ' (' + Math.round(r.stats.coolWait.total) + ' s)' : ''), false);
       say('Sliced for the ' + profile.short + ': ' + describe(r));
       refresh();                          // a piece moved while it ran: the readout says so, and Export stays shut
       return ended({ ok: true, reason: '', line: describe(r), fresh: isFresh(), stacks: r.stacks || null });

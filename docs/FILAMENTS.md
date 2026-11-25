@@ -14,6 +14,7 @@ The Slice card now has a filament and the numbers a filament is tuned by.
 | **bed** | the plate type's bed temperature, both layers | the filament's own |
 | **max flow** | `filament_max_volumetric_speed`, mm^3/s: every speed is held under it | the filament's own |
 | **temp step** / **every** | change the nozzle temperature by this much at every band of height | 0: off |
+| **cool wait** | a minimum layer time, s, kept by waiting off the part when slowing down cannot reach it ("CR-TPU prints straight up") | the filament's own (CR-TPU 8; else off) |
 
 Picking a filament fills the four number rows with that filament's values; they stay editable.
 `Profile values` puts everything back to the printer profile, the filament included. An untouched
@@ -339,6 +340,23 @@ proven to need on a printer goes into its entry (`keys`, `printerKeys`, `cooling
 | ELEGOO PETG | the owner's preset 245 C, 10 mm^3/s; **supports: Top Z 0.33** (Supporttest, 2026-11-23) | Generic PETG 255 C, 12 mm^3/s (desk hanger); supports: Top Z 0.33 |
 
 Still open: supports for PLA and CR-TPU against a print each, and the PETG Supporttest printed from NSO's own slice.
+
+### CR-TPU prints straight up, and waits for a thin layer to set (2026-11-25)
+
+The owner's capsule (a tall stem narrowing to 1.5 mm necks, CR-TPU on the A1 mini) wound into a knot at the same height twice. The G-code
+climbed every layer; the part did not: each neck layer printed in about 2 s even at the 10 mm/s floor (the filament asks for 8 s), so the
+tip was still soft when the nozzle came back, bent under it and gathered the plastic into coils. Every layer also wiped across the neck and
+spiralled up and back over it.
+
+- **No wipe, no z hop**: CR-TPU's `keys` carry `filament_wipe = 0` and `filament_z_hop = 0`. The retraction stays (0.4 mm, one pull).
+  The Z hop row puts a lift back for a job that wants one.
+- **Cool wait** (the card's row under Printer and filament, `coolWait`, s; CR-TPU's `tune`: 8): a layer that still prints faster than this
+  once slowed to `slow_down_min_speed` is followed by a wait off the part - retracted, 1 mm up, 10 mm off the layer's outline in X, a
+  `G4 P` for what the layer lacks, the fan still on - and the next layer's own travel brings the nozzle back down. No filament is spent
+  (a sacrificial pillar beside the part would spend some; this is the owner's "smallest amount"). The print's time counts the waits;
+  the readout says how many layers waited and for how long. 0 turns it off; empty is the filament's.
+
+On the capsule rebuilt from Studio's G-code, the necks print in about 1 s and wait about 6 s; the 10 mm body about 4 s and waits about 4 s.
 
 ### PETG's support gap (`tune`: `supTopZ` 0.33)
 
