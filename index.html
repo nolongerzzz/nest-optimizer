@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=43ab7ec2" />
+  <link rel="stylesheet" href="styles.css?v=b52cdf89" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1471,9 +1471,9 @@
               <button id="btn-cut-blade-full" class="btn btn-secondary" type="button" aria-pressed="true"
                       title="Chop: a plane across the whole piece. It splits everything in its path, all the way through, with no kerf.">Chop</button>
               <button id="btn-cut-blade-sized" class="btn btn-secondary" type="button" aria-pressed="false"
-                      title="Dice: a box of your width, depth and kerf. Click a face to put it there; it goes in against that face and takes out only its own volume - between two things, or a notch that stops short of the far side.">Dice</button>
+                      title="Dice: a knife - a short Chop. Click a finger, an arm, a cord: the blade fits that one strand and cuts clean through it, and what comes off is a piece of its own. Everything else the plane crosses is left alone. Nothing to set.">Dice</button>
               <button id="btn-cut-blade-notch" class="btn btn-secondary" type="button" aria-pressed="false"
-                      title="Notch: click a strand (a cord, a turn of a spiral). The blade fits that strand and cuts a nick in from its edge, of the width and depth you set. Only that strand is touched.">Notch</button>
+                      title="Notch: click a face or an edge. The notch rides it and cuts INTO it - your width (kerf) and depth - never through. Turn 90 swaps which way the width runs along the face: across, for a pocket running the face's length (a tape recess, a groove).">Notch</button>
               <button id="btn-cut-blade-plane" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Plane: shave an end of the piece flat at the blade. The nearer end comes off, all the way across, and the cut face is capped flat. There is no 1 mm minimum (the blade can stand 0.1 mm from the end), so it takes off as little as that; the offcut is not kept. One Undo puts it back.">Plane</button>
               </div>
@@ -1482,16 +1482,7 @@
                       title="Whole plate: one level blade across the plate, on a height slider. Cut cuts every piece it crosses at that height, at once - drop the bottom of every piece to shorten them all by the same amount (a long pillar, to print-test faster), or the top.">Whole plate</button>
               </div>
               <div class="cut-blade-sliders" id="cut-blade-fields" hidden>
-              <div class="cut-slide-row" title="How wide the blade is across the cut (mm)"><span class="cut-slide-label">Width</span>
-              <input type="range" id="cut-blade-width-s" min="0.2" max="60" step="0.1" value="10" aria-label="Width, mm">
-              <input type="number" id="cut-blade-width" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="10" aria-label="Width, mm"></div>
-              <div class="cut-slide-row" title="How far the blade goes into the piece from the face you clicked (mm). Less than the piece is thick and it stops short of the far side."><span class="cut-slide-label">Depth</span>
-              <input type="range" id="cut-blade-depth-s" min="0.2" max="30" step="0.1" value="3" aria-label="Depth, mm">
-              <input type="number" id="cut-blade-depth" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="3" aria-label="Depth, mm"></div>
-              <div class="cut-slide-row" title="The blade's thickness: the width of the slot it leaves (mm). The floor is 0.2."><span class="cut-slide-label">Kerf</span>
-              <input type="range" id="cut-blade-kerf-s" min="0.2" max="10" step="0.1" value="1" aria-label="Kerf, mm">
-              <input type="number" id="cut-blade-kerf" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Kerf, mm"></div>
-                            <label class="cut-switch cut-follow" title="Follow strand: the blade takes only the strand under it (where its box holds several - the turns of a spiral - the others are left alone; the strand is outlined in yellow) and follows it. Click a cord and the blade turns to stand square across it right there, however it winds. Drag the blade or the slider and it slides along the cord, about 90 degrees of it at a time; Back and Forward step it a slice, and Cut cuts and moves on to the next slice - slicing a spiral like salami. Off: a plain sized blade, square to the piece, that takes everything in its box."><input type="checkbox" id="chk-cut-follow"><span>Follow strand</span></label>
+                            <label class="cut-switch cut-follow" title="Follow strand: click a cord and the blade turns to stand square across it right there, however it winds. Drag the blade or the slider and it slides along the cord, about 90 degrees of it at a time; Back and Forward step it a slice, and Cut cuts and moves on to the next slice - slicing a spiral like salami. Off: the blade stays square to the piece, and still cuts only the strand you click."><input type="checkbox" id="chk-cut-follow"><span>Follow strand</span></label>
               </div>
               <!-- Whole plate: one level blade across every piece (app-cut-plate.js, nso_cut_plate.js, docs/CUT-PLATE.md). -->
               <div class="cut-blade-sliders" id="cut-plate-fields" hidden>
@@ -1513,6 +1504,8 @@
               <div class="cut-slide-row" title="How far in from the strand's edge the nick goes (mm). Less than the strand is thick and it stops short of the far side."><span class="cut-slide-label">Notch depth</span>
               <input type="range" id="cut-notch-depth-s" min="0.2" max="10" step="0.1" value="1" aria-label="Notch depth, mm">
               <input type="number" id="cut-notch-depth" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Notch depth, mm"></div>
+              <button id="btn-cut-notch-turn" class="btn btn-secondary cut-notch-turn" type="button" aria-pressed="false"
+                      title="Turn the notch 90 degrees on the face: its width runs across the face, centred where you clicked, and it runs the face's whole length - a pocket for tape down the back of a part, a groove along a rail. Off: the width runs along the blade's travel (From / To).">Turn 90&deg;</button>
               <div class="cut-slide-row cut-notch-span"><span class="cut-slide-label" id="cut-notch-span-label">From / to</span>
               <input type="number" id="cut-notch-from" class="cut-no-spin" step="0.01" aria-label="Notch from, mm">
               <input type="number" id="cut-notch-to" class="cut-no-spin" step="0.01" aria-label="Notch to, mm"></div>
@@ -3306,7 +3299,7 @@
   <script src="nso_skin.js?v=e0cfc361"></script>
   <script src="nso_skin_patch.js?v=4b2304fa"></script>
   <script src="nso_carve.js?v=c82241ec"></script>
-<script src="nso_notch.js?v=8e7debd0"></script>
+<script src="nso_notch.js?v=7307a5a2"></script>
 <script src="nso_strand.js?v=b0562762"></script>
 <script src="nso_cut_plate.js?v=0683b280"></script>
   <script src="nso_seat_surface.js?v=293d7ca2"></script>
@@ -3314,7 +3307,7 @@
   <script src="nso_hollow.js?v=9af04282"></script>
   <script src="nso_void.js"></script>
   <script src="nso_foam.js?v=9c2f6904"></script>
-  <script src="nso_foam_gun.js?v=efd095c0"></script>
+  <script src="nso_foam_gun.js?v=cb4b7b0a"></script>
   <!-- Support beacons: the plan-grid detector detectOverhangs wraps. Before
        nso_support_aim.js so its beacons ride along on every detection. See
        docs/SUPPORT-BEACONS.md. -->
@@ -3388,11 +3381,11 @@
 
 
 
-  <script src="app-cut.js?v=80e84e38"></script>
+  <script src="app-cut.js?v=12b7b790"></script>
   <!-- Cut card, Follow strand: the sized blade put square across a cord and walked along it (nso_strand.js, docs/CUT-FOLLOW.md). After app-cut.js. -->
   <!-- Cut card, Notch From / To: the notch set by its two ends. After app-cut.js. -->
-  <script src="app-cut-notch-span.js?v=ec0be9ba"></script>
-  <script src="app-cut-follow.js?v=350438ca"></script>
+  <script src="app-cut-notch-span.js?v=c62e150e"></script>
+  <script src="app-cut-follow.js?v=1b56cf39"></script>
   <!-- Cut card, Whole plate blade: one level blade across every piece. After app-cut.js, whose cutOneSide / cutOverlay
        it calls, and before the Crop card; it commits through app-sculpt.js's NSO_sculptCommitRaw at press time. docs/CUT-PLATE.md. -->
   <script src="app-cut-plate.js?v=187bdbdd"></script>
@@ -3481,7 +3474,7 @@
   <script src="app-fasteners.js?v=4a5a49b2"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=41a685c0"></script>
-  <script src="app-join.js?v=4a62abd7"></script>
+  <script src="app-join.js?v=6372c1a8"></script>
   <script src="app-center-lock.js?v=88c6bc06"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=6798e389"></script>

@@ -12,16 +12,21 @@ permissions:
   pages: write
   id-token: write
 
+# Never cancel a deploy that is under way: a run killed inside deploy-pages
+# leaves a Pages deployment behind that nothing finishes, and the next deploy
+# of the same commit then waits on it until it times out. A newer push still
+# wins -- it replaces whatever is queued behind the running deploy.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deploy3.outputs.page_url || steps.deploy2.outputs.page_url || steps.deploy1.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,5 +42,40 @@ jobs:
         with:
           path: .
 
-      - id: deployment
+      # deploy-pages looks the artifact up by name a fraction of a second after
+      # the upload is finalized, and the artifact listing is not always caught
+      # up by then: it answers "Found 0 artifact(s)" and the deploy fails with
+      # `No artifacts named "github-pages" were found`. About half the deploys
+      # died that way. So: give the listing a moment, and try up to three
+      # times, waiting longer before each retry. A deploy that hangs is cut off
+      # at 4 minutes (a normal one takes under 30 seconds) and retried too.
+      - name: Let the artifact listing catch up
+        run: sleep 5
+
+      - id: deploy1
         uses: actions/deploy-pages@v4
+        continue-on-error: true
+        with:
+          timeout: 240000
+
+      - name: Wait before the second attempt
+        if: steps.deploy1.outcome == 'failure'
+        run: sleep 20
+
+      - id: deploy2
+        if: steps.deploy1.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+        with:
+          timeout: 240000
+
+      - name: Wait before the third attempt
+        if: steps.deploy2.outcome == 'failure'
+        run: sleep 60
+
+      # The last attempt is the one that fails the job.
+      - id: deploy3
+        if: steps.deploy2.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 240000

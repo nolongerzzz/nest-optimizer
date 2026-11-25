@@ -10,19 +10,33 @@ the ids `btn-cut-blade-full` / `-sized` and the modes `full` / `sized` are uncha
 - **Chop** (the default, unchanged): a plane across the whole piece. It
   splits everything in its path, all the way through, with no kerf. One piece
   becomes two that add back to the original.
-- **Dice**: a *box* - `Width` across the cut, `Depth` into the piece,
-  `Kerf` thick - that takes out only its own volume. Use it to cut **between**
-  things (a blade narrower than the section leaves whatever else is in the
-  full blade's path alone) and to cut **into** a face without going through.
-  With **Follow strand** on (one box: it is also *take only the strand* - see
-  [CUT-FOLLOW.md](CUT-FOLLOW.md)) it takes only the *strand under the
-  click*, even where its box holds several - see below.
-- **Notch**: click a strand (a cord, one turn of a spiral). The blade fits that
-  strand and cuts a **nick** in from its edge, `Notch width` along the strand
-  and `Notch depth` in. It never goes through, and only that strand is touched.
+- **Dice**: a **knife** - a short Chop. Click a finger, an arm, a cord: the
+  blade fits that one **strand** (the blob of the plane's section under the
+  click) and cuts clean **through** it; what comes off is a piece of its own.
+  Everything else the plane crosses is left alone. There is nothing to set
+  (Width / Depth / Kerf are gone - it was never meant to be a box of any size).
+  It is Chop's own cut with **no kerf** (`cutDiceAt`, app-cut.js): the piece
+  split at the plane in the kernel, each part read for the strands it carries
+  a cut face of, and the parts that meet on every strand but the clicked one
+  joined back exactly - their cap faces dropped, the two sides' rims meeting
+  point for point (one split made them). The two halves go through Chop's
+  commit: two pieces, one Undo, left where they were. A strand joined round
+  the other way (a ring) cannot come off, and Dice says so. **Follow strand**
+  turns it square across a cord and walks it along, a slice at a time with no
+  kerf between ([CUT-FOLLOW.md](CUT-FOLLOW.md)); a place already cut is not
+  offered. Off, the blade stays square to the piece and still cuts only the
+  strand clicked.
+- **Notch**: click a face or an edge. The notch **rides** it and cuts **into**
+  it - `Notch width` (its kerf) and `Notch depth` - never through. By default
+  the width runs along the blade's travel (From / To) and the notch runs
+  across the face; **Turn 90°** swaps them: the width runs across the face,
+  centred on the click, and the notch runs the face's whole length (a tape
+  pocket down the back of a part, a groove along a rail). Turned, it is the
+  same notch laid in the other plane: the section through the click square to
+  the face's run, the face run found along the blade's own travel in it - so
+  inside corners stop it flush and outside ones it goes through.
 
-**Sizes are sliders.** Width, Depth and Kerf (Sized), and Notch width and Notch
-depth (Notch), are each a slider with a number box beside it; they are the same
+**Sizes are sliders.** Notch width and Notch depth are each a slider with a number box beside it; they are the same
 number, and the blade in the viewport and the readout follow as you drag. The
 slider's range comes from the piece, with room to breathe (width to twice its
 biggest section dimension, depth to 1.5 times it, kerf and notch width to three

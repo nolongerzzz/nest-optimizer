@@ -2690,7 +2690,10 @@ function cutActiveModel(opts) {
   }
   // A sized blade (Cut card, "Sized blade") is not a split: its box comes out
   // of the piece (cutNotchAt, app-cut.js) and the piece stays one piece.
-  if (info.blade) { cutNotchAt(m, info); return; }
+  const pre = opts && opts.pair;
+  // Dice (app-cut.js cutDiceAt): Chop's own cut, glued back everywhere but the strand clicked; it comes back here with the pair.
+  if (info.blade && info.blade.dice && !pre) { cutDiceAt(m, info); return; }
+  if (info.blade && !pre) { cutNotchAt(m, info); return; }
   // A clean split at the one plane (cutSplitAt, app-cut.js): the halves meet
   // exactly and add back to the piece - no kerf band comes out.
   // Turned right-side-out only on the click, only for the piece it was
@@ -2714,7 +2717,7 @@ function cutActiveModel(opts) {
   }
   let pair;
   try {
-    pair = cutSplitAt(cutModel, info);
+    pair = pre || cutSplitAt(cutModel, info);
   } catch (err) {
     if (err && err.name === 'CutRefused') {
       if (err.insideOut && !rightSideOut) {
@@ -2882,7 +2885,8 @@ function cutActiveModel(opts) {
   removeCutHelper();
   state.previewMesh = null;
   layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, plateAxis, stayA, stayB,
-                   info.base && !info.deg && !info.bevel ? info.normalWorld : null);
+                   info.base && !info.deg && !info.bevel ? info.normalWorld : null,
+                   !!(opts && opts.dice));      // Dice: the pieces stay where they were cut (Follow strand slices on along the cord)
   state.cutterOpen = true;
   state.editId = null;
   removeCutHelper();

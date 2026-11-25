@@ -29,7 +29,8 @@ function cutFollowOn() {
 function cutFollowStep() {
   const b = cutBladeState(), z = NSO_Notch.sizes(b);
   const slice = Number(b.slice) > 0 ? Number(b.slice) : CUT_FOLLOW_SLICE_DEFAULT;
-  return { slice: slice, kerf: z.kerf, pitch: slice + z.kerf };
+  const kerf = b.mode === 'sized' ? 0 : z.kerf;              // Dice is Chop's cut on one strand: no kerf between slices
+  return { slice: slice, kerf: kerf, pitch: slice + kerf };
 }
 
 /** Every piece on the plate as one soup, world frame: the strand goes on across the gaps cuts leave and the slices
@@ -116,9 +117,11 @@ function cutFollowNeighbours(soup, c, t, st) {
   const f = NSO_Strand.advance(soup, c, t, st.pitch, opts);
   const bt = [-t[0], -t[1], -t[2]];
   const b = NSO_Strand.advance(soup, c, bt, st.pitch, opts);
+  // a step that lands on a cut already made (Dice leaves no gap to fall into, only the two end faces) is no place to go
+  const free = a => a && !a.end && !cutFollowCutFaceAt(soup, a.c, a.t, 2);
   return {
-    next: f && !f.end ? { c: f.c, t: f.t } : null,
-    prev: b && !b.end ? { c: b.c, t: [-b.t[0], -b.t[1], -b.t[2]] } : null
+    next: free(f) ? { c: f.c, t: f.t } : null,
+    prev: free(b) ? { c: b.c, t: [-b.t[0], -b.t[1], -b.t[2]] } : null
   };
 }
 
@@ -297,12 +300,35 @@ function cutFollowEndDrag() {
   cutFollowSettle();
 }
 
+/** A cut face across the strand at its centre `c` (running along `t`, `r` its reach): a face square to the strand, in
+    the plane through c. Dice cuts with no kerf, so where it has cut the two pieces meet face to face and the cord runs
+    on without a gap - the trace reads it as whole cord there, and a blade put back on that plane would cut nothing
+    (and see no section of its own: the plane is the two pieces' end faces). */
+function cutFollowCutFaceAt(soup, c, t, r) {
+  const reach = (r || 2) * 1.2, TOL = 0.05;
+  for (let i = 0; i + 8 < soup.length; i += 9) {
+    const ax = soup[i], ay = soup[i + 1], az = soup[i + 2];
+    const mx = (ax + soup[i + 3] + soup[i + 6]) / 3, my = (ay + soup[i + 4] + soup[i + 7]) / 3, mz = (az + soup[i + 5] + soup[i + 8]) / 3;
+    if (Math.abs(mx - c[0]) > reach || Math.abs(my - c[1]) > reach || Math.abs(mz - c[2]) > reach) continue;
+    const ux = soup[i + 3] - ax, uy = soup[i + 4] - ay, uz = soup[i + 5] - az, vx = soup[i + 6] - ax, vy = soup[i + 7] - ay, vz = soup[i + 8] - az;
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const L = Math.hypot(nx, ny, nz);
+    if (!(L > 1e-12)) continue;
+    nx /= L; ny /= L; nz /= L;
+    if (Math.abs(nx * t[0] + ny * t[1] + nz * t[2]) < 0.99) continue;                        // not square to the strand
+    if (Math.abs((mx - c[0]) * t[0] + (my - c[1]) * t[1] + (mz - c[2]) * t[2]) > TOL) continue;  // not in the plane through c
+    return true;
+  }
+  return false;
+}
+
 /** Put the blade square across the strand at world point `c` (running along `t`, a hint: the sense is kept). The piece the
     strand is in becomes the selected one. Returns { ok, why }. */
 function cutFollowPlace(c, t, why, quiet) {
   const soup = cutFollowWorldSoup();
   const tr = NSO_Strand.traceAt(soup, c, { hint: t, up: CUT_FOLLOW_UP, within: 1.2 });
   if (!tr) return { ok: false, why: 'no strand there - already cut, or the strand has ended' };
+  if (cutFollowCutFaceAt(soup, tr.c, tr.t, tr.r)) return { ok: false, why: 'a cut is already there' };
   const idx = cutFollowPieceAt(tr.c, tr.t);
   if (idx < 0) return { ok: false, why: 'that strand is not on a piece on the plate' };
   const p = state.placed[idx];
@@ -320,11 +346,7 @@ function cutFollowPlace(c, t, why, quiet) {
   const off = cutFollowAim(m, tL);
   // The blade must reach through the cord: as wide as it is across, and in far enough from the top to clear the underside.
   const b = cutBladeState(), notes = [];
-  if (b.mode === 'sized') {                                  // (a notch stops short: its depth is the one you set, its width the strand's own)
-    const needD = Math.ceil((tr.h + 0.5) * 10) / 10, needW = Math.ceil((tr.w + 1) * 10) / 10;
-    if (b.depth < needD) { b.depth = needD; notes.push('depth raised to ' + needD + ' mm to go through the strand'); }
-    if (b.width < needW) { b.width = needW; notes.push('width raised to ' + needW + ' mm'); }
-  }
+  // (Dice fits the strand and goes through it by itself - app-cut.js cutBladeSpec; a notch's depth is the one you set)
   state.cutBladeAt = { modelId: m.id, local: topL, normal: upL.clone() };
   const f = cutFrame(m);
   const want = f.normal.dot(cL) - f.origin;

@@ -187,6 +187,27 @@
     return unNeedle(out);
   }
 
+  /* Every directed edge once and its twin once, by exact corners. */
+  function closedSoup(soup) {
+    var key = new Map(), nv = 0, nt = soup.length / 9, ids = new Int32Array(nt * 3), i;
+    for (i = 0; i < nt * 3; i++) {
+      var k = soup[i * 3] + ',' + soup[i * 3 + 1] + ',' + soup[i * 3 + 2], id = key.get(k);
+      if (id == null) { id = nv++; key.set(k, id); }
+      ids[i] = id;
+    }
+    var dir = new Map();
+    for (var t = 0; t < nt; t++) for (var c = 0; c < 3; c++) {
+      var a = ids[t * 3 + c], b = ids[t * 3 + (c + 1) % 3], dk = a * nv + b;
+      dir.set(dk, (dir.get(dk) || 0) + 1);
+    }
+    var open = 0, nm = 0;
+    dir.forEach(function (n, dk) {
+      var a = Math.floor(dk / nv), b = dk - a * nv, r = dir.get(b * nv + a) || 0;
+      if (n > 1 || r > 1) nm++; else if (r !== 1) open++;
+    });
+    return { open: open, nm: nm, closed: !open && !nm };
+  }
+
   /* A needle: three distinct corners in a line, no area (a T-junction the
      kernel's float32 corners leave). It goes, and the triangle across its long
      edge is split at its middle corner, so every edge still has its twin. */
@@ -355,7 +376,7 @@
     var C = r > 0 ? S.offset(r, 'Round').offset(-r, 'Round') : S;
     var polys = C.toPolygons(), outer = [];
     for (var i = 0; i < polys.length; i++) if (ringArea(polys[i]) > 0) outer.push(polys[i]);
-    var held = outer.length ? new W.CrossSection(outer, 'Positive') : new W.CrossSection([], 'Positive');
+    var held = outer.length ? new W.CrossSection(outer, 'Positive') : emptyCS(W);
     if (C !== S) C.delete();
     return held;
   }
@@ -385,8 +406,10 @@
     d1.delete(); d2.delete();
     return same;
   }
+  /* An empty cross-section: the kernel's constructor throws on no polygons. */
+  function emptyCS(W) { var q = W.CrossSection.square([1, 1]), e = q.subtract(q); q.delete(); return e; }
   function unionAll(W, list) {
-    if (!list.length) return new W.CrossSection([], 'Positive');
+    if (!list.length) return emptyCS(W);
     if (list.length === 1) return list[0].translate([0, 0]);
     return W.CrossSection.union(list);
   }
@@ -661,6 +684,11 @@
       if (!(added > 1e-9)) { base.reason = T.name + ': ' + T.nothing + ' Nothing changed.'; return base; }
       lap('simplify');
       var mesh = manifoldToSoup(t2, R.F), foamSoup = null;
+      /* Closed, or nothing: float32 rounding can land two of the kernel's
+         sheets on one edge. The piece is never handed back open. */
+      var shut = closedSoup(mesh);
+      if (!shut.closed) return refusal(soup, 'open', T.name + ': the result would not stay closed (' + shut.open + ' open, ' + shut.nm +
+        ' non-manifold edges where the foam meets the piece) - try the points closer to the dip. Nothing changed.');
       if (opts.preview !== false) {
         var f1 = foam.trimByPlane([0, 0, -1], -R.zmax), f2 = f1.trimByPlane([0, 0, 1], R.zmin);
         made.push(f1, f2);
@@ -699,9 +727,11 @@
      a, b: { point, normal } on the piece, raw (normal: the face's outward
      normal at the click). The straight edge is the line a-b, laid on the
      surface (its part along the normal dropped). On a wall (|normal . up| <
-     0.7) it sweeps up the plate's vertical (opts.up), whatever height each
-     point was clicked at; on a face it sweeps across the face, s = edge x
-     normal, snapped to a raw axis when within 25 degrees of one. In each slab
+     0.7) it sweeps across the way the points were clicked: side by side (the
+     edge more level than steep) up the plate's vertical (opts.up), whatever
+     height each point was at; one above the other, along the wall. On a face
+     it sweeps across the face, s = edge x normal. Snapped to a raw axis when
+     within 25 degrees of one. In each slab
      along s, the straight edge rests on the high spots between the two
      points - the convex hull of the piece within the strip between them (a
      chord's length into the air and into the piece) and the two points - and
@@ -713,7 +743,8 @@
      =================================================================== */
   var FLOAT_MIN = 0.05;       // mm: two points closer than this are one
   var FLOAT_MIN_DEPTH = 0.002; // mm: a dip shallower than this on average along the edge is float noise, not a dip
-  var FLOAT_BAND = 0.01;      // mm: the strip's outer edge, for telling open air
+  var FLOAT_BAND = 0.01;
+  var FLOAT_TOUCH = 0.05;     // mm: material within this of the edge, either side, is the surface being floated      // mm: the strip's outer edge, for telling open air
   var FLOAT_SNAP = 0.906;     // cos 25 deg: s this near a raw axis is that axis
   var FLOAT_WALL = 0.7;       // a normal this far across the plate's vertical (|n.up| under it) is a wall
   function floatRead(W, soup, a, b, opts) {
@@ -728,8 +759,19 @@
        vertical, whatever height each point was clicked at; a face (its normal
        along it) floats across itself, square to the edge. */
     var up = norm(opts.up || [0, 0, 1]) || [0, 0, 1], sd;
-    if (Math.abs(dot(n, up)) < FLOAT_WALL) sd = up;
-    else {
+    if (Math.abs(dot(n, up)) < FLOAT_WALL) {
+      /* A wall: the fill runs across the way the points were clicked - side
+         by side, it runs up the wall; one above the other, it runs along the
+         wall (a hole in a narrow band between two ledges is floated across
+         the band, clear of the ledges). */
+      var cu = dot(ct, up), chz = Math.hypot(ct[0] - cu * up[0], ct[1] - cu * up[1], ct[2] - cu * up[2]);
+      if (Math.abs(cu) <= chz) sd = up;
+      else {
+        sd = norm(cross(up, n));
+        if (!sd) return { ok: false, kind: 'aim', reason: 'the two points do not lie across the surface' };
+        for (var k0 = 0; k0 < 3; k0++) if (Math.abs(sd[k0]) > FLOAT_SNAP) { var ax0 = [0, 0, 0]; ax0[k0] = sd[k0] > 0 ? 1 : -1; sd = ax0; break; }
+      }
+    } else {
       sd = norm(cross(ct, n));
       if (!sd) return { ok: false, kind: 'aim', reason: 'the two points do not lie across the surface' };
       for (var k = 0; k < 3; k++) if (Math.abs(sd[k]) > FLOAT_SNAP) { var ax = [0, 0, 0]; ax[k] = sd[k] > 0 ? 1 : -1; sd = ax; break; }
@@ -758,23 +800,46 @@
        chord's length out in the air to a chord's length into the piece. */
     var Wst = strip(sg, -D, D), far = strip(sg, -D, -D + FLOAT_BAND);
     /* One slab: the straight edge rests on the high spots - the hull of the
-       piece in the strip (the points are on its surface, so the strip's ends
-       hold the edge there) - and the dip is what of that
-       hull is open air reached from outside (air in the strip connected to its
-       outer edge): never a hole inside the piece, never the piece's far side.
-       -> { dip, held } or null */
-    function dipAt(S) {
-      var m0 = S.intersect(Wst), H = m0.hull();
-      m0.delete();
-      var air = Wst.subtract(S), parts = air.decompose(), outside = [];
-      air.delete();
+       piece's material in the strip that is joined to the surface along the
+       edge (the points are on that surface, so the strip's ends hold the edge
+       there; material elsewhere in the strip - a hook, a lip, the far side of
+       a channel - is not the surface being floated and has no say) - and the
+       dip is what of that hull is open air reached from outside the whole
+       section: never a hole inside the piece, and a lip standing in front does
+       not wall the air in. -> { dip, held } or null */
+    var touch = strip(sg, -FLOAT_TOUCH, FLOAT_TOUCH);
+    function exteriorAir(S) {
+      var bb = S.bounds(), pad = 1;
+      var lo = [bb.min[0] - pad, bb.min[1] - pad], hi2 = [bb.max[0] + pad, bb.max[1] + pad];
+      var rect = new W.CrossSection([[lo, [hi2[0], lo[1]], hi2, [lo[0], hi2[1]]]], 'NonZero');
+      var inner = new W.CrossSection([[[lo[0] + pad / 2, lo[1] + pad / 2], [hi2[0] - pad / 2, lo[1] + pad / 2], [hi2[0] - pad / 2, hi2[1] - pad / 2], [lo[0] + pad / 2, hi2[1] - pad / 2]]], 'NonZero');
+      var border = rect.subtract(inner), air = rect.subtract(S), parts = air.decompose(), keep = [];
+      inner.delete(); air.delete();
       for (var q = 0; q < parts.length; q++) {
-        var x = parts[q].intersect(far), ok = x.area() > MIN_AREA * 1e-3;
+        var x = parts[q].intersect(border), ok = x.area() > MIN_AREA;
         x.delete();
-        if (ok) outside.push(parts[q]); else parts[q].delete();
+        if (ok) keep.push(parts[q]); else parts[q].delete();
       }
-      var O = unionAll(W, outside);
-      for (q = 0; q < outside.length; q++) outside[q].delete();
+      rect.delete(); border.delete();
+      var O = unionAll(W, keep);
+      for (q = 0; q < keep.length; q++) keep[q].delete();
+      return O;
+    }
+    function dipAt(S) {
+      var m0 = S.intersect(Wst), mp = m0.decompose(), joined = [];
+      m0.delete();
+      for (var q = 0; q < mp.length; q++) {
+        var x = mp[q].intersect(touch), ok = x.area() > MIN_AREA * 1e-3;
+        x.delete();
+        if (ok) joined.push(mp[q]); else mp[q].delete();
+      }
+      if (!joined.length) return null;
+      var M = unionAll(W, joined);
+      for (q = 0; q < joined.length; q++) joined[q].delete();
+      var H = M.hull();
+      M.delete();
+      var Ox = exteriorAir(S), O = Ox.intersect(Wst);
+      Ox.delete();
       var d0 = H.intersect(O), dps = d0.decompose(), keep = [];
       d0.delete(); O.delete();
       for (q = 0; q < dps.length; q++) { if (dps[q].area() > MIN_AREA) keep.push(dps[q]); else dps[q].delete(); }
@@ -787,7 +852,7 @@
     /* Float noise on an even face leaves a dip a few ten-thousandths deep:
        less than FLOAT_MIN_DEPTH on average along the edge is no dip. */
     if (f0 && f0.dip.area() / L < FLOAT_MIN_DEPTH) { f0.dip.delete(); f0.held.delete(); f0 = null; }
-    if (!f0) { Wst.delete(); far.delete(); return { ok: false, kind: 'flat', reason: 'nothing to float there - the surface between the two points is already straight or proud' }; }
+    if (!f0) { Wst.delete(); far.delete(); touch.delete(); return { ok: false, kind: 'flat', reason: 'nothing to float there - the surface between the two points is already straight or proud' }; }
     lap('bridge');
     var first = f0.dip, pockets = new Array(P.nS), helds = new Array(P.nS);
     pockets[js] = first; helds[js] = f0.held;
@@ -803,13 +868,15 @@
         j += dir;
       }
     }
-    Wst.delete(); far.delete();
+    Wst.delete(); far.delete(); touch.delete();
     lap('pocket');
     return { ok: true, F: P.F, m: P.m, cuts: P.cuts, lo: lo, hi: hi, pockets: pockets, helds: helds, r: 0, r0: 0, zmin: P.zmin, zmax: P.zmax,
              reachesPlate: lo === 0, reachesFace: hi === P.nS - 1, nS: P.nS, along: sd, length: L };
   }
   function floatWords(r) {
-    return 'Floated - ' + vol(r.addedVolume) + ' mm³ filled up to a straight edge resting on the high spots between the two points, along the dip' +
+    var run = r.span ? r.span[1] - r.span[0] : 0;
+    return 'Floated - ' + vol(r.addedVolume) + ' mm³ filled up to a straight edge resting on the high spots between the two points, along ' +
+           mm(run) + ' mm of the dip' +
            (r.amount < 100 ? ' (' + Math.round(r.amount) + '% of the way)' : '') + '.';
   }
   var FLOAT_T = { name: 'Float', verb: 'float', nothing: 'nothing to float - the surface between the two points is already straight or proud.', words: floatWords };

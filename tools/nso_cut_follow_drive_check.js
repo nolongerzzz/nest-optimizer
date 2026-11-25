@@ -8,7 +8,7 @@
    - A click on the cord with Follow strand on stands the blade square across it: the blade's normal is the cord's
      direction there (read from the cord's own sections, nso_strand.js), and its section is the cord's own round one.
      The blade is made deep and wide enough to go through (the card says so).
-   - Forward / Back walk it one step (slice + kerf = 2.5 mm) along the cord, staying square round the bend; Back
+   - Forward / Back walk it one step (slice + Dice's kerf, which is none: 1.5 mm) along the cord, staying square round the bend; Back
      comes home.
    - Cut cuts and moves on to the next slice by itself, three times running: each cut severs one more piece, the
      blade is on the cord 2.5 mm further on, and the pieces between the cuts are slices of the slice's thickness.
@@ -200,7 +200,8 @@ withApp(async (page, logs) => {
   await clickAt(crown);
   await waitStatus(/Follow: strand found/);
   const st1 = await status();
-  check('the status line says what it did', /3\.\d mm cord, step 2\.5 mm/.test(st1), st1);
+  // a step is the slice: Dice has no kerf
+  check('the status line says what it did', /3\.\d mm cord, step 1\.5 mm/.test(st1), st1);
   let fa = await follow(), b = await blade();
   check('the strand is traced and the blade placed', !!fa && !!b);
   const cord = await page.evaluate(c => __cordAt(c), b.centre);
@@ -208,8 +209,9 @@ withApp(async (page, logs) => {
   check('the blade faces along the cord (< 1 degree)', cord && angle(b.normal, cord.t) < 1, cord ? angle(b.normal, cord.t).toFixed(2) + ' deg' : 'no cord');
   let sec = await page.evaluate(([c, n]) => __sectionArea(c, n), [b.centre, b.normal]);
   check('its section is the cord\'s own round one', sec && Math.abs(sec.area / POLY_AREA - 1) < 0.02, sec ? (sec.area / POLY_AREA).toFixed(4) + ' x the round section' : 'none');
-  const dims = await page.evaluate(() => ({ d: state.cutBlade.depth, w: state.cutBlade.width }));
-  check('the blade goes through the cord (deeper than it is thick, wider than it is across)', dims.d >= 4.1 && dims.w >= 4.6, JSON.stringify(dims));
+  // Dice fits the strand and goes through it: its box, read off the blade it will cut with
+  const dims = await page.evaluate(() => { const z = getCutPlaneLocal(getActiveModel()).blade.sizes; return { d: z.depth, w: z.width }; });
+  check('the blade goes through the cord (deeper than it is thick, wider than it is across)', dims.d >= 4.1 && dims.w >= 4.5, JSON.stringify(dims));
 
   console.log('Forward and Back');
   const c0 = fa.c;
@@ -217,7 +219,7 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(400);
   fa = await follow(); b = await blade();
   const step = len(sub(fa.c, c0));
-  check('Forward moves one step (2.5 mm along a gentle bend)', step > 2.35 && step < 2.55, step.toFixed(3) + ' mm');
+  check('Forward moves one step (1.5 mm along a gentle bend: the slice; Dice has no kerf)', step > 1.44 && step < 1.56, step.toFixed(3) + ' mm');
   const cord2 = await page.evaluate(c => __cordAt(c), b.centre);
   check('and the blade is square across the cord there too', cord2 && angle(b.normal, cord2.t) < 1, cord2 ? angle(b.normal, cord2.t).toFixed(2) + ' deg' : 'no cord');
   check('the cord turned a little between the two', cord && cord2 && angle(cord.t, cord2.t) > 1 && angle(cord.t, cord2.t) < 25, cord && cord2 ? angle(cord.t, cord2.t).toFixed(1) + ' deg' : '');
@@ -235,20 +237,21 @@ withApp(async (page, logs) => {
   for (let i = 1; i <= 3; i++) {
     centres.push(prev);
     await page.click('#btn-cut');
-    await waitStatus(/Sized cut/);
+    await waitStatus(/Dice cut/);
     await page.waitForTimeout(300);
     const s = await status(), now = await follow(), bb = await blade();
     const moved = now ? len(sub(now.c, prev)) : -1;
     const cd = now && await page.evaluate(c => __cordAt(c), bb.centre);
-    check('cut ' + i + ': another piece, the blade on to the next slice 2.5 mm on, square',
-      (await models()) === 1 + i && moved > 2.35 && moved < 2.55 && cd && angle(bb.normal, cd.t) < 1,
+    check('cut ' + i + ': another piece, the blade on to the next slice 1.5 mm on (no kerf), square',
+      (await models()) === 1 + i && moved > 1.44 && moved < 1.56 && cd && angle(bb.normal, cd.t) < 1,
       'pieces ' + (await models()) + ', moved ' + moved.toFixed(3) + ' mm' + (cd ? ', ' + angle(bb.normal, cd.t).toFixed(2) + ' deg off square' : ''));
-    check('cut ' + i + ': the status line reports the cut and the move', /Sized cut/.test(s) && /Follow: on to the next slice/.test(s), s.slice(0, 200));
+    check('cut ' + i + ': the status line reports the cut and the move', /Dice cut/.test(s) && /Follow: on to the next slice/.test(s), s.slice(0, 200));
     prev = now ? now.c : prev;
   }
   const all = await page.evaluate(() => ({ vols: __pieceVolumes(), pa: __probeAll() }));
   const total = all.vols.reduce((a, b) => a + b.vol, 0), removed = v0 - total;
-  check('what came out is the kerf: 3 x 1 mm of the cord\'s section', Math.abs(removed - 3 * POLY_AREA) < 0.2 * 3 * POLY_AREA, removed.toFixed(2) + ' mm3 vs ' + (3 * POLY_AREA).toFixed(2));
+  // Dice is Chop's cut on one strand: no kerf, nothing comes out
+  check('nothing came out: Dice cuts with no kerf', Math.abs(removed) < 0.01, removed.toFixed(4) + ' mm3');
   const sorted = all.vols.map(v => v.vol).sort((a, b) => a - b);
   const slices = sorted.slice(0, 2);                       // the two pieces between cuts are the smallest
   check('the two slices are about 1.5 mm thick', slices.every(v => v > 1.5 * POLY_AREA * 0.85 && v < 1.5 * POLY_AREA * 1.15), slices.map(v => v.toFixed(2)).join(', ') + ' mm3 vs ' + (1.5 * POLY_AREA).toFixed(2));
@@ -260,7 +263,7 @@ withApp(async (page, logs) => {
   // asked anyway (a stale click, a keystroke), the card refuses and the blade stays put - it does not jump to another turn
   await page.evaluate(() => cutFollowMove(-1));
   const sb = await status(), fb = await follow();
-  check('and asked anyway it says so and does not move', /end of the strand/.test(sb) && fb && len(sub(fb.c, prev)) < 0.1, sb + (fb ? ' | moved ' + len(sub(fb.c, prev)).toFixed(3) : ''));
+  check('and asked anyway it says so and does not move', /end of the strand|a cut is already there/.test(sb) && fb && len(sub(fb.c, prev)) < 0.1, sb + (fb ? ' | moved ' + len(sub(fb.c, prev)).toFixed(3) : ''));
   // placing there directly (as an old click would) is refused too
   const refusedPlace = await page.evaluate(c => cutFollowPlace(c, state.cutFollowAt.t, 'test', true), centres[centres.length - 1]);
   check('placing the blade in a kerf already cut is refused', refusedPlace && refusedPlace.ok === false, JSON.stringify(refusedPlace));
@@ -385,7 +388,7 @@ withApp(async (page, logs) => {
   check('there is no separate Single strand box, and Follow strand takes the one strand', !boxes.strandBox && boxes.isolate, JSON.stringify(boxes));
   await page.uncheck('#chk-cut-follow');
   const offIso = await page.evaluate(() => !!getCutPlaneLocal(getActiveModel()).blade.isolate);
-  check('unticked, it is a plain sized blade (takes everything in its box)', offIso === false);
+  check('unticked, Dice still cuts only the strand clicked (it does not follow, that is all)', offIso === true);
   await page.evaluate(() => { state.cutFollowAt = null; });
 
   console.log('Notch with Follow strand');
@@ -484,9 +487,9 @@ withApp(async (page, logs) => {
     state.cutBlade.followDir = d(fa.next) < d(fa.prev) ? 1 : -1;
   }, [tip]);
   let last = null, cuts = 0;
-  for (let i = 0; i < 4 && !last; i++) {
+  for (let i = 0; i < 8 && !last; i++) {                       // slices 1.5 mm apart (no kerf): a few more cuts than at 2.5
     await page.click('#btn-cut');
-    await page.waitForFunction(() => /Sized cut|Cut not made/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+    await page.waitForFunction(() => /Sized cut|Dice cut|Cut not made/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
     await page.waitForTimeout(300);
     const s = await status(); cuts++;
     if (/Cut not made/.test(s)) { last = 'refused: ' + s; break; }

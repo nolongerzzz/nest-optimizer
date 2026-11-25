@@ -211,14 +211,14 @@ function bounds(s) {
   const stepped = soupOf(box(20, 10, 20, -10, 5, 10).add(box(20, 10.05, 20, 10, 4.975, 10)));    // fronts at y = 0 and y = -0.05
   const rf = await fl(stepped, [-6, 0, 15], [0, -1, 0], [8, -0.05, 4], [0, -1, 0]);
   gateFloat('a step between two welded faces, points 6 mm and 8 mm either side', stepped, rf, 0.5 * 6 * 0.05 * 20);
-  check('...a wall floats up the wall, whatever height each point was clicked at', rf.ok && rf.along && rf.along[2] === 1 && rf.reachesPlate && rf.reachesFace,
+  check('...points side by side on a wall float up the wall, whatever height each was clicked at', rf.ok && rf.along && rf.along[2] === 1 && rf.reachesPlate && rf.reachesFace,
         JSON.stringify(rf.along));
   check('...and the edge rests on the high corner, not the line to the second point: the ramp ends at the step', rf.ok && rel(rf.addedVolume, 3) < 0.02,
         rf.ok && rf.addedVolume.toFixed(3) + ' (to the step: 6 x 0.05 / 2 x 20 = 3; the line to the second point would give 1.29)');
   /* A V-groove 1 mm wide, 0.3 mm deep, down the whole front wall. */
   const groove = soupOf(box(20, 10, 20, 0, 5, 10).subtract(W.Manifold.cylinder(30, 0.6, 0.6, 3).rotate([0, 0, 90]).translate([0, -0.3, -5])));
   const blockVol = vol(soupOf(box(20, 10, 20, 0, 5, 10)));
-  const rg = await fl(groove, [-3, 0, 10], [0, -1, 0], [3, 0, 2], [0, -1, 0]);
+  const rg = await fl(groove, [-3, 0, 10], [0, -1, 0], [3, 0, 7], [0, -1, 0]);
   gateFloat("a V-groove down a wall, points either side of it", groove, rg, blockVol - vol(groove), 0.01);
   /* A pit in the top face: 2 x 2 mm, 0.3 deep. */
   const pit = soupOf(box(20, 10, 20, 0, 5, 10).subtract(box(2, 2, 0.6, 0, 5, 20)));
@@ -232,10 +232,39 @@ function bounds(s) {
   /* fixtures/welded_step.stl: two blocks welded with their fronts 0.054 mm apart at x = -10. */
   const ws = readSTL(path.join(ROOT, 'fixtures', 'welded_step.stl'));
   const t11 = Date.now();
-  const rws = await fl(ws, [-12, -15.036, 5], [0, -1, 0], [-8, -15.09, -3], [0, -1, 0]);
+  const rws = await fl(ws, [-12, -15.036, 5], [0, -1, 0], [-8, -15.09, 3], [0, -1, 0]);
   /* The oracle: the section at mid-height in shapely - the hull of the piece in
      the strip between the points, less the piece - 0.05063 mm² - x 38.52 mm. */
   gateFloat('welded_step.stl: the seam between the two fronts (' + (Date.now() - t11) + ' ms)', ws, rws, 0.050634 * 38.52, 0.02);
+
+  /* A countersunk hole in a wall, in a band between two proud ledges - a slatwall's back
+     wall between its bevel and its hook - standing on end: up runs along the band. */
+  const csk = () => {
+    const cyl = W.Manifold.cylinder(6, 2.54, 2.54, 64).rotate([-90, 0, 0]).translate([0, 4.41, 15]);          // y 4.41..10.41
+    const cone = W.Manifold.cylinder(2.03, 4.31, 2.54, 64).rotate([-90, 0, 0]).translate([0, 2.38, 15]);       // y 2.38..4.41
+    const mouth = W.Manifold.cylinder(1, 4.31 + 0.872, 4.31, 64).rotate([-90, 0, 0]).translate([0, 1.38, 15]); // past the face
+    return cyl.add(cone).add(mouth);
+  };
+  const wallB = box(40, 6.35, 30, 0, 5.555, 15), ledges = box(40, 5.38, 4, 0, -0.31, 2).add(box(40, 5.38, 4, 0, -0.31, 28));
+  const solidBand = wallB.add(ledges), holed = soupOf(solidBand.subtract(csk()));
+  const holeVol = vol(soupOf(solidBand)) - vol(holed);
+  const UP = { up: [1, 0, 0] };
+  const rh = await fl(holed, [-8, 2.38, 15], [0, -1, 0], [8, 2.38, 15], [0, -1, 0], UP);
+  gateFloat('a countersunk hole in a band between two ledges, points either side of it along the band', holed, rh, holeVol, 0.01);
+  check('...points one above the other on a wall float along the wall: across the band, clear of the ledges', rh.ok && rh.along && Math.abs(rh.along[2]) === 1,
+        JSON.stringify(rh.along));
+  const coneAt = (th, y) => { const r = 2.54 + (4.41 - y) * (4.31 - 2.54) / 2.03; return [r * Math.cos(th), y, 15 + r * Math.sin(th)]; };
+  const coneN = th => { const k = (4.31 - 2.54) / 2.03, l = Math.hypot(1, k); return [-Math.cos(th) / l, -k / l, -Math.sin(th) / l]; };
+  const rc1 = await fl(holed, coneAt(Math.PI, 3.0), coneN(Math.PI), coneAt(0, 3.0), coneN(0), UP);
+  check('points on the countersink\'s bevel: the hole floated up to them, not past them', rc1.ok && rc1.changed && rc1.addedVolume > 0.8 * holeVol && rc1.addedVolume < 0.97 * holeVol,
+        rc1.ok && rc1.addedVolume.toFixed(1) + ' of ' + holeVol.toFixed(1));
+  if (rc1.ok && rc1.changed) {
+    const again = await fl(rc1.mesh, coneAt(Math.PI, 3.0), coneN(Math.PI), coneAt(0, 3.0), coneN(0), UP);
+    check('...the same points again: nothing more to float there', !again.ok && again.kind === 'flat', again.reason);
+    const rest = await fl(rc1.mesh, [-8, 2.38, 15], [0, -1, 0], [8, 2.38, 15], [0, -1, 0], UP);
+    check('...points on the flat face round it take the rest: the hole is closed flush', rest.ok && rest.changed && Math.abs(rc1.addedVolume + rest.addedVolume - holeVol) < 0.01 * holeVol,
+          rest.ok && (rc1.addedVolume + rest.addedVolume).toFixed(1) + ' of ' + holeVol.toFixed(1));
+  }
 
   for (const [name, a, an, b, bn] of [['the right block\'s even front face', [-8, -15.09, 5], [0, -1, 0], [-4, -15.09, -2], [0, -1, 0]],
                                        ['the left block\'s even top face', [-14, -10, 19.24], [0, 0, 1], [-11, 5, 19.24], [0, 0, 1]]]) {

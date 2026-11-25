@@ -174,6 +174,24 @@ window.__bladeY = function () {
     const odd = await page.evaluate(() => ({ y: __bladeY(), w: state.cutBlade.nwidth }));
     check('From 1.25 / To 11.25 is exactly that - the notch carries what the slider\'s step cannot', near(odd.y[0], 1.25, 1e-3) && near(odd.y[1], 11.25, 1e-3) && odd.w === 10, JSON.stringify(odd));
 
+    console.log('Turn 90: a pocket the length of the face');
+    // the 0..10 notch off (one Undo), then the same wall's top clicked again, turned: 5 wide across the face, 2 deep
+    await page.click('#btn-undo');
+    const t0 = await page.evaluate(() => __vol());
+    await page.mouse.move(xy[0], xy[1]); await page.mouse.down(); await page.mouse.move(xy[0] + 2, xy[1] + 2); await page.mouse.up();
+    await page.evaluate(() => { const b = cutBladeState(); b.nwidth = 5; b.ndepth = 2; b.nshift = 0; cutBladeRefresh(); });
+    await page.click('#btn-cut-notch-turn');
+    const tv = await page.evaluate(() => ({ pressed: document.getElementById('btn-cut-notch-turn').getAttribute('aria-pressed'),
+      spanHidden: document.getElementById('cut-notch-from').closest('.cut-slide-row').hidden, ro: document.getElementById('cut-readout').textContent,
+      turned: getCutPlaneLocal(getActiveModel()).blade.turned }));
+    check('Turn 90 is pressed, the notch is turned, and From / To are put away', tv.pressed === 'true' && tv.turned && tv.spanHidden, JSON.stringify(tv));
+    check('the readout says across the face, the length of the face', /NOTCH, TURNED - 5 wide across the face .* 2 deep, the length of the face \(\d/.test(tv.ro), tv.ro);
+    const t1 = await page.evaluate(async () => { await cutNotchAt(getActiveModel(), getCutPlaneLocal(getActiveModel())); return { v: __vol(), st: document.getElementById('status').textContent, n: state.models.length }; });
+    // the wall's inside face runs the piece's whole 25 mm height: 5 x 2 x 25
+    check('it takes 5 x 2 x 25: a pocket down the whole inside face, one piece still', near(t0.vol - t1.v.vol, 250, 0.5) && t1.n === 1 && /pocket along the face/.test(t1.st),
+      (t0.vol - t1.v.vol).toFixed(3) + ' of 250; ' + t1.st);
+    check('closed', t1.v.open === 0 && t1.v.nm === 0, JSON.stringify(t1.v));
+
     const errs = logs.filter(l => /error|exception/i.test(l) && !/favicon|Failed to load resource/i.test(l));
     check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
     console.log(fails ? '\n' + fails + ' FAILED' : '\nall gates held');

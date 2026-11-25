@@ -149,18 +149,30 @@ edge: the follow-up for what the GUN cannot click - an uneven seam, a step betwe
 faces, a shallow notch, a pit in a face. It only fills; it never cuts.
 
 - **The points**: two clicks on the piece, each a point and its face's outward normal (raw).
-- **The sweep**: on a wall (the normals across the plate's vertical, |n . up| < 0.7) it floats up
-  the wall, whatever height each point was clicked at; on a face it floats across the face,
-  square to the edge (s = edge x normal, snapped to a raw axis within 25 degrees). The piece is
-  read in slabs along the sweep, as the GUN reads it along up.
+- **The sweep**: on a wall (the normals across the plate's vertical, |n . up| < 0.7) the fill runs
+  across the way the points were clicked: side by side (the edge more level than steep), up the
+  wall whatever height each point was at; one above the other, along the wall. On a face it floats
+  across the face, square to the edge (s = edge x normal). Snapped to a raw axis within 25 degrees.
+  The piece is read in slabs along the sweep, as the GUN reads it along up.
 - **The straight edge rests on the high spots**: in each slab, in the strip between the two points
-  (a chord's length out into the air and into the piece), the hull of the piece is the edge's
-  line; the dip is the open air inside that hull reached from outside - never a hole in the piece,
-  never its far side. A second point on the proud face of a step does not drag the edge into it:
-  the edge rests on the step's corner, and the ramp ends there.
+  (a chord's length out into the air and into the piece), the hull of the piece's material that is
+  joined to the surface along the edge (within 0.05 mm of it, either side) is the edge's line -
+  material elsewhere in the strip (a hook, a lip, the far side of a channel) is not the surface
+  being floated and has no say. The dip is the open air inside that hull that is connected to the
+  outside of the whole section - never a hole in the piece, and a lip standing in front does not
+  wall the air in. A second point on the proud face of a step does not drag the edge into it: the
+  edge rests on the step's corner, and the ramp ends there.
+- **Holes**: points on the flat face either side of a hole float it closed flush in one go. Points on
+  a countersink's bevel float it up to them, not past them (the edge sits where it was put); points
+  on the flat face round it then take the rest. On a wall in a narrow band between two ledges (a
+  slatwall's back wall between its bevel and its hook), click along the band: across it, the points
+  land on the ledges and the edge floats the band itself, the whole length of the piece.
 - **Along the dip**: slab by slab from the points' own, out while the dip goes on.
 - **Not a dip**: a dip less than 0.002 mm deep on average along the edge is an even face's float
   noise - "nothing to float", nothing drawn, nothing set.
+- **Closed, or nothing**: a result the kernel's float32 corners would leave open is refused in words,
+  nothing changed (the GUN too). The readout says how far along the dip the fill ran ("along 9.0 mm
+  of the dip"), so a fill that ran the whole piece is plain.
 - **The foam** is the GUN's (`fillPockets`, shared): each slab's dip grown 0.03 mm into the piece,
   never past the edge, prisms, one union, the overshoot at the piece's ends trimmed back.
 
@@ -182,3 +194,4 @@ surface between them already straight or proud); not one closed solid; non-solid
 | a pit 2 x 2 x 0.3 mm in a top face | 1.206 mm³ (1.2), floated across the face |
 | two points on a flat wall / on top of each other | refused |
 | fixtures/welded_step.stl's seam (fronts 0.054 mm apart) | 1.93 mm³ against shapely's 1.95, 0.14 s |
+| a countersunk hole in a wall, in a band between two ledges, standing on end | points along the band: 163.4 of 163.8 mm³ in one go; on the bevel: 150.1, the same points again nothing, then the flat face round it: 163.5 |
