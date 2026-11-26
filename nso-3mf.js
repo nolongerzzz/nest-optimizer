@@ -130,7 +130,7 @@
    * @param {{name:string, data:Uint8Array}[]} entries
    * @returns {Promise<Uint8Array>} the ZIP archive
    */
-  var ZIP_MAX_RATIO = 20, ZIP_RATIO_MIN_BYTES = 65536;
+  var ZIP_MAX_RATIO = 8, ZIP_RATIO_MIN_BYTES = 65536;   /* 8: the flow bars' 12 : 1 (59 KB) would not send either; 4 - 7 : 1 plates always have */
   function buildZip(entries) {
     // DOS timestamp is fixed so the same plate + profile always produces a
     // byte-identical archive. Makes exports diffable and the round-trip test
@@ -147,7 +147,7 @@
       return deflateRaw(p.raw).then(function (def) {
         // Only take the deflated form if it actually saved space - and not when it shrinks a big entry past ZIP_MAX_RATIO: Bambu's cloud refuses
         // such a file with a bare HTTP 400 (the owner's PETG flow tube, 2026-11-25: 1.9 MB of G-code deflated 44 : 1 to 44 KB would not send, 4
-        // times out of 4; the same bytes stored went at once). A normal plate's G-code deflates 4 - 7 : 1.
+        // times out of 4; the same bytes stored went at once; the flow bars at 12 : 1 failed too). A normal plate's G-code deflates 4 - 7 : 1.
         var tooSqueezed = def && p.raw.length > ZIP_RATIO_MIN_BYTES && def.length * ZIP_MAX_RATIO < p.raw.length;
         if (def && def.length < p.raw.length && !tooSqueezed) {
           p.method = 8;
