@@ -945,7 +945,7 @@ async function main() {
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu', bridgeTemp: 212 }) });
     check('a bridge temperature on the P1S is refused: its park and wipe moves are not written yet', !p1sBt.ok && /written for the A1 mini only so far/.test(p1sBt.reason), p1sBt.reason);
     check('...the card\'s CR-TPU on the P1S is the owner\'s own P1S preset (fixtures/print-planner/p1s-0.4/studio-owner-cr-tpu-squishy): 220 C, first layer too, bed 30, 3 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 220, firstTemp: 220, bedTemp: 30, maxFlow: 3, rangeLow: 200, rangeHigh: 250,
-      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0, bridgeSpeed: 50, bridgeFlow: 1, hangSpeed: null, bridgeTemp: null, coolWait: 8, coolPillar: true, supTopZ: PRINT.settingsFromConfig(p1sCfg).supTopZ }), JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')));
+      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0, bridgeSpeed: 50, bridgeFlow: 1, hangSpeed: null, bridgeTemp: null, coolWait: 8, coolPillar: true, supTopZ: 0.2 }), JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')));
     const p1sOwn = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu' }) });
     check('...and CR-TPU with every row empty slices for the P1S: the filament asks for no bridge temperature where the printer has no park (only a number typed in the row is refused)', p1sOwn.ok && p1sOwn.stats.bridgeTemp === null, p1sOwn.reason);

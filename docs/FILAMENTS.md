@@ -337,7 +337,7 @@ proven to need on a printer goes into its entry (`keys`, `printerKeys`, `cooling
 | | A1 mini | P1S |
 |---|---|---|
 | Profile (PLA) | the template, printed often | the template, printed often; the owner's projects set Top Z 0.33 too |
-| CR-TPU 95A | 215 / 235 C, bed 30, slicer rules (temperature tower, string test, roofs) | the owner's preset: 220 C, bed 30, fan 40 - 65 % |
+| CR-TPU 95A | 215 / 235 C, bed 30, slicer rules (temperature tower, string test, roofs); **supports: Top Z 0.2** (the shelves, 2026-11-25) | the owner's preset: 220 C, bed 30, fan 40 - 65 % |
 | ELEGOO PETG | the owner's preset 245 C, 10 mm^3/s; **supports: Top Z 0.33** (Supporttest, 2026-11-23) | Generic PETG 255 C, **16 mm^3/s** (the flow rings, 2026-11-25: clean as far as they reached - about 17, the rings' corners capping every band above it; Generic's 12 before); supports: Top Z 0.33 |
 
 **NSO's baseline support gap is 0.33 mm** (`nsoBaseline` in `app-print.js`, written into each printer's template as it is fetched, so
@@ -349,7 +349,10 @@ too hard a first test: `models/tpu-support-ladder` is four flat shelves at 0.4, 
 `supportGapMm`), sliced in CR-TPU on the A1 mini - its print sets CR-TPU's own gap. Printed 2026-11-25: all four peeled off about equally, no loose strands.
 NSO had rounded each gap up to whole part layers (0.21 - 0.40 all print 0.4 at 0.2 mm layers), so the 0.4 shelf is the 0.33 baseline as NSO
 prints it - CR-TPU releases there. **Exact top gap** (support rows, `supExactGap`) now prints a gap to the dot: the support's own layers end
-the gap under the part. Next: 0.2 alone (one layer of air), then 0.36 - 0.39 exact, for the underside's finish.
+the gap under the part. Then: 0.36 - 0.39 exact peeled off equally too; **0.2 (one layer of air) peeled off and
+left the smoothest underside**, a little sticky at the edges; four interfaces at 0.2 (the default, closed crosswise, closed one way, closed
+concentric) with a 20 s interface wait could not be told apart. **CR-TPU's own support gap is 0.2** (`tune`: `supTopZ`), the default
+interface, no wait.
 
 Still open: supports for CR-TPU against a print, and the PETG Supporttest printed from NSO's own slice.
 

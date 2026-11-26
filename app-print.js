@@ -276,7 +276,11 @@
          printed in 2 s, stayed soft and wound into a knot under the nozzle */
       /* COOL PILLAR: and the wait is spent over a 6 mm pillar beside the part, printed first on each layer - the owner, 2026-11-25: coming back
          from a wait, or from the wiper, brings a glob back with it; into the pillar it goes */
-      tune: function () { return { coolWait: 8, coolPillar: true }; },
+      /* ITS SUPPORT GAP 0.2 mm - one layer of air: the owner's CR-TPU shelves on the A1 mini, 2026-11-25. 0.4, 0.6, 0.8, 1.0 (NSO had rounded
+         0.21 - 0.40 up to 0.4) and 0.36 - 0.39 exact all peeled off about equally; 0.2 peeled off too and left the smoothest underside, a little
+         sticky at the edges. A fully closed interface (crosswise, one way, concentric) and a 20 s wait before the part went down on it made
+         no difference anyone could see (models/tpu-support-ladder): the default interface, no wait. */
+      tune: function () { return { coolWait: 8, coolPillar: true, supTopZ: 0.2 }; },
       /* ITS SLICER RULES: a fill piece under 1 mm is not laid (the slicer's NO CRUMBS) - at the tip of the tower level's roof a 0.03 mm corner
          of solid infill got the whole prime and retraction, and the owner's print of 2026-11-15 hung whole lines off that tip */
       slicer: { shortFillMm: 1 },
