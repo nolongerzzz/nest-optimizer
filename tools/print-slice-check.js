@@ -965,7 +965,7 @@ async function main() {
       const st = await L.bambuSlice(rel), sc = st.config, one = k => Array.isArray(sc[k]) ? sc[k][0] : sc[k];
       const f = PRINT.FILAMENTS[fid], keys = PRINT.filamentKeys(cfgT, fid);
       /* NSO's own departures from the preset, each written down where the filament is: CR-TPU prints straight up (no wipe, no z hop) */
-      const OWN = { 'cr-tpu': ['filament_wipe', 'filament_z_hop'] }[fid] || [];
+      const OWN = ({ 'cr-tpu': ['filament_wipe', 'filament_z_hop'], 'elegoo-petg': cfgT === p1sCfg ? ['filament_max_volumetric_speed'] : [] })[fid] || [];   /* PETG's P1S flow 18: the flow rings */
       const badK = Object.keys(keys).filter(k => k !== 'filament_settings_id' && OWN.indexOf(k) < 0 && String(one(k)) !== String(keys[k]));
       check(label + ': every Studio key NSO writes is the owner\'s preset\'s value (' + Object.keys(keys).length + ' keys), and the file names that preset (' + keys.filament_settings_id + ')',
         badK.length === 0 && keys.filament_settings_id === one('filament_settings_id'), JSON.stringify(badK.map(k => [k, keys[k], one(k)])));
@@ -993,7 +993,7 @@ async function main() {
       const fb = PRINT.filamentBase(cfgT, fid);
       check('...the card\'s rows start at the preset: ' + fb.nozzleTemp + ' C (first layer ' + fb.firstTemp + '), bed ' + fb.bedTemp + ', ' + fb.maxFlow + ' mm^3/s, flow ratio ' + fb.flowRatio,
         fb.nozzleTemp === +one('nozzle_temperature') && fb.firstTemp === +one('nozzle_temperature_initial_layer') && fb.bedTemp === +one('textured_plate_temp_initial_layer') &&
-          fb.maxFlow === +one('filament_max_volumetric_speed') && fb.flowRatio === +one('filament_flow_ratio'), JSON.stringify(fb));
+          fb.maxFlow === (OWN.indexOf('filament_max_volumetric_speed') >= 0 ? +keys.filament_max_volumetric_speed : +one('filament_max_volumetric_speed')) && fb.flowRatio === +one('filament_flow_ratio'), JSON.stringify(fb));
       const out = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), prn.bed), { config: cfgT, printer: prn },
         { settings: Object.assign({}, PRINT.settingsFromConfig(cfgT), { filament: fid }) });
       const g = out.ok ? L.text(await L.R.openZip(out.bytes).read('Metadata/plate_1.gcode')) : '';

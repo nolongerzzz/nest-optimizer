@@ -310,7 +310,10 @@
       tune: function () { return { supTopZ: 0.33 }; },
       printerKeys: function (config) {
         /* the A1 mini: the owner's ELEGOO-PETG-A1mini preset; the P1S: Generic PETG as it is */
-        return isA1Mini(config) ? { nozzle_temperature: '245', nozzle_temperature_initial_layer: '245', filament_max_volumetric_speed: '10' } : {};
+        /* ...and on the P1S its max flow 18 mm^3/s (Generic PETG's 12): the owner's flow rings of 2026-11-25 - three 40 mm rings at 255 C, 11 to 21
+           mm^3/s, every wall clean to 21, only the seam a little squirrely in the top bands (models/flow-test); the single 50 mm tube had gone
+           glossy and ridged from 14, its laps under a second - heat, not the hotend */
+        return isA1Mini(config) ? { nozzle_temperature: '245', nozzle_temperature_initial_layer: '245', filament_max_volumetric_speed: '10' } : { filament_max_volumetric_speed: '18' };
       },
       start: PETG_START,
       studioId: function (config) { return isA1Mini(config) ? 'ELEGOO-PETG-A1mini' : 'Generic PETG'; }

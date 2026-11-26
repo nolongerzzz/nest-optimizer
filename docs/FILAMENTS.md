@@ -338,7 +338,7 @@ proven to need on a printer goes into its entry (`keys`, `printerKeys`, `cooling
 |---|---|---|
 | Profile (PLA) | the template, printed often | the template, printed often; the owner's projects set Top Z 0.33 too |
 | CR-TPU 95A | 215 / 235 C, bed 30, slicer rules (temperature tower, string test, roofs) | the owner's preset: 220 C, bed 30, fan 40 - 65 % |
-| ELEGOO PETG | the owner's preset 245 C, 10 mm^3/s; **supports: Top Z 0.33** (Supporttest, 2026-11-23) | Generic PETG 255 C, 12 mm^3/s (desk hanger); supports: Top Z 0.33 |
+| ELEGOO PETG | the owner's preset 245 C, 10 mm^3/s; **supports: Top Z 0.33** (Supporttest, 2026-11-23) | Generic PETG 255 C, **18 mm^3/s** (the flow rings, 2026-11-25: walls clean to 21, the seam squirrely only in the top bands; Generic's 12 before); supports: Top Z 0.33 |
 
 **NSO's baseline support gap is 0.33 mm** (`nsoBaseline` in `app-print.js`, written into each printer's template as it is fetched, so
 every filament and the card start there; a template or project with its own number keeps it, and it stays over the fine quality presets'
