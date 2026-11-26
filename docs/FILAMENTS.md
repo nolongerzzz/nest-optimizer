@@ -394,6 +394,14 @@ On the capsule rebuilt from Studio's G-code, the necks print in about 1 s and wa
 - With no z hop, the timelapse hook's way back is now always a travel of its own: a top run's glide after the hook had gone at the hook's
   F18000 (found on the pillar's top).
 
+### Next: bridges instead of supports (the owner, 2026-11-25, for a session of its own)
+
+The owner watched the P1S lay a 54 mm PLA bridge flat with no support; NSO's Max bridge length starts at 0 (every bridge supported). To weigh,
+once each filament's max flow is known (it bears on bridge and support speeds): (1) a per printer x filament bridge length, behind a
+"Bridge instead of support" checkbox; (2) posts every ~40 mm under a longer span instead of a full support; (3) better bridges (speed, flow,
+fan, bridge temperature) to push the length up; (4) a steeper support threshold where overhangs hold. First a test plate: bridges 20 - 80 mm
+and an overhang fan 35 - 60 deg, no supports, PLA on the P1S, then PETG and CR-TPU.
+
 ### PETG's support gap (`tune`: `supTopZ` 0.33)
 
 The owner's Supporttest in PETG on the A1 mini, from Bambu's slice at a 0.33 mm top gap: every support broke off cleanly or fell off.
