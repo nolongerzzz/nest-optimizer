@@ -131,6 +131,8 @@
                            coolPillar: null,
                            /* PAUSE AT: heights (mm) the printer pauses before, the nozzle parked - for a steady chuck set over a thin stem by hand */
                            pauseAt: [],
+                           /* BRACE: every this many mm a thin link from an 8 mm pillar 4 mm off the part into it - a printed steady rest; 0 none */
+                           braceEvery: 0,
                            /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). They start at the printer profile's values (settingsFromConfig);
                               these are Bambu's own defaults, for a card with no profile. NSO's old numbers (top 0.18, first layer solid, a bridge of
                               5 mm not held) are the Print card's built-in saved setting "NSO classic" */
@@ -359,7 +361,7 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [],
+      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [], braceEvery: 0,
       /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
          keys; a key the profile does not hold is this slicer's own default */
       supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
@@ -501,6 +503,7 @@
       pauseAt: (Array.isArray(s.pauseAt) ? s.pauseAt : String(s.pauseAt == null ? '' : s.pauseAt).split(/[\s,;]+/)).map(parseFloat)
         .filter(function (h) { return isFinite(h) && h > 0 && h < 1000; }).map(function (h) { return Math.round(h * 100) / 100; })
         .sort(function (a, b) { return a - b; }).filter(function (h, i, a) { return !i || h !== a[i - 1]; }).slice(0, 20),
+      braceEvery: (function (v) { v = parseFloat(v); return !isFinite(v) || v <= 0 ? 0 : Math.round(Math.max(1, Math.min(50, v)) * 10) / 10; })(s.braceEvery),
       coolPillar: s.coolPillar === true || s.coolPillar === 'on' ? true : s.coolPillar === false || s.coolPillar === 'off' ? false : null,
       coolWait: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.min(60, v) * 10) / 10; })(s.coolWait),   /* 0: none */
       supDensity: Math.round(n(s.supDensity, D.supDensity, 10, 100)),
@@ -644,39 +647,105 @@
     return !!(fb && fb.coolPillar);
   }
   var PILLAR_MM = 6, PILLAR_GAP_MM = 12, PILLAR_EDGE_MM = 8;
+  /* THE BRACE (settings.braceEvery, mm): the pillar made a steady rest - wider, closer, tied to the part by a thin link every so often */
+  var BRACE_MM = 8, BRACE_GAP_MM = 4, LINK_W = 1.0, LINK_H = 0.6, LINK_INTO = 0.4;
   /**
-   * THE COOL PILLAR for a first slice `res` of `objects` (bed coordinates): a PILLAR_MM square column PILLAR_GAP_MM to the right of the parts
-   * (else the left), as tall as the last layer that would print faster than `coolWait` s at the cooling's slowest speed (every line at
-   * slow_down_min_speed: the layer's length over it). null when no layer is that fast, or there is no room on the bed.
+   * THE COOL PILLAR for a first slice `res` of `objects` (bed coordinates): a square column to the right of the parts (else the left).
+   * As a cool pillar (o.coolWait): PILLAR_MM square, PILLAR_GAP_MM off, as tall as the last layer that would print faster than o.coolWait s
+   * at the cooling's slowest speed (every line at slow_down_min_speed: the layer's length over it). As a brace (o.braceEvery mm): BRACE_MM
+   * square, BRACE_GAP_MM off, up to the part's last link, and every o.braceEvery mm a LINK_W x LINK_H bar from the pillar's face into the
+   * part's outline (LINK_INTO mm into its wall), where the first slice's outer wall at that height crosses the pillar's line. The column and its links are one
+   * stack of prisms, a link's layers a T of the square and its bar, so no two shells overlap. null when nothing asks for it, or no room.
    */
-  function coolPillarFor(objects, res, bed, coolWait, cooling, config) {
-    var vmin = +((cooling && cooling.slow_down_min_speed) || cfgRaw(config, 'slow_down_min_speed') || 10);
-    var top = -1;
+  function coolPillarFor(objects, res, bed, o, config) {
+    o = o || {};
+    var vmin = +((o.cooling && o.cooling.slow_down_min_speed) || cfgRaw(config, 'slow_down_min_speed') || 10);
+    var top = -1, partTop = 0;
     res.planes.forEach(function (pl, li) {
-      if (li === 0) return;
       var len = 0, any = false;
       res.objects.forEach(function (ob) {
         var L = ob.layers[li];
         if (!L || !L.paths) return;
         L.paths.forEach(function (p) { any = true; for (var k = 1; k < p.pts.length; k++) len += Math.hypot(p.pts[k][0] - p.pts[k - 1][0], p.pts[k][1] - p.pts[k - 1][1]); });
       });
-      if (any && len / vmin < coolWait) top = Math.max(top, pl.printZ);
+      if (any) partTop = Math.max(partTop, pl.printZ);
+      if (li > 0 && any && o.coolWait > 0 && len / vmin < o.coolWait) top = Math.max(top, pl.printZ);
     });
-    if (top <= 0) return null;
+    var brace = o.braceEvery > 0 ? +o.braceEvery : 0;
+    if (top <= 0 && !brace) return null;
     var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     objects.forEach(function (ob) { for (var i = 0; i < ob.soup.length; i += 3) {
       if (ob.soup[i] < x0) x0 = ob.soup[i]; if (ob.soup[i] > x1) x1 = ob.soup[i]; if (ob.soup[i + 1] < y0) y0 = ob.soup[i + 1]; if (ob.soup[i + 1] > y1) y1 = ob.soup[i + 1]; } });
-    var h = PILLAR_MM / 2, cx = x1 + PILLAR_GAP_MM + h;
-    if (cx + h > bed.x - PILLAR_EDGE_MM) cx = x0 - PILLAR_GAP_MM - h;
+    var size = brace ? BRACE_MM : PILLAR_MM, gap = brace ? BRACE_GAP_MM : PILLAR_GAP_MM;
+    var h = size / 2, side = 1, cx = x1 + gap + h;
+    if (cx + h > bed.x - PILLAR_EDGE_MM) { cx = x0 - gap - h; side = -1; }
     if (cx - h < PILLAR_EDGE_MM) return null;
     var cy = Math.max(PILLAR_EDGE_MM + h, Math.min(bed.y - PILLAR_EDGE_MM - h, (y0 + y1) / 2));
-    var zt = top + 0.01, c = [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]], t = [];
-    var P = function (i, z) { return [c[i][0], c[i][1], z]; };
-    var quad = function (a, b, d, e) { t.push.apply(t, a.concat(b, d, a, d, e)); };
-    quad(P(0, 0), P(3, 0), P(2, 0), P(1, 0)); quad(P(0, zt), P(1, zt), P(2, zt), P(3, zt));
-    for (var i = 0; i < 4; i++) { var j = (i + 1) % 4; quad(P(i, 0), P(j, 0), P(j, zt), P(i, zt)); }
-    return { object: { name: 'NSO cool pillar', soup: Float32Array.from(t), key: 'nso-cool-pillar', role: 'part', paint: null },
-             info: { x: +cx.toFixed(2), y: +cy.toFixed(2), size: PILLAR_MM, height: +top.toFixed(2) } };
+    /* the links: at each height, the part's outer wall nearest the pillar on the pillar's line (y = cy), its surface half a line out */
+    var links = [];
+    if (brace) {
+      for (var zl = brace; zl <= partTop - 1 + 1e-6; zl += brace) {
+        var best = null, bi = -1;
+        res.planes.forEach(function (pl, li) { if (pl.printZ <= zl + 1e-6 && (bi < 0 || pl.printZ > res.planes[bi].printZ)) bi = li; });
+        if (bi < 0) continue;
+        res.objects.forEach(function (ob) {
+          var L = ob.layers[bi];
+          if (!L || !L.paths) return;
+          L.paths.forEach(function (p) {
+            if (p.feature !== 'Outer wall') return;
+            /* where the wall crosses the pillar's line y = cy */
+            var pts = p.closed ? p.pts.concat([p.pts[0]]) : p.pts;
+            for (var k = 1; k < pts.length; k++) {
+              var A = pts[k - 1], B = pts[k];
+              if ((A[1] - cy) * (B[1] - cy) > 0 || A[1] === B[1]) continue;
+              var sx = A[0] + (B[0] - A[0]) * (cy - A[1]) / (B[1] - A[1]) + side * (p.width || 0.42) / 2;
+              if (best == null || side * sx > side * best) best = sx;
+            }
+          });
+        });
+        if (best == null || side * (cx - side * h - best) <= 0.3) continue;
+        var zTop = Math.round(zl / 0.2) * 0.2;
+        links.push({ z0: +(zTop - LINK_H).toFixed(3), z1: +zTop.toFixed(3), x: best - side * LINK_INTO });
+      }
+      if (!links.length && top <= 0) return null;
+    }
+    var height = Math.max(top, links.length ? links[links.length - 1].z1 : 0);
+    if (height <= 0) return null;
+    /* the stack: square prisms between the links, a T prism for each link */
+    var tris = [];
+    var prism = function (poly, z0, z1) {
+      var n = poly.length, k;
+      for (k = 0; k < n; k++) {
+        var a = poly[k], b = poly[(k + 1) % n];
+        tris.push(a[0], a[1], z0, b[0], b[1], z0, b[0], b[1], z1, a[0], a[1], z0, b[0], b[1], z1, a[0], a[1], z1);
+      }
+      /* caps: a fan from the polygon's first corner (the square's, and the T's - convex from it, as below) */
+      for (k = 1; k + 1 < n; k++) {
+        tris.push(poly[0][0], poly[0][1], z1, poly[k][0], poly[k][1], z1, poly[k + 1][0], poly[k + 1][1], z1);
+        tris.push(poly[0][0], poly[0][1], z0, poly[k + 1][0], poly[k + 1][1], z0, poly[k][0], poly[k][1], z0);
+      }
+    };
+    var sq = [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]];
+    var ccw = function (poly) { var a = 0; for (var k = 0; k < poly.length; k++) { var p = poly[k], q = poly[(k + 1) % poly.length]; a += p[0] * q[1] - q[0] * p[1]; } return a > 0 ? poly : poly.slice().reverse(); };
+    var tee = function (xEnd) {
+      var f = cx - side * h, w = LINK_W / 2;
+      /* the square with a bar off its face toward the part; the caps are written as two quads (square, bar), not a fan */
+      return ccw([[cx + side * h, cy - h], [cx + side * h, cy + h], [f, cy + h], [f, cy + w], [xEnd, cy + w], [xEnd, cy - w], [f, cy - w], [f, cy - h]]);
+    };
+    var zc = 0;
+    links.forEach(function (lk) {
+      if (lk.z0 > zc + 1e-6) prism(sq, zc, lk.z0);
+      var t = tee(lk.x), n = t.length;
+      for (var k = 0; k < n; k++) { var a = t[k], b = t[(k + 1) % n]; tris.push(a[0], a[1], lk.z0, b[0], b[1], lk.z0, b[0], b[1], lk.z1, a[0], a[1], lk.z0, b[0], b[1], lk.z1, a[0], a[1], lk.z1); }
+      var capQ = function (q, z, up) { var o2 = up ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]; o2.forEach(function (i) { tris.push(q[i][0], q[i][1], z); }); };
+      var w = LINK_W / 2, f = cx - side * h;
+      var bar = ccw([[Math.min(f, lk.x), cy - w], [Math.max(f, lk.x), cy - w], [Math.max(f, lk.x), cy + w], [Math.min(f, lk.x), cy + w]]);
+      [ccw(sq), bar].forEach(function (q) { capQ(q, lk.z1, true); capQ(q, lk.z0, false); });
+      zc = lk.z1;
+    });
+    if (height > zc + 1e-6) prism(sq, zc, height + 0.01);
+    return { object: { name: brace ? 'NSO brace' : 'NSO cool pillar', soup: Float32Array.from(tris), key: 'nso-cool-pillar', role: 'part', paint: null },
+             info: { x: +cx.toFixed(2), y: +cy.toFixed(2), size: size, height: +height.toFixed(2), links: links.length, brace: brace || null } };
   }
   /** The cool wait a slice is made with, s: the row's (0: none), else the filament's own; null for none. */
   function coolWaitOf(config, settings) {
@@ -992,8 +1061,9 @@
       /* THE COOL PILLAR (docs/FILAMENTS.md "Cool pillar"): the layers too fast for the cool wait get a small pillar beside the part, up to the
          last of them, printed first on each layer: the wait is spent over it and whatever oozes goes into it, not onto the part */
       var ex0 = plannerExtras(config, settings);
-      if (!ex0.coolWait || !coolPillarOf(assets.config, settings)) return res;
-      pillar = coolPillarFor(objects, res, assets.printer.bed, ex0.coolWait, ex0.cooling, config);
+      var braceEvery = settings && settings.braceEvery > 0 ? settings.braceEvery : 0;
+      if (!braceEvery && (!ex0.coolWait || !coolPillarOf(assets.config, settings))) return res;
+      pillar = coolPillarFor(objects, res, assets.printer.bed, { coolWait: coolPillarOf(assets.config, settings) ? ex0.coolWait : 0, cooling: ex0.cooling, braceEvery: braceEvery }, config);
       if (!pillar) return res;
       stage('slicing', { objects: objects.length + 1 });
       return SL.run(objects.concat([pillar.object]), so.o);
@@ -1351,7 +1421,7 @@
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
       bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band'),
-      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'), coolWait: v('slice-set-cool-wait'), coolPillar: v('slice-set-cool-pillar'), pauseAt: v('slice-set-pause-at'),
+      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'), coolWait: v('slice-set-cool-wait'), coolPillar: v('slice-set-cool-pillar'), pauseAt: v('slice-set-pause-at'), braceEvery: v('slice-set-brace'),
       flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), retractBefore: v('slice-set-retract-before'), zHop: v('slice-set-zhop'),
       project: S.project
     }));
@@ -1384,6 +1454,7 @@
     set('slice-set-bridge-temp-from', st.bridgeTempFrom == null ? '' : st.bridgeTempFrom);
     set('slice-set-cool-pillar', st.coolPillar == null ? '' : st.coolPillar ? 'on' : 'off');
     set('slice-set-pause-at', (st.pauseAt || []).join(', '));
+    set('slice-set-brace', st.braceEvery ? st.braceEvery : '');
     showFilamentRows();
     FILAMENT_ROWS.forEach(function (r) { if (st[r[1]] != null) set(r[0], st[r[1]]); });
     filamentNote(); bridgeNote();
@@ -1796,6 +1867,7 @@
       readout(describe(r) + ' - ' + pieces.length + ' object' + (pieces.length === 1 ? '' : 's') + (sup ? ' (' + sup + ' support' + (sup === 1 ? '' : 's') + ')' : '') +
               (procChanged.length ? ' - ' + settingsWords(settings) : '') + (filChanged && r.filament ? ' - ' + r.filament : '') + (tuned && r.tune ? ' - ' + r.tune : '') +
               (steps ? ' - ' + steps : '') + (r.stats.bridgeTemp ? ' - ' + bridgeTempWords(r.stats.bridgeTemp) : '') +
+              (r.stats.coolPillar && r.stats.coolPillar.brace ? ' - brace, ' + r.stats.coolPillar.links + ' links' : '') +
               (r.stats.pauses ? ' - pauses at ' + r.stats.pauses.join(', ') + ' mm' : '') +
               (r.stats.coolWait && r.stats.coolWait.layers ? ' - cool wait on ' + r.stats.coolWait.layers + ' layer' + (r.stats.coolWait.layers === 1 ? '' : 's') + ' (' + Math.round(r.stats.coolWait.total) + ' s)' : ''), false);
       say('Sliced for the ' + profile.short + ': ' + describe(r));

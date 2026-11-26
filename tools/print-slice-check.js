@@ -213,7 +213,7 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, quality: '0.20mm Standard @BBL A1M', layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [],   /* the filament's own */
+        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [], braceEvery: 0,   /* the filament's own */
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true,
@@ -608,6 +608,21 @@ async function main() {
           wz.ok && pz.length === 2 && zh(pz[0]) === 5 && zh(pz[1]) === 8 && JSON.stringify(wz.stats.pauses) === '[5,8]' &&
           pz.every(i => /^G1 Z[\d.]+ F/.test(gz[i + 3]) && gz[i + 4] === 'G1 X0 Y90 F18000' && gz[i + 5] === 'G1 X-13.5 F3000' && gz[i + 6] === 'M400 U1') &&
           Math.abs(+/Z([\d.]+)/.exec(gz[pz[0] + 3])[1] - (5 - 0.2 + 5)) < 1e-6, gz.slice(pz[0] - 2, pz[0] + 10).join(' | '));
+        /* THE BRACE: an 8 mm pillar 4 mm off, a link every 4 mm into the part's wall */
+        const wb = await PRINT.build(pObjs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { braceEvery: 4 }) });
+        const gb = wb.ok ? await g(wb) : [];
+        const reach = zz => { let z = null, ob = null, x = 0, y = 0; const o = {};
+          gb.forEach(l => { let m; if ((m = /^; Z_HEIGHT: ([\d.]+)/.exec(l))) z = +m[1]; if ((m = /^; start printing object, unique label id: (\d+)/.exec(l))) ob = m[1];
+            if ((m = /^G1 (.*)/.exec(l))) { const d = {}; m[1].replace(/([XYE])(-?[\d.]+)/g, (q, k, v) => { d[k] = +v; return q; }); const nx = d.X != null ? d.X : x, ny = d.Y != null ? d.Y : y;
+              /* where each extruding line crosses y = 90, the pillar's line */
+              if (Math.abs(z - zz) < 1e-6 && d.E > 0 && (y - 90) * (ny - 90) <= 0 && ny !== y) (o[ob] = o[ob] || []).push(x + (nx - x) * (90 - y) / (ny - y));
+              x = nx; y = ny; } });
+          return o; };
+        const r8 = reach(7.8), r6 = reach(6.6);
+        check('Brace every 4: an 8 mm pillar 4 mm off the part, PLA as well as TPU, with a link at 4 and 8 mm (' + JSON.stringify(wb.stats && wb.stats.coolPillar) + '), the owner\'s piece still one object',
+          wb.ok && wb.stats.coolPillar.size === 8 && wb.stats.coolPillar.links === 2 && wb.stats.coolPillar.brace === 4 && wb.objects === 1 && Math.abs(wb.stats.coolPillar.x - (a1.bed.x / 2 + 1.5 + 4 + 4)) < 0.01, JSON.stringify(wb.stats && wb.stats.coolPillar));
+        check('...on a link\'s layer the pillar\'s lines run into the part\'s outer wall (the link\'s end within a line of the wall\'s); between links they stop at the pillar\'s face',
+          r8['1002'] && r8['1001'] && Math.min(...r8['1002']) - Math.max(...r8['1001']) < 0.42 && r6['1002'] && Math.min(...r6['1002']) > 95, JSON.stringify([r8, r6].map(o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, [Math.min(...v), Math.max(...v)]])))));
         check('...Cool pillar off keeps the wait off the part, as above', w0.stats.coolPillar == null && waits(g0).every(i => !/pillar/.test(g0[i])));
       }
     }

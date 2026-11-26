@@ -368,6 +368,14 @@ On the capsule rebuilt from Studio's G-code, the necks print in about 1 s and wa
   clean. The pillar is no piece of the owner's: it is left out of the result's labels and objects, and the readout's time includes it.
   On the rebuilt capsule: about 2.5 g of pillar (the part is 1.8 g), the waits down from about 40 min to about 3 min, the same 1 h 26 min.
   "Off" keeps the wait 10 mm off the part.
+- **Brace every** (the card's row, `braceEvery`, mm; any filament, off by default). The owner's capsule got further with pauses alone,
+  then the nozzle dragged the cooled 1.5 mm tip round in circles: past a height, cooling is not the problem, stiffness is. The pillar
+  becomes a printed steady rest: **8 mm square, 4 mm off the part**, as tall as the part's last link, and every `braceEvery` mm a
+  **1 x 0.6 mm link** (three layers) from its face to where the first slice's outer wall crosses the pillar's line, 0.4 mm into that wall.
+  The column and its links are one stack of prisms (a link's layers a T), so no two shells overlap. Clip the links off afterwards.
+- **Pause at** (the card's row, `pauseAt`, mm): before the first layer at or over each height the nozzle retracts, lifts 5 mm, parks
+  (the A1 mini's purge spot; elsewhere the plate's back-left corner) and `M400 U1` pauses the printer. For the steady chuck
+  (`models/steady-chuck`): a printable three-jaw steady rest, dropped over the stem by hand at a pause.
 - With no z hop, the timelapse hook's way back is now always a travel of its own: a top run's glide after the hook had gone at the hook's
   F18000 (found on the pillar's top).
 

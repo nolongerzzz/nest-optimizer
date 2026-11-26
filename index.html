@@ -274,6 +274,9 @@
                     <select id="slice-set-cool-pillar" class="vp-select" autocomplete="off"
                             title="With a cool wait: a 6 mm square pillar 12 mm beside the part, as tall as the last layer that needs the wait, printed first on every layer. The nozzle waits over it, then prints it - whatever oozed in the wait goes into the pillar - and goes on to the part clean. Without it the wait is 10 mm off the part. Filament's own: CR-TPU on, others off.">
                       <option value="">Filament's own</option><option value="on">On</option><option value="off">Off</option></select></label>
+                  <label class="vp-bend-field" for="slice-set-brace">Brace every
+                    <input type="number" id="slice-set-brace" min="0" max="50" step="1" placeholder="off" inputmode="decimal"
+                           title="A printed steady rest for a tall thin part: an 8 mm pillar 4 mm beside it, printed first on each layer, tied to the part by a 1 mm x 0.6 mm link every this many mm - clip the links off after. With a cool wait the wait is spent over the pillar. Empty or 0: off." autocomplete="off"><span>mm</span></label>
                   <label class="vp-bend-field" for="slice-set-pause-at">Pause at
                     <input type="text" id="slice-set-pause-at" placeholder="none" inputmode="decimal"
                            title="Heights, mm, separated by commas (40, 60, 80): before the first layer at or over each, the nozzle retracts, lifts 5 mm, parks and the printer pauses (Bambu's M400 U1) - resume from the printer. For the steady chuck: pause a few mm above where its head will sit, drop it over the stem, close the jaws, resume." autocomplete="off"><span>mm</span></label>
@@ -3596,7 +3599,7 @@
   <script src="nso-gcode3mf-write.js?v=bd4593c7"></script>
   <!-- Bambu's nozzles and quality presets for the A1 mini and the P1S (app-print.js qualityOverlay; docs/PRINT-CARD.md "Nozzle and quality") -->
   <script src="nso-bambu-presets.js?v=0f5f48d7"></script>
-  <script src="app-print.js?v=aa86daec"></script>
+  <script src="app-print.js?v=dd0b4d9e"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
