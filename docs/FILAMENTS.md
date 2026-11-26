@@ -340,7 +340,13 @@ proven to need on a printer goes into its entry (`keys`, `printerKeys`, `cooling
 | CR-TPU 95A | 215 / 235 C, bed 30, slicer rules (temperature tower, string test, roofs) | the owner's preset: 220 C, bed 30, fan 40 - 65 % |
 | ELEGOO PETG | the owner's preset 245 C, 10 mm^3/s; **supports: Top Z 0.33** (Supporttest, 2026-11-23) | Generic PETG 255 C, 12 mm^3/s (desk hanger); supports: Top Z 0.33 |
 
-Still open: supports for PLA and CR-TPU against a print each, and the PETG Supporttest printed from NSO's own slice.
+**NSO's baseline support gap is 0.33 mm** (`nsoBaseline` in `app-print.js`, written into each printer's template as it is fetched, so
+every filament and the card start there; a template or project with its own number keeps it, and it stays over the fine quality presets'
+own 0.06 - 0.18). The owner's PLA test on the P1S (2026-11-24: 0.2, 0.26, 0.28, 0.30, 0.33): 0.33 is the least that **released** - every
+smaller gap left little tree tips welded on; at 0.33 easy on obliques, fair on slopes, pliers in tight spots. With PETG's Supporttest
+(below) it is the baseline for both. CR-TPU's Supporttest at 0.33 is sliced and waiting to be printed.
+
+Still open: supports for CR-TPU against a print, and the PETG Supporttest printed from NSO's own slice.
 
 ### CR-TPU prints straight up, and waits for a thin layer to set (2026-11-25)
 

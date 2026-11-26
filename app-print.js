@@ -458,7 +458,10 @@
       put('printer_variant', nz); put('extruder_nozzle_diameter', nz); put('default_print_profile', D.standard[nz]);
     }
     var q = D.process.filter(function (p) { return p.nozzle === nz && p.name === quality; })[0] || D.process.filter(function (p) { return p.name === D.standard[nz]; })[0];
-    if (q) { Object.keys(q.keys).forEach(function (k) { put(k, q.keys[k]); }); put('print_settings_id', q.name); }
+    /* NSO's baseline support gap (nsoBaseline: 0.33) stays over the fine presets' own (0.06 - 0.18, a layer's height): the owner's 0.33 is
+       where the tree tips stop welding on, whatever the layer */
+    var keepGap = Math.abs(numOf(cfgRaw(config, 'support_top_z_distance'), 0) - 0.33) < 1e-9;
+    if (q) { Object.keys(q.keys).forEach(function (k) { if (!(keepGap && k === 'support_top_z_distance')) put(k, q.keys[k]); }); put('print_settings_id', q.name); }
     /* a 0.2 nozzle melts little: Bambu's Generic presets for it hold PLA to 1.6 mm^3/s and PETG to 1 */
     if (nz === '0.2' && P.flow02) {
       /* Bambu's own PLA Basic 0.2 preset allows 2 (the owner's Studio slices at 0.2, both printers); Generic PLA 1.6, PETG 1 */
@@ -1228,7 +1231,7 @@
     PROFILES: PROFILES, ENGINE: ENGINE, profileFor: profileFor, readTemplate: readTemplate, pieceObjects: pieceObjects,
     fileName: fileName, gcodeName: gcodeName, build: build, withProjectFilaments: withProjectFilaments, layerSlots: layerSlots, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
     SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
-    configOverlay: configOverlay, withOverlay: withOverlay, plateProject: plateProject,
+    configOverlay: configOverlay, withOverlay: withOverlay, nsoBaseline: nsoBaseline, plateProject: plateProject,
     qualityOverlay: qualityOverlay, qualitiesOf: qualitiesOf, nozzlesOf: nozzlesOf, presetConfig: presetConfig,
     FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf, hangSpeedOf: hangSpeedOf, coolWaitOf: coolWaitOf, coolPillarOf: coolPillarOf, coolPillarFor: coolPillarFor
   };
@@ -1608,12 +1611,28 @@
     });
   }
 
-  /** The profile's template settings and frozen blocks, fetched once. */
+  /* NSO'S BASELINE (docs/FILAMENTS.md "A printer and a filament"): what NSO prints with where Bambu's stock profile says otherwise, written
+     into the printer's template as it is fetched - so the card starts at it, an untouched card changes nothing more, and the file lists it
+     among the process's changes (orange in Studio), as it is one.
+       support_top_z_distance 0.33 (Bambu's 0.2): the owner's baseline for PLA and PETG. PLA on the P1S (2026-11-24: 0.2, 0.26, 0.28,
+       0.30, 0.33) - 0.33 the least that released: every smaller gap left little tree tips welded on; at 0.33 easy on obliques, fair on
+       slopes, pliers in tight spots. PETG on the A1 mini (the Supporttest, 2026-11-23). A template that says something else keeps it. */
+  function nsoBaseline(config) {
+    var NSO_BASELINE = { support_top_z_distance: { from: '0.2', to: '0.33' } };   /* (here, not beside it: the module's code after its export runs only as declarations) */
+    var over = {};
+    Object.keys(NSO_BASELINE).forEach(function (k) {
+      var b = NSO_BASELINE[k], v = cfgRaw(config, k);
+      if (v === '' || Math.abs(parseFloat(v) - parseFloat(b.from)) < 1e-9) over[k] = b.to;
+    });
+    return Object.keys(over).length ? withOverlay(config, over) : config;
+  }
+
+  /** The profile's template settings and frozen blocks, fetched once (NSO's baseline written in). */
   function loadAssets(profile) {
     if (S.assets[profile.id]) return Promise.resolve(S.assets[profile.id]);
     return Promise.all([fetchAsset(profile.frozen, 'json'), fetchAsset(profile.template, 'bytes')]).then(function (a) {
       return readTemplate(new Uint8Array(a[1])).then(function (config) {
-        return (S.assets[profile.id] = { printer: a[0], config: config });
+        return (S.assets[profile.id] = { printer: a[0], config: nsoBaseline(config) });
       });
     });
   }

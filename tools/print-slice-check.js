@@ -229,6 +229,18 @@ async function main() {
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));
     check('an untouched card changes nothing in the template', Object.keys(PRINT.configOverlay(tpl, base)).length === 0 && PRINT.withOverlay(tpl, {}) === tpl);
+    /* NSO'S BASELINE: the template as the app fetches it carries NSO's own 0.33 support gap (the owner's PLA and PETG tests), listed as a
+       process change; a template with its own number keeps it */
+    {
+      const nb = PRINT.nsoBaseline(tpl), nbs = PRINT.settingsFromConfig(nb), own = PRINT.nsoBaseline(PRINT.withOverlay(tpl, { support_top_z_distance: '0.25' }));
+      check('NSO\'s baseline: the fetched template\'s support gap is 0.33 (Bambu\'s 0.2), listed among the process\'s changes; the card starts there and an untouched card changes nothing more; a template\'s own 0.25 stays',
+        String(nb.support_top_z_distance) === '0.33' && nbs.supTopZ === 0.33 && Object.keys(PRINT.configOverlay(nb, nbs)).length === 0 &&
+          String(nb.different_settings_to_system[0]).split(';').includes('support_top_z_distance') && String(own.support_top_z_distance) === '0.25',
+        JSON.stringify([nb.support_top_z_distance, nbs.supTopZ, nb.different_settings_to_system && nb.different_settings_to_system[0], own.support_top_z_distance]));
+      const fine = PRINT.qualityOverlay(nb, '0.4', '0.08mm Extra Fine @BBL A1M'), fineRaw = PRINT.qualityOverlay(tpl, '0.4', '0.08mm Extra Fine @BBL A1M');
+      check('...and it stays over a fine preset\'s own gap (0.08 Extra Fine: Bambu\'s 0.08 on the stock template, NSO\'s 0.33 kept)',
+        fine.support_top_z_distance === undefined && fineRaw.support_top_z_distance === '0.08' && fine.layer_height === '0.08', JSON.stringify([fine.support_top_z_distance, fineRaw.support_top_z_distance, fine.layer_height]));
+    }
     let threw = '';
     try { PRINT.configOverlay(tpl, Object.assign({}, base, { nozzle: 1.0 })); } catch (e) { threw = e.message; }
     check('a nozzle the printer has no profile for is refused (a 1.0 on the A1 mini; its 0.2 / 0.6 / 0.8 are Bambu\'s presets, section 5f)', /no 1 mm nozzle profile/.test(threw), threw);
