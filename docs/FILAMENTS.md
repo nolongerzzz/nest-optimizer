@@ -336,7 +336,7 @@ proven to need on a printer goes into its entry (`keys`, `printerKeys`, `cooling
 
 | | A1 mini | P1S |
 |---|---|---|
-| Profile (PLA) | the template, printed often | the template, printed often; the owner's projects set Top Z 0.33 too |
+| Profile (PLA) - the owner's PLA is Bambu PLA Basic on both | the template (Generic PLA, 12 mm^3/s: to become PLA Basic after the mini's service, then its own flow bars) | Bambu PLA Basic, **30 mm^3/s** (the flow bars, 2026-11-26: walls held to 36, a faint line where 28 stepped to 30; Bambu's 21) |
 | CR-TPU 95A | 215 / 235 C, bed 30, slicer rules (temperature tower, string test, roofs); **supports: Top Z 0.2** (the shelves, 2026-11-25) | the owner's preset: 220 C, bed 30, fan 40 - 65 % |
 | ELEGOO PETG | the owner's preset 245 C, 10 mm^3/s; **supports: Top Z 0.33** (Supporttest, 2026-11-23) | Generic PETG 255 C, **16 mm^3/s** (the flow rings, 2026-11-25: clean as far as they reached - about 17, the rings' corners capping every band above it; Generic's 12 before); supports: Top Z 0.33 |
 

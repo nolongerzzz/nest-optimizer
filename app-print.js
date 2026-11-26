@@ -1655,6 +1655,11 @@
       var b = NSO_BASELINE[k], v = cfgRaw(config, k);
       if (v === '' || Math.abs(parseFloat(v) - parseFloat(b.from)) < 1e-9) over[k] = b.to;
     });
+    /* Bambu PLA Basic on the P1S: max flow 30 mm^3/s (Bambu's 21) - the owner's flow bars of 2026-11-26 (three 110 x 14 mm bars, 16 to 36
+       mm^3/s at 220 C, the long sides at the asked speed up to about 490 mm/s): walls held to 36, one faint line on all three where 28 stepped
+       to 30 (z 21). 30 keeps a margin under what held. */
+    if (/P1S/.test(cfgRaw(config, 'printer_model')) && /^Bambu PLA Basic/.test(cfgRaw(config, 'filament_settings_id')) &&
+        Math.abs(parseFloat(cfgRaw(config, 'filament_max_volumetric_speed')) - 21) < 1e-9) over.filament_max_volumetric_speed = '30';
     return Object.keys(over).length ? withOverlay(config, over) : config;
   }
 

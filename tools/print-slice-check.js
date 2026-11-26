@@ -237,6 +237,11 @@ async function main() {
         String(nb.support_top_z_distance) === '0.33' && nbs.supTopZ === 0.33 && Object.keys(PRINT.configOverlay(nb, nbs)).length === 0 &&
           String(nb.different_settings_to_system[0]).split(';').includes('support_top_z_distance') && String(own.support_top_z_distance) === '0.25',
         JSON.stringify([nb.support_top_z_distance, nbs.supTopZ, nb.different_settings_to_system && nb.different_settings_to_system[0], own.support_top_z_distance]));
+      const nbP = PRINT.nsoBaseline(await L.p1sTemplate());
+      check('...and on the P1S, Bambu PLA Basic\'s max flow is 30 (Bambu\'s 21; the owner\'s flow bars held to 36), a filament change of its own; the A1 mini\'s PLA keeps its own',
+        String(nbP.filament_max_volumetric_speed[0]) === '30' && PRINT.filamentBase(nbP, 'profile').maxFlow === 30 && String(nbP.different_settings_to_system[1]).split(';').includes('filament_max_volumetric_speed') &&
+          String([].concat(nb.filament_max_volumetric_speed)[0]) === String([].concat(tpl.filament_max_volumetric_speed)[0]),
+        JSON.stringify([nbP.filament_max_volumetric_speed, nb.filament_max_volumetric_speed]));
       const fine = PRINT.qualityOverlay(nb, '0.4', '0.08mm Extra Fine @BBL A1M'), fineRaw = PRINT.qualityOverlay(tpl, '0.4', '0.08mm Extra Fine @BBL A1M');
       check('...and it stays over a fine preset\'s own gap (0.08 Extra Fine: Bambu\'s 0.08 on the stock template, NSO\'s 0.33 kept)',
         fine.support_top_z_distance === undefined && fineRaw.support_top_z_distance === '0.08' && fine.layer_height === '0.08', JSON.stringify([fine.support_top_z_distance, fineRaw.support_top_z_distance, fine.layer_height]));
