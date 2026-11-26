@@ -11,3 +11,10 @@ about 10 %, as the filament's max flow on that printer and nozzle.
 | Height (mm) | 0.2 - 3 | 3 - 6 | 6 - 9 | 9 - 12 | 12 - 15 | 15 - 18 | 18 - 21 | 21 - 24 | 24 - 27 | 27 - 30 | 30 - 33 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | mm³/s | 10 | 12 | 14 | 16 | 18 | 20 | 22 | 24 | 26 | 28 | 30 |
+
+## Use the bars, not the tube (2026-11-25)
+
+A round model caps the test: a 40 mm ring in 160 segments turns 2.25 deg at every joint, and the printer's 9 mm/s jerk holds that to about
+229 mm/s, so every band past roughly 17 mm^3/s prints at the same speed (the owner heard it: PLA's rings never sped up). `bar0.stl`,
+`bar1.stl`, `bar2.stl` are three 110 x 14 x 31 mm bars (walls 2, infill 0, top 0, as above): their long sides reach the band's speed. Read
+the middle of the long sides.

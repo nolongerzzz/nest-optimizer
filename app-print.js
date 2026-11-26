@@ -310,10 +310,12 @@
       tune: function () { return { supTopZ: 0.33 }; },
       printerKeys: function (config) {
         /* the A1 mini: the owner's ELEGOO-PETG-A1mini preset; the P1S: Generic PETG as it is */
-        /* ...and on the P1S its max flow 18 mm^3/s (Generic PETG's 12): the owner's flow rings of 2026-11-25 - three 40 mm rings at 255 C, 11 to 21
-           mm^3/s, every wall clean to 21, only the seam a little squirrely in the top bands (models/flow-test); the single 50 mm tube had gone
-           glossy and ridged from 14, its laps under a second - heat, not the hotend */
-        return isA1Mini(config) ? { nozzle_temperature: '245', nozzle_temperature_initial_layer: '245', filament_max_volumetric_speed: '10' } : { filament_max_volumetric_speed: '18' };
+        /* ...and on the P1S its max flow 16 mm^3/s (Generic PETG's 12): the owner's flow rings of 2026-11-25 - three 40 mm rings at 255 C, 11 to 21
+           mm^3/s, every wall clean. But a 40 mm ring cut in 160 segments turns 2.25 deg at each, and the printer's 9 mm/s jerk holds that to
+           about 229 mm/s: every band from 17 up printed at about 17, whatever it asked. Clean to 17 is what was shown; 16 keeps a margin
+           until the straight-sided test (models/flow-test, the bars) says more. The single 50 mm tube had gone glossy from 14 with laps under
+           a second - heat, not the hotend. */
+        return isA1Mini(config) ? { nozzle_temperature: '245', nozzle_temperature_initial_layer: '245', filament_max_volumetric_speed: '10' } : { filament_max_volumetric_speed: '16' };
       },
       start: PETG_START,
       studioId: function (config) { return isA1Mini(config) ? 'ELEGOO-PETG-A1mini' : 'Generic PETG'; }
