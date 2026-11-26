@@ -649,6 +649,15 @@ async function main() {
           wf.ok && JSON.stringify(wf.stats.flowTest.map(b => b.flow)) === '[4,5,6]' && wf.stats.flowTest[1].fromZ === 4 &&
             [0, 1, 2].every(b => rate[b] && Math.abs(med(rate[b]) - (4 + b)) < 0.05) && gf.filter(l => /^; NSO flow test: /.test(l)).length === 3,
           JSON.stringify([wf.stats && wf.stats.flowTest, [0, 1, 2].map(b => rate[b] && med(rate[b]))]));
+        /* A G-CODE THAT DEFLATES PAST 20 : 1 IS STORED (nso-3mf.js ZIP_MAX_RATIO): Bambu's cloud refused the 44 : 1 flow tube with a bare HTTP 400 */
+        {
+          const zi = b => { const v = new DataView(b.buffer, b.byteOffset, b.byteLength); const out = {}; let at = 0;
+            while (at + 30 <= b.length && v.getUint32(at, true) === 0x04034b50) { const m = v.getUint16(at + 8, true), cs = v.getUint32(at + 18, true), us = v.getUint32(at + 22, true), nl = v.getUint16(at + 26, true), xl = v.getUint16(at + 28, true);
+              out[Buffer.from(b.subarray(at + 30, at + 30 + nl)).toString()] = { m, cs, us }; at += 30 + nl + xl + cs; } return out; };
+          const zf = zi(wf.bytes), zp = zi(w1.bytes), gq = zf['Metadata/plate_1.gcode'], gp = zp['Metadata/plate_1.gcode'];
+          check('the 3MF\'s G-code is deflated as Studio\'s is (' + (gp ? (gp.us / gp.cs).toFixed(1) : '-') + ' : 1 on the pillar plate), but kept stored when deflating would squeeze it past 20 : 1 - Bambu\'s cloud refuses that (HTTP 400)',
+            gp && gp.m === 8 && Object.values(zf).every(e => e.m === 0 || e.us <= 65536 || e.us < 20 * e.cs), JSON.stringify([gp, gq]));
+        }
         check('...Cool pillar off keeps the wait off the part, as above', w0.stats.coolPillar == null && waits(g0).every(i => !/pillar/.test(g0[i])));
       }
     }
