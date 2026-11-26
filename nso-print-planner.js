@@ -78,6 +78,7 @@
 
   var EPS = 1e-9;
   var RETRACT_DURING_WIPE = 0.95;      // Bambu wipes 0.76 of 0.8 and retracts the last 0.04 after (A1 mini slice)
+  var SUPPORT_RING_OVERLAP_MM = 0.3;   // mm a support ring with no wipe runs past its own start (CR-TPU's trees split up the seam)
   var SPIRAL_R = 1.2;                  // mm, the layer-change z-hop circle (Bambu's runs 1.217)
   var BRIDGE_TEMP_MIN_MM = 10;         // a layer with less bridge than this is not a bridge layer
   var BRIDGE_TEMP_COVER = 1;           // layers over a bridge layer that stay at the bridge temperature (laid straight onto the bridge)
@@ -670,14 +671,25 @@
          A part's layer now carries its sparse region (sparsePolys); a support's travels keep its section, as Studio's keep its islands. */
       (L.sparsePolys ? L.sparsePolys : (L.sectionPolys || [])).forEach(function (p) { rings.push(p); });
       L.paths.forEach(function (p) {
-        var pts = p.closed && p.pts.length ? p.pts.concat([p.pts[0]]) : p.pts;
+        /* A SUPPORT RING WITH NO WIPE (CR-TPU since 2026-11-25): its seam is what the wipe forward used to seal - the owner's TPU trees split
+           straight up their aligned seams, one-wall rings stopping 0.06 mm short layer after layer. So such a ring starts a little further round
+           each layer (the golden ratio's share of it: no two seams over one another for many layers) and runs SUPPORT_RING_OVERLAP_MM past its
+           own start instead of stopping short. */
+        var ringNoWipe = p.closed && !S.retract.wipe && /^Support/.test(p.feature || '') && p.pts.length > 3;
+        var ring = p.pts;
+        if (ringNoWipe) { var k0 = Math.floor(((li * 0.6180339887) % 1) * ring.length) % ring.length; ring = ring.slice(k0).concat(ring.slice(0, k0)); }
+        var pts = p.closed && ring.length ? ring.concat([ring[0]]) : ring;
         if (pts.length < 2) return;
+        if (ringNoWipe) {
+          var a0 = ring[0], a1 = ring[1], dd = dist(a0, a1), ov = Math.min(SUPPORT_RING_OVERLAP_MM, dd);
+          if (dd > EPS) pts = pts.concat([[a0[0] + (a1[0] - a0[0]) * ov / dd, a0[1] + (a1[1] - a0[1]) * ov / dd]]);
+        }
         /* A LOOP ENDS AS BAMBU'S DOES (the owner's P1S prints: every trunk, then the 2x pillars and domes, split straight up the seam): a wall or a
            support ring (not a brim: Studio closes those) stops the seam gap short
            of its start and wipes on FORWARD over its own cooled start (loop) - the wipe back over the bead just laid, retracting, dragged the seam
            open on a 15 mm trunk ring */
         var loop = null;
-        if (p.closed && p.feature !== 'Brim' && S.retract.seamGapMm > 0) {
+        if (p.closed && p.feature !== 'Brim' && S.retract.seamGapMm > 0 && !ringNoWipe) {
           var full = pathLength(pts);
           if (full > 4 * S.retract.seamGapMm) { loop = pts; pts = trimEnd(pts, S.retract.seamGapMm); }
         }

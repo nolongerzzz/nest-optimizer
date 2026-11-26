@@ -40,7 +40,13 @@ async function ladder(gaps, exact, sopts, extra) {
       if (m[3] && lf === 'Support interface' && Math.abs(lz - zTop) < 1e-6) { const i = Math.min(gaps.length - 1, Math.floor((nx - lo) / w)); if (i >= 0) len[i] += Math.hypot(nx - lx, ny - ly); }
       lx = nx; ly = ny; } });
   const waits = g.filter(l => /^; NSO interface wait/.test(l));
-  return { r, len, waits, gap: gaps.map((gp, i) => { const mine = tops.filter(t => t.x >= lo + i * w - 1e-6 && t.x <= lo + (i + 1) * w + 1e-6); const zt = Math.max(...mine.map(t => t.z));
+  /* the support rings (Support, closed): where each starts and how far past its start it ends */
+  const rings = []; let rz = 0, rf = '', rx = 0, ry = 0, cur = null;
+  g.forEach(l => { let m; if ((m = /^; Z_HEIGHT: ([\d.]+)/.exec(l))) { rz = +m[1]; cur = null; } else if ((m = /^; FEATURE: (.*)$/.exec(l))) { rf = m[1]; cur = null; }
+    else if ((m = /^G1 X([\d.]+) Y([\d.]+)( E)?/.exec(l))) { const nx = +m[1], ny = +m[2];
+      if (m[3] && rf === 'Support') { if (!cur) { cur = { z: rz, pts: [[rx, ry]] }; rings.push(cur); } cur.pts.push([nx, ny]); } else cur = null;
+      rx = nx; ry = ny; } else if (/^G1 E|^G1 Z|^M62/.test(l)) cur = null; });
+  return { r, len, waits, rings, gap: gaps.map((gp, i) => { const mine = tops.filter(t => t.x >= lo + i * w - 1e-6 && t.x <= lo + (i + 1) * w + 1e-6); const zt = Math.max(...mine.map(t => t.z));
     return { want: +gp, got: +(10 - zt).toFixed(3), feat: [...new Set(mine.filter(t => Math.abs(t.z - zt) < 1e-6).map(t => t.feat))] }; }) };
 }
 (async () => {
@@ -59,6 +65,13 @@ async function ladder(gaps, exact, sopts, extra) {
     iv.r.ok && iv.len[1] > 1.6 * iv.len[0], JSON.stringify(iv.len));
   check('Interface wait 15: one wait, before the shelves\' first layer over the supports (z 10), 15 s off the part',
     iv.r.ok && iv.waits.length === 1 && / at 10 mm$/.test(iv.waits[0]) && iv.r.stats.interfaceWait && iv.r.stats.interfaceWait.seconds === 15, JSON.stringify(iv.waits));
+  /* A SUPPORT RING WITH NO WIPE (CR-TPU): its seam goes round from layer to layer and it runs past its own start - the owner's TPU trees split
+     straight up their aligned seams */
+  const closedR = ex.rings.filter(q => q.pts.length > 8 && Math.hypot(q.pts[0][0] - q.pts[q.pts.length - 1][0], q.pts[0][1] - q.pts[q.pts.length - 1][1]) < 0.5);
+  const starts = new Set(closedR.map(q => q.pts[0][0].toFixed(1) + ',' + q.pts[0][1].toFixed(1)));
+  const past = closedR.filter(q => { const p0 = q.pts[0], p1 = q.pts[1], e = q.pts[q.pts.length - 1]; return (e[0] - p0[0]) * (p1[0] - p0[0]) + (e[1] - p0[1]) * (p1[1] - p0[1]) > 0; });
+  check('CR-TPU (no wipe): its support rings start somewhere new layer after layer (' + starts.size + ' starts over ' + closedR.length + ' rings) and run on past their own start (' + past.length + ' of them)',
+    closedR.length > 20 && starts.size > closedR.length * 0.6 && past.length > closedR.length * 0.8, JSON.stringify(closedR.slice(0, 3).map(q => [q.pts[0], q.pts[1], q.pts[q.pts.length - 1]])));
   console.log(fails ? '\nFAILED ' + fails : '\nall checks pass');
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
