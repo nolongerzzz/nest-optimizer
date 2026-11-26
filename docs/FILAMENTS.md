@@ -384,6 +384,10 @@ On the capsule rebuilt from Studio's G-code, the necks print in about 1 s and wa
 - **Pause at** (the card's row, `pauseAt`, mm): before the first layer at or over each height the nozzle retracts, lifts 5 mm, parks
   (the A1 mini's purge spot; elsewhere the plate's back-left corner) and `M400 U1` pauses the printer. For the steady chuck
   (`models/steady-chuck`): a printable three-jaw steady rest, dropped over the stem by hand at a pause.
+- **Flow test** (the card's row, `flowTest`: start, step, every mm): a max-volumetric tower from any model. From the second layer every
+  line of a band prints at exactly that flow of filament through the hotend (the bead times the flow ratio), whatever the feature's speed
+  or the filament's max flow, with no slowing for layer time (`opts.flowTest` in the planner). Each band is marked in the file and the
+  readout. `models/flow-test`: a 50 mm tube with a band table.
 - With no z hop, the timelapse hook's way back is now always a travel of its own: a top run's glide after the hook had gone at the hook's
   F18000 (found on the pillar's top).
 

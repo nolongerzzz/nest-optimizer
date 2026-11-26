@@ -2021,6 +2021,13 @@
        at the bridge's speed, as Studio's does; a filament can slow it on its own (CR-TPU: the owner's tower level of 2026-11-15, its front lip
        sagging at 42 mm/s). Never faster than the bridge's speed, and the max flow still holds it. */
     var coolWait = opts.coolWait > 0 ? +opts.coolWait : 0;
+    /* FLOW TEST (opts.flowTest { start, step, bandMm }, mm^3/s): a max-volumetric tower from any model - after the first layer every line of a
+       layer prints at exactly start + step x (its band), its band the printZ over bandMm, whatever the feature's speed or the filament's max flow,
+       with no slowing for the layer's time. Where the walls start to go matte, thin or gappy is where the hotend stops keeping up (the owner's
+       PETG, 2026-11-25: a smaller print than Studio's own test). */
+    var flowTest = opts.flowTest && +opts.flowTest.start > 0 && +opts.flowTest.bandMm > 0
+      ? { start: +opts.flowTest.start, step: +opts.flowTest.step || 0, bandMm: +opts.flowTest.bandMm } : null;
+    var flowBands = [];
     /* THE COOL PILLAR (opts.coolPillarObj: the index of the app's pillar object): printed first on each layer, the wait spent over it */
     /* PAUSE AT (opts.pauseAt: heights, mm): before the first layer at or over each, the nozzle retracts, lifts 5 mm, goes to the printer's park
        (the A1 mini's purge spot; elsewhere the plate's back-left corner) and the printer pauses (Bambu's machine_pause_gcode, M400 U1) - for
@@ -2590,6 +2597,19 @@
           st.coolWait = { seconds: lackS, box: wb };
         }
       }
+      /* FLOW TEST: the layer's flow, every line at it */
+      var flowNow = null;
+      if (flowTest && !first) {
+        var band = Math.floor((pl.printZ - 1e-6) / flowTest.bandMm);
+        flowNow = +(flowTest.start + flowTest.step * band).toFixed(3);
+        if (flowNow > 0) {
+          /* the filament that really goes through the hotend: the line's bead times the flow ratio, at that speed, is flowNow */
+          items.forEach(function (it) { it.v = flowNow / (it.bead.area * (F.flow || 1)); it.keep = true; });
+          var lastB = flowBands[flowBands.length - 1];
+          if (!lastB || lastB.flow !== flowNow) flowBands.push({ flow: flowNow, fromZ: +(pl.printZ - pl.h).toFixed(3), toZ: +pl.printZ.toFixed(3), layerFrom: layerNo });
+          else lastB.toZ = +pl.printZ.toFixed(3);
+        } else flowNow = null;
+      }
       var rec = { index: li, number: layerNo, z: pl.printZ, h: pl.h, seconds: cool.seconds, slowdownCap: cool.cap, fan: fan,
                   features: [], items: items.length, lineFrom: W.lines.length };
       layers.push(rec);
@@ -2656,6 +2676,7 @@
       if (fan !== st.fan) { put(fanLine(fan)); st.fan = fan; }
       if (S.fan.aux && aux !== st.aux) { put('M106 P2 S' + fc(aux, 2)); st.aux = aux; }
       if (pj === 1) { put('; open powerlost recovery'); put('M1003 S1'); }
+      if (flowNow != null && flowBands.length && flowBands[flowBands.length - 1].layerFrom === layerNo) put('; NSO flow test: ' + flowNow + ' mm3/s from z ' + fc(pl.printZ - pl.h, 4));
       st.objId = -1;
       var layerFan = fan;
       var featuresSeen = {};
@@ -2928,6 +2949,7 @@
         tower: TW ? { x: TW.x, y: TW.y, width: TW.W, depth: TW.D, box: [TW.box.x0, TW.box.y0, TW.box.x1, TW.box.y1], layers: TW.last + 1, moved: TW.moved } : null,
         towerNote: towerNote,
         pauses: pauseStat.length ? pauseStat : null,
+        flowTest: flowTest ? flowBands : null,
         coolWait: coolWait ? { seconds: coolWait, layers: waitStat.layers, total: +waitStat.total.toFixed(1) } : null,
         bridgeTemp: bridgeT != null ? { temp: bridgeT, changes: bridgeStat.changes, layers: bridgeStat.layers, secondsEach: BRIDGE_TEMP_SECONDS, fromLayer: +opts.bridgeTempFrom >= 2 ? +opts.bridgeTempFrom : null } : null,
         tempBands: steps ? bands : null,                       // the temperature steps as written: [{ temp, fromZ, layer }]
