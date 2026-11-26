@@ -213,7 +213,7 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, quality: '0.20mm Standard @BBL A1M', layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null,   /* the filament's own */
+        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [],   /* the filament's own */
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true,
@@ -599,6 +599,15 @@ async function main() {
           wq.length > 0 && wq.every(i => / over the cool pillar$/.test(gq[i]) && nextOpen(i) === '1002'), gq.slice(wq[0], wq[0] + 12).join(' | '));
         check('...the waits are shorter for it (' + w0.stats.coolWait.total.toFixed(0) + ' s off the part -> ' + wPil.stats.coolWait.total.toFixed(0) + ' s over the pillar), for ' + (wPil.stats.grams - w0.stats.grams).toFixed(2) + ' g of pillar',
           wPil.stats.coolWait.total < w0.stats.coolWait.total / 2 && wPil.stats.grams > w0.stats.grams);
+        /* PAUSE AT: the steady chuck's pauses */
+        const wz = await PRINT.build(pObjs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { pauseAt: '8, 5,abc' }) });
+        const gz = wz.ok ? await g(wz) : [];
+        const pz = gz.map((l, i) => l === '; PAUSE_PRINT' ? i : -1).filter(i => i >= 0);
+        const zh = i => { for (let j = i; j > 0; j--) { const m = /^; Z_HEIGHT: ([\d.]+)/.exec(gz[j]); if (m) return +m[1]; } return NaN; };
+        check('Pause at "8, 5,abc": two pauses, before the layers at 5 and 8 mm - retracted, 5 mm up, the A1 mini\'s park, M400 U1 - and the readout says so (' + JSON.stringify(wz.stats && wz.stats.pauses) + ')',
+          wz.ok && pz.length === 2 && zh(pz[0]) === 5 && zh(pz[1]) === 8 && JSON.stringify(wz.stats.pauses) === '[5,8]' &&
+          pz.every(i => /^G1 Z[\d.]+ F/.test(gz[i + 3]) && gz[i + 4] === 'G1 X0 Y90 F18000' && gz[i + 5] === 'G1 X-13.5 F3000' && gz[i + 6] === 'M400 U1') &&
+          Math.abs(+/Z([\d.]+)/.exec(gz[pz[0] + 3])[1] - (5 - 0.2 + 5)) < 1e-6, gz.slice(pz[0] - 2, pz[0] + 10).join(' | '));
         check('...Cool pillar off keeps the wait off the part, as above', w0.stats.coolPillar == null && waits(g0).every(i => !/pillar/.test(g0[i])));
       }
     }

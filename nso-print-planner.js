@@ -2022,6 +2022,10 @@
        sagging at 42 mm/s). Never faster than the bridge's speed, and the max flow still holds it. */
     var coolWait = opts.coolWait > 0 ? +opts.coolWait : 0;
     /* THE COOL PILLAR (opts.coolPillarObj: the index of the app's pillar object): printed first on each layer, the wait spent over it */
+    /* PAUSE AT (opts.pauseAt: heights, mm): before the first layer at or over each, the nozzle retracts, lifts 5 mm, goes to the printer's park
+       (the A1 mini's purge spot; elsewhere the plate's back-left corner) and the printer pauses (Bambu's machine_pause_gcode, M400 U1) - for
+       the owner's steady chuck, set over a thin stem by hand; the layer's own travel brings the nozzle back down */
+    var pauseAt = (opts.pauseAt || []).map(Number).filter(function (h) { return h > 0; }).sort(function (a, b) { return a - b; }), pauseK = 0, pauseStat = [];
     var pillarObj = opts.coolPillarObj != null && opts.coolPillarObj >= 0 ? +opts.coolPillarObj : -1;
     S.speed.hang = opts.hangSpeed > 0 ? Math.min(+opts.hangSpeed, S.speed.bridge) : S.speed.bridge;
     var F = S.filament, R = S.retract;
@@ -2236,6 +2240,20 @@
       put('G4 P' + Math.round(w.seconds * 1000));
       st.x = ax; st.y = ay; st.z = zl;
       waitStat.layers++; waitStat.total += w.seconds;
+    }
+    /** PAUSE AT: retracted, 5 mm up, to the park, M400 U1 (the template's machine_pause_gcode). */
+    function pauseHere(zLayer) {
+      if (!st.retracted && R.length > 0) { put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0)); st.retracted = true; st.retractLen = R.length; }
+      var zl = Math.min(bed.z, st.z + 5);
+      put('; PAUSE_PRINT');
+      put('; NSO pause before the layer at ' + fc(zLayer, 4) + ' mm');
+      accel(S.accel.travel);
+      put('G1 Z' + fx(zl) + ' F' + fmt(S.speed.travel * 60, 0));
+      if (PARK[Pr.id]) PARK[Pr.id].go.forEach(function (l) { put(l.replace(/\{CY\}/g, tnum(vals.cy))); });
+      else put('G1 X' + fx(10) + ' Y' + fx(bed.y - 10) + ' F' + fmt(S.speed.travel * 60, 0));
+      put((raw(opts.config, 'machine_pause_gcode') || 'M400 U1').replace(/\\n/g, '\n'));
+      st.z = zl; st.x = null; st.y = null;
+      pauseStat.push(+zLayer.toFixed(2));
     }
     function spiral(zUp, first) {
       put('G17');
@@ -2589,6 +2607,10 @@
         flushRetract();
         closeObject();
         if (st.coolWait) { coolWaitOff(st.coolWait, items[0] && items[0].obj === pillarObj ? items[0].pts[0] : null); st.coolWait = null; }
+        if (pauseK < pauseAt.length && z >= pauseAt[pauseK] - 1e-6) {
+          while (pauseK < pauseAt.length && z >= pauseAt[pauseK] - 1e-6) pauseK++;
+          pauseHere(z);
+        }
         if (remainingOn) { var nowR = remainingAt(pj); if (nowR.length < remaining.length) putRemaining(nowR); }
       }
       put('; layer num/total_layer_count: ' + layerNo + '/' + totalLayers);
@@ -2905,6 +2927,7 @@
         /* the prime tower: where it stands (plate coordinates, its brim's edge) and on how many layers; or why there is none */
         tower: TW ? { x: TW.x, y: TW.y, width: TW.W, depth: TW.D, box: [TW.box.x0, TW.box.y0, TW.box.x1, TW.box.y1], layers: TW.last + 1, moved: TW.moved } : null,
         towerNote: towerNote,
+        pauses: pauseStat.length ? pauseStat : null,
         coolWait: coolWait ? { seconds: coolWait, layers: waitStat.layers, total: +waitStat.total.toFixed(1) } : null,
         bridgeTemp: bridgeT != null ? { temp: bridgeT, changes: bridgeStat.changes, layers: bridgeStat.layers, secondsEach: BRIDGE_TEMP_SECONDS, fromLayer: +opts.bridgeTempFrom >= 2 ? +opts.bridgeTempFrom : null } : null,
         tempBands: steps ? bands : null,                       // the temperature steps as written: [{ temp, fromZ, layer }]

@@ -274,6 +274,9 @@
                     <select id="slice-set-cool-pillar" class="vp-select" autocomplete="off"
                             title="With a cool wait: a 6 mm square pillar 12 mm beside the part, as tall as the last layer that needs the wait, printed first on every layer. The nozzle waits over it, then prints it - whatever oozed in the wait goes into the pillar - and goes on to the part clean. Without it the wait is 10 mm off the part. Filament's own: CR-TPU on, others off.">
                       <option value="">Filament's own</option><option value="on">On</option><option value="off">Off</option></select></label>
+                  <label class="vp-bend-field" for="slice-set-pause-at">Pause at
+                    <input type="text" id="slice-set-pause-at" placeholder="none" inputmode="decimal"
+                           title="Heights, mm, separated by commas (40, 60, 80): before the first layer at or over each, the nozzle retracts, lifts 5 mm, parks and the printer pauses (Bambu's M400 U1) - resume from the printer. For the steady chuck: pause a few mm above where its head will sit, drop it over the stem, close the jaws, resume." autocomplete="off"><span>mm</span></label>
                   <label class="vp-bend-field" for="slice-set-temp-step">Temp step
                     <input type="number" id="slice-set-temp-step" value="0" min="-25" max="25" step="1" inputmode="numeric"
                              title="Change the nozzle temperature by this much at every band of height: -5 with temp 240 prints 240, 235, 230 ... up the model (a temperature tower from any model). 0: off. The change is made without stopping, at the layer change." autocomplete="off"><span>&deg;C</span></label>
@@ -3589,11 +3592,11 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=46eaa788"></script>
+  <script src="nso-print-planner.js?v=03d4b795"></script>
   <script src="nso-gcode3mf-write.js?v=bd4593c7"></script>
   <!-- Bambu's nozzles and quality presets for the A1 mini and the P1S (app-print.js qualityOverlay; docs/PRINT-CARD.md "Nozzle and quality") -->
   <script src="nso-bambu-presets.js?v=0f5f48d7"></script>
-  <script src="app-print.js?v=c58ec58e"></script>
+  <script src="app-print.js?v=aa86daec"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
