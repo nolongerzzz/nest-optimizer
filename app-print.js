@@ -842,6 +842,7 @@
       return { name: p.name, soup: soup, key: p.sourceId, gapCloseMm: p.nonSolid ? 0 : undefined,
                role: p.support ? (p.brim ? 'brim' : 'support') : 'part', hostKey: p.support ? p.hostSourceId : undefined,
                interfaceLayers: p.support ? p.interfaceLayers : undefined,
+               supportGapMm: p.support && p.supportGapMm > 0 ? p.supportGapMm : undefined,      /* a support's own top gap (nso_slicer.js) */
                sheetLayerMm: p.support ? p.sheetLayerMm : undefined,
                paint: p.support ? null : (p.paint || null) };            /* its painted colours (nso_paint.js): the layers' filament slots */
     });

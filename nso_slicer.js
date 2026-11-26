@@ -2850,6 +2850,9 @@
         return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped, exactAt: exactAt, soupOk: !!(ob.soup && ob.soup.length), soup: ob.soup && ob.soup.length ? ob.soup : null,
                  nonSolid: ob.gapCloseMm === 0,
                  role: ob.role === 'support' ? 'support' : ob.role === 'brim' ? 'brim' : 'part', key: ob.key, hostKey: ob.hostKey,
+                 /* A SUPPORT'S OWN TOP GAP (ob.supportGapMm): over the slice's supportGapMm for this support alone - a gap ladder on one plate
+                    (the owner's first CR-TPU support test, 2026-11-25: one shelf per gap) */
+                 gapMm: ob.role === 'support' && ob.supportGapMm > 0 ? +ob.supportGapMm : null,
                  thin: ob.detectThinWall != null ? !!ob.detectThinWall
                    : (ob.role === 'support' ? CONSTANTS.thinWall.supportsOn : !!o.detectThinWall),
                  layers: [], planes: pl === planes ? null : pl };
@@ -4180,6 +4183,7 @@
     });
   }
   function columnRule(g, P, perObject, planes, o) {
+    if (P.gapMm != null) o = Object.assign({}, o, { supportGapMm: P.gapMm });          /* the support's own top gap */
     var C = CONSTANTS.supportSheet;
     var NI = o.supportInterfaceLayers != null ? o.supportInterfaceLayers : C.interfaceLayers, NT = C.transitionLayers;
     var gap = o.supportGapMm, xy = o.supportXyMm != null ? o.supportXyMm : 0.35, SP = P.planes || planes, n = SP.length;
@@ -4467,6 +4471,7 @@
      of the part's layer that bridges its top - the top layer square to it, and so on down, one turn a layer. */
   var STUDIO36_DEG = 3.6;   /* Studio 02.09's bridge over the owner's mouse1 supports, and the stack's turn under it (layers 210 - 219) */
   function columnType(g, P, SP, o, host, planes, hostStacks) {
+    if (P.gapMm != null) o = Object.assign({}, o, { supportGapMm: P.gapMm });          /* the support's own top gap */
     var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, pitch = wI + 0.04, aD = (o.infillDirectionDeg || 45) * Math.PI / 180;
     var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, stackIdx = [], regs = [], sheets = [], up = [];
     var NI = P.col.NI, NT = P.col.NT;
@@ -4697,6 +4702,7 @@
       if (P.role !== 'support') return;
       var SP = P.planes || planes;                                             // this support's own layers, and `planes` the part's
       var n = SP.length, stairH = stairHOf(SP);
+      var gap = P.gapMm != null ? P.gapMm : o.supportGapMm;                    /* the support's own top gap */
       var host = P.hostKey != null ? parts.find(function (Q) { return Q.key != null && Q.key === P.hostKey; }) || null : null;
       var hosts = host ? [host] : parts;
       P.host = host;
@@ -5372,7 +5378,8 @@
       at: function (k) {
         var out = [];
         sups.forEach(function (P) {
-          var under = P.planes ? layersUnderX(planes, k, P.planes, o.supportGapMm) : layersUnder(planes, k, o.supportGapMm);
+          var gP = P.gapMm != null ? P.gapMm : o.supportGapMm;
+          var under = P.planes ? layersUnderX(planes, k, P.planes, gP) : layersUnder(planes, k, gP);
           var cs = g.unionAll(under.map(function (i) { return P.footAt(i); }));
           if (!g.isEmpty(cs)) out.push({ sup: P, cs: cs });
         });

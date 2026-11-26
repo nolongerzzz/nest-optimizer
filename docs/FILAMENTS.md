@@ -344,7 +344,9 @@ proven to need on a printer goes into its entry (`keys`, `printerKeys`, `cooling
 every filament and the card start there; a template or project with its own number keeps it, and it stays over the fine quality presets'
 own 0.06 - 0.18). The owner's PLA test on the P1S (2026-11-24: 0.2, 0.26, 0.28, 0.30, 0.33): 0.33 is the least that **released** - every
 smaller gap left little tree tips welded on; at 0.33 easy on obliques, fair on slopes, pliers in tight spots. With PETG's Supporttest
-(below) it is the baseline for both. CR-TPU's Supporttest at 0.33 is sliced and waiting to be printed.
+(below) it is the baseline for both. For CR-TPU 0.33 is too close (the owner: TPU will not let go there) and the Supporttest
+too hard a first test: `models/tpu-support-ladder` is four flat shelves at 0.4, 0.6, 0.8 and 1.0, one gap each (a support object's own
+`supportGapMm`), sliced in CR-TPU on the A1 mini - its print sets CR-TPU's own gap.
 
 Still open: supports for CR-TPU against a print, and the PETG Supporttest printed from NSO's own slice.
 
