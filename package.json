@@ -55,6 +55,7 @@
     "support:settings-drive": "node tools/nso_support_settings_drive_check.mjs",
     "support:gate": "node tools/nso_support_gate.js",
     "support:gate-rest": "node tools/nso_support_gate.js --fixture fixtures/supports/supporttest.3mf --ref fixtures/supports/supporttest_slim.gcode.3mf --angle 46 --rest",
+    "support:exact-gap": "node tools/nso_support_exact_gap_check.js",
     "support:gate-petg": "node tools/nso_support_gate.js --fixture fixtures/supports/supporttest_petg_a1m.3mf --ref fixtures/supports/supporttest_petg_a1m_slim.gcode.3mf --angle 45 --rest --interface 2 --gap 0.33",
     "support:gate-column": "node tools/nso_support_gate.js --rule column",
     "support:gate-sheet": "node tools/nso_support_gate.js --rule sheet",

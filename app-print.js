@@ -135,6 +135,9 @@
                            braceEvery: 0,
                            /* FLOW TEST: [start mm^3/s, step, every mm] - every line of a band at exactly that flow (a max-flow tower); null none */
                            flowTest: null,
+                           /* EXACT GAP: the support's top stands the Top Z distance to the dot under the part, its own layers ending there (needs Independent
+                              support layer height); off: rounded up to whole part layers, as the gate's Bambu references are */
+                           supExactGap: false,
                            /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). They start at the printer profile's values (settingsFromConfig);
                               these are Bambu's own defaults, for a card with no profile. NSO's old numbers (top 0.18, first layer solid, a bridge of
                               5 mm not held) are the Print card's built-in saved setting "NSO classic" */
@@ -363,7 +366,7 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [], braceEvery: 0, flowTest: null,
+      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [], braceEvery: 0, flowTest: null, supExactGap: false,
       /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
          keys; a key the profile does not hold is this slicer's own default */
       supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
@@ -513,6 +516,7 @@
         if (a.length < 1 || !(a[0] > 0)) return null;
         return [Math.min(60, a[0]), a.length > 1 ? Math.max(-20, Math.min(20, a[1])) : 1, a.length > 2 && a[2] > 0 ? Math.max(0.5, Math.min(50, a[2])) : 5];
       })(s.flowTest),
+      supExactGap: s.supExactGap === true || s.supExactGap === 'on',
       braceEvery: (function (v) { v = parseFloat(v); return !isFinite(v) || v <= 0 ? 0 : Math.round(Math.max(1, Math.min(50, v)) * 10) / 10; })(s.braceEvery),
       coolPillar: s.coolPillar === true || s.coolPillar === 'on' ? true : s.coolPillar === false || s.coolPillar === 'off' ? false : null,
       coolWait: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.min(60, v) * 10) / 10; })(s.coolWait),   /* 0: none */
@@ -919,6 +923,7 @@
       o.supportFirstLayerDensity = cs.supDensity / 100;
       o.supportWallLoops = cs.supWalls;
       o.supportGapMm = cs.supTopZ;
+      if (cs.supExactGap) o.supportGapExact = true;                     /* the gap to the dot, not rounded up to part layers (needs supports on their own layers) */
       if (Math.abs(cs.supBottomZ - 0.2) > 1e-6) o.supportBottomGapMm = cs.supBottomZ;                 /* 0.2: the foot as Generate carves it */
       o.supportBasePattern = cs.supBase;
       o.supportBaseSpacingMm = cs.supBaseSpacing;
@@ -1433,7 +1438,7 @@
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
       bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band'),
-      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'), coolWait: v('slice-set-cool-wait'), coolPillar: v('slice-set-cool-pillar'), pauseAt: v('slice-set-pause-at'), braceEvery: v('slice-set-brace'), flowTest: v('slice-set-flow-test'),
+      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'), coolWait: v('slice-set-cool-wait'), coolPillar: v('slice-set-cool-pillar'), pauseAt: v('slice-set-pause-at'), braceEvery: v('slice-set-brace'), flowTest: v('slice-set-flow-test'), supExactGap: v('slice-set-sup-exact'),
       flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), retractBefore: v('slice-set-retract-before'), zHop: v('slice-set-zhop'),
       project: S.project
     }));
@@ -1468,6 +1473,7 @@
     set('slice-set-pause-at', (st.pauseAt || []).join(', '));
     set('slice-set-brace', st.braceEvery ? st.braceEvery : '');
     set('slice-set-flow-test', st.flowTest ? st.flowTest.join(', ') : '');
+    set('slice-set-sup-exact', !!st.supExactGap);
     showFilamentRows();
     FILAMENT_ROWS.forEach(function (r) { if (st[r[1]] != null) set(r[0], st[r[1]]); });
     filamentNote(); bridgeNote();

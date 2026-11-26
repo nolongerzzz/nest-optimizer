@@ -9,3 +9,11 @@ slice's own; the Print card has no row for it yet.
 
     python3 make_shelf.py . 0.4 0.6 0.8 1.0      # the shelves (manifold3d, trimesh, matplotlib)
     node make_plate.js 0.4 0.6 0.8 1.0           # supports by the card's build, CR-TPU on the A1 mini, one .gcode.3mf
+
+## The first print (2026-11-25) and exact gaps
+
+0.4, 0.6, 0.8 and 1.0 all peeled off about equally - close in feel, no loose strands. At 0.2 mm layers NSO rounded every gap up to whole
+part layers (0.21 - 0.40 all printed 0.4), so the 0.4 shelf is what NSO's 0.33 baseline prints. **Exact top gap** (the support rows'
+checkbox, `supExactGap`; the slicer's `supportGapExact`) stands the support's top its gap to the dot under the part - its own layers end
+there - so `node make_plate.js 0.36 0.37 0.38 0.39` with `SET='{"supExactGap":true}'` prints four different gaps. `npm run support:exact-gap`
+checks it.

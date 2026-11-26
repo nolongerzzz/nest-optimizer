@@ -19,7 +19,7 @@ function readStl(f){const b=fs.readFileSync(f);const n=b.readUInt32LE(80);const 
  pieces.forEach(p=>{for(let i=0;i<p.soup.length;i+=3){p.soup[i]-=(x0+x1)/2;p.soup[i+1]-=(y0+y1)/2;}});
  console.log('footprint',(x1-x0).toFixed(1),(y1-y0).toFixed(1));
  const objects=PRINT.pieceObjects(pieces,pr.bed);
- const st=Object.assign(PRINT.settingsFromConfig(tpl),{filament:'cr-tpu',angle:45,interfaceRule:'column'});
+ const st=Object.assign(PRINT.settingsFromConfig(tpl),{filament:'cr-tpu',angle:45,interfaceRule:'column'},JSON.parse(process.env.SET||'{}'));
  const r=await PRINT.build(objects,{config:tpl,printer:pr},{settings:st});
  if(!r.ok){console.log('REFUSED',r.reason);return;}
  const name='TPU support ladder '+gaps.join('-')+' - A1 mini.gcode.3mf';

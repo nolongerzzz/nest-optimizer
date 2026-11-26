@@ -346,7 +346,10 @@ own 0.06 - 0.18). The owner's PLA test on the P1S (2026-11-24: 0.2, 0.26, 0.28, 
 smaller gap left little tree tips welded on; at 0.33 easy on obliques, fair on slopes, pliers in tight spots. With PETG's Supporttest
 (below) it is the baseline for both. For CR-TPU 0.33 is too close (the owner: TPU will not let go there) and the Supporttest
 too hard a first test: `models/tpu-support-ladder` is four flat shelves at 0.4, 0.6, 0.8 and 1.0, one gap each (a support object's own
-`supportGapMm`), sliced in CR-TPU on the A1 mini - its print sets CR-TPU's own gap.
+`supportGapMm`), sliced in CR-TPU on the A1 mini - its print sets CR-TPU's own gap. Printed 2026-11-25: all four peeled off about equally, no loose strands.
+NSO had rounded each gap up to whole part layers (0.21 - 0.40 all print 0.4 at 0.2 mm layers), so the 0.4 shelf is the 0.33 baseline as NSO
+prints it - CR-TPU releases there. **Exact top gap** (support rows, `supExactGap`) now prints a gap to the dot: the support's own layers end
+the gap under the part. Next: 0.2 alone (one layer of air), then 0.36 - 0.39 exact, for the underside's finish.
 
 Still open: supports for CR-TPU against a print, and the PETG Supporttest printed from NSO's own slice.
 

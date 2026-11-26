@@ -329,6 +329,7 @@
       brimLineWidthMm: null,               // null -> 1.25 x the nozzle (Bambu's first-layer line, 0.5 mm at 0.4)
       brimAutoRatio: 2,
       brimSupportGapMm: 0.02,
+      supportGapExact: false,              // true: the support's top stands the gap to the dot under the part (its own layers end there), not rounded up to part layers
       supportLayerMaxMm: 0,                // 0 = supports are cut on the part's layers; 0.28 = on their own (Bambu's independent_support_layer_height): see sliceObjects
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
       supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
@@ -3994,7 +3995,7 @@
   function supportGrid(P, planes, maxH, shiftZ) {
     var z0 = planes[0].printZ, zEnd = z0, anchors = [];
     P.layers.forEach(function (L) { if (L.areaMm2 > 0 && L.printZ > zEnd) zEnd = L.printZ; });
-    ((P.sheet && P.sheet.sheets) || []).forEach(function (sh) { anchors.push(sh.zHi); });
+    ((P.sheet && P.sheet.sheets) || []).forEach(function (sh) { anchors.push(sh.zHi); if (sh.zHi > zEnd && sh.zHi < zEnd + 0.4) zEnd = sh.zHi; });   /* an exact gap's anchor a hair over the last layer */
     anchors.push(zEnd);
     anchors = anchors.filter(function (a) { return a > z0 + 1e-6 && a <= zEnd + 1e-6; }).sort(function (a, b) { return a - b; });
     var zs = [z0], prev = z0;
@@ -4220,7 +4221,7 @@
         shadow[ks] = acc;
       }
     }
-    var blocked = [], blockedHard = [], blockedTree = [], blockedTwig = [], contact = [], near = [];
+    var blocked = [], blockedHard = [], blockedTree = [], blockedTwig = [], contact = [], near = [], exactTop = [];
     for (var i = 0; i < n; i++) {
       var zt = SP[i].printZ, zb = zt - SP[i].h, hn = i + 1 < n ? SP[i + 1].h : planes[0].h;
       var lat = [], ver = [], up = [], nr = [], upOv = [], bot = [];
@@ -4236,7 +4237,11 @@
         var d = b - zt;
         if (d < -1e-6) Array.prototype.push.apply(lat, cs);
         else if (d < gap - 1e-6) Array.prototype.push.apply(ver, cs);
-        else if (d < gap + hn - 1e-6) { Array.prototype.push.apply(up, csUp); if (ovByK[k]) upOv.push(ovByK[k]); }
+        else if (d < gap + hn - 1e-6) {
+          Array.prototype.push.apply(up, csUp); if (ovByK[k]) upOv.push(ovByK[k]);
+          /* EXACT GAP (o.supportGapExact): where this contact's top would stand to leave the gap to the dot - the underside less the gap */
+          if (exactTop[i] == null || b - gap < exactTop[i]) exactTop[i] = b - gap;
+        }
         if (d >= -1e-6) Array.prototype.push.apply(nr, cs);
       }
       var bl = [], L0 = U(lat), V0 = U(ver), hard = [], B0 = U(bot);
@@ -4461,7 +4466,7 @@
       console.log('column rule ' + P.name + ' (' + (host ? host.name : 'all parts') + '): footprint ' + A(F) + ' mm2');
       for (var i6 = 0; i6 < n; i6++) if (SP[i6].printZ > +process.env.NSO_COLUMN_DEBUG) console.log('  z ' + SP[i6].printZ.toFixed(3) + ' S ' + A(P.S[i6]) + ' blocked∩F ' + A(blocked[i6] ? g.inter(F, blocked[i6]) : null) + ' contact∩F ' + A(contact[i6] ? g.inter(F, contact[i6]) : null) + ' I ' + A(I[i6]) + ' T ' + A(T[i6]));
     }
-    P.col = { I: I, T: T, D: D, R0: R0, NI: NI, NT: NT, footprint: F, blocked: blocked, blockedHard: blockedHard, rank: rank };
+    P.col = { I: I, T: T, D: D, R0: R0, NI: NI, NT: NT, footprint: F, blocked: blocked, blockedHard: blockedHard, rank: rank, exactTop: exactTop };
   }
 
   /* the stack laid: each of a layer's regions one loop round its edge (half a line in) and a zig-zag inside it at Bambu's interface
@@ -4523,7 +4528,12 @@
     }
     P.layers.forEach(function (L, j) {
       var I = P.col.I[j], T = P.col.T[j], R = regs[j];
-      if (P.col.R0[j]) sheets.push({ topLayer: j, zLo: SP[Math.max(0, j - NI - NT + 1)].printZ - SP[Math.max(0, j - NI - NT + 1)].h, zHi: SP[j].printZ, areaMm2: g.area(P.col.R0[j]), tips: 0 });
+      /* EXACT GAP (o.supportGapExact): on the shared grid a contact's top is anchored where it leaves the gap to the dot (the underside less the
+         gap), so the support's own grid (supportGrid) ends its stretch there - not on the part layer under it, which rounds every gap up to whole
+         part layers (0.21 - 0.40 all printed 0.4 at 0.2 mm layers; the owner's CR-TPU ladder, 2026-11-25) */
+      var zTop = SP[j].printZ;
+      if (o.supportGapExact && !P.planes && P.col.exactTop && P.col.exactTop[j] != null && P.col.exactTop[j] > zTop) zTop = P.col.exactTop[j];
+      if (P.col.R0[j]) sheets.push({ topLayer: j, zLo: SP[Math.max(0, j - NI - NT + 1)].printZ - SP[Math.max(0, j - NI - NT + 1)].h, zHi: zTop, areaMm2: g.area(P.col.R0[j]), tips: 0 });
       var out = [];
       var Rp = R ? g.polys(g.offset(R, 1e-3)) : [];
       L.paths.forEach(function (p) {

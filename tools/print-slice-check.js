@@ -213,7 +213,7 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, quality: '0.20mm Standard @BBL A1M', layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [], braceEvery: 0, flowTest: null,   /* the filament's own */
+        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [], braceEvery: 0, flowTest: null, supExactGap: false,   /* the filament's own */
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true,
