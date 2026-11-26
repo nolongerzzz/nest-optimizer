@@ -352,6 +352,7 @@
       supportInterfacePattern: 'default',  // support_interface_pattern: 'default' (the angle rule above) | 'rectilinear' (one direction) | 'rectilinear_interlaced' (a quarter turn a layer) | 'grid' (both, each layer) | 'concentric'
       supportBasePattern: 'default',       // support_base_pattern: 'default' (a line across each ring under a stack) | 'hollow' (walls alone) | 'rectilinear' | 'rectilinear-grid' (lines through the whole tree)
       supportBaseSpacingMm: 2.5,           // support_base_pattern_spacing: the base pattern's lines this far apart
+      supportSeamStagger: true,            // a support's wall loops start at a different place round the ring each layer (false: where each polygon begins - stacked)
       supportWallLoops: -1,                // tree_support_wall_count: -1 (or 0) automatic - one; else that many
       supportFirstLayerDensity: 1,         // raft_first_layer_density: a support's first layer filled this dense (1: solid)
       supportFirstLayerGapMm: null,        // support_object_first_layer_gap: a support's first layer this far from the part's (null: as built)
@@ -973,6 +974,17 @@
      side, so a curve made of many short edges is one smooth turn): a concave corner (the material's inside angle over 180) is best, a sharp
      convex one next, a straight or gently curving stretch worst - Studio's compute_angle_penalty. To that is added a little for the distance
      from the nearest seam on the layer below, so seams line up layer on layer, and a loop with no corner keeps its seam where the one below was. */
+  /* a closed loop begun at the vertex nearest a point that moves round it by the golden section of its length a layer: no two layers near each
+     other begin at the same place, and the loop's points and direction are unchanged */
+  function staggerStart(pts, layer) {
+    var n = pts.length;
+    if (n < 4) return pts;
+    var cum = [0], k;
+    for (k = 1; k <= n; k++) cum.push(cum[k - 1] + Math.hypot(pts[k % n][0] - pts[k - 1][0], pts[k % n][1] - pts[k - 1][1]));
+    var f = (layer * 0.6180339887) % 1, want = f * cum[n], best = 0;
+    for (k = 1; k < n; k++) if (Math.abs(cum[k] - want) < Math.abs(cum[best] - want)) best = k;
+    return best ? pts.slice(best).concat(pts.slice(0, best)) : pts;
+  }
   function placeSeam(pts, polys, prev, w) {
     var n = pts.length;
     if (n < 3) return pts;
@@ -2958,6 +2970,10 @@
             var lpPolys = seamOn ? g.polys(lp.cs) : null;
             loopsOf(g, lp.cs).forEach(function (path) {
               if (seamOn) { path.pts = placeSeam(path.pts, lpPolys, seamsPrev, w); seamsNow.push(path.pts[0]); }
+              /* A SUPPORT'S RINGS START ROUND THE RING, A NEW PLACE EVERY LAYER (o.supportSeamStagger). A tree's trunk is one wall: started at the
+                 same point every layer, each ring's thin beginning (the nozzle has just travelled; TPU most of all) stacks into a slit up the
+                 trunk - the owner's TPU trunks printed split open. Nothing of a support is seen, so its seam is spread, not hidden. */
+              else if (P.role === 'support' && o.supportSeamStagger !== false && path.closed !== false) path.pts = staggerStart(path.pts, i);
               var seq = [];
               splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm, belowIn).forEach(function (piece) {
                 if (!piece.over) { seq.push({ feature: feat, width: w, closed: piece.closed, pts: piece.pts }); return; }
