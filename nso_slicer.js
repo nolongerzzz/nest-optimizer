@@ -2854,6 +2854,11 @@
                  /* A SUPPORT'S OWN TOP GAP (ob.supportGapMm): over the slice's supportGapMm for this support alone - a gap ladder on one plate
                     (the owner's first CR-TPU support test, 2026-11-25: one shelf per gap) */
                  gapMm: ob.role === 'support' && ob.supportGapMm > 0 ? +ob.supportGapMm : null,
+                 /* ...and its own interface (ob.supportOptions: supportInterfaceSpacingMm, supportInterfacePattern), over the slice's */
+                 optOver: ob.role === 'support' && ob.supportOptions ? (function (so) { var out = {};
+                   if (so.supportInterfaceSpacingMm != null && isFinite(+so.supportInterfaceSpacingMm)) out.supportInterfaceSpacingMm = +so.supportInterfaceSpacingMm;
+                   if (typeof so.supportInterfacePattern === 'string') out.supportInterfacePattern = so.supportInterfacePattern;
+                   return Object.keys(out).length ? out : null; })(ob.supportOptions) : null,
                  thin: ob.detectThinWall != null ? !!ob.detectThinWall
                    : (ob.role === 'support' ? CONSTANTS.thinWall.supportsOn : !!o.detectThinWall),
                  layers: [], planes: pl === planes ? null : pl };
@@ -4477,6 +4482,7 @@
   var STUDIO36_DEG = 3.6;   /* Studio 02.09's bridge over the owner's mouse1 supports, and the stack's turn under it (layers 210 - 219) */
   function columnType(g, P, SP, o, host, planes, hostStacks) {
     if (P.gapMm != null) o = Object.assign({}, o, { supportGapMm: P.gapMm });          /* the support's own top gap */
+    if (P.optOver) o = Object.assign({}, o, P.optOver);                                  /* ...and its own interface */
     var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, pitch = wI + 0.04, aD = (o.infillDirectionDeg || 45) * Math.PI / 180;
     var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, stackIdx = [], regs = [], sheets = [], up = [];
     var NI = P.col.NI, NT = P.col.NT;

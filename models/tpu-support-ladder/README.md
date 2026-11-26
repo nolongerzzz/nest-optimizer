@@ -17,3 +17,19 @@ part layers (0.21 - 0.40 all printed 0.4), so the 0.4 shelf is what NSO's 0.33 b
 checkbox, `supExactGap`; the slicer's `supportGapExact`) stands the support's top its gap to the dot under the part - its own layers end
 there - so `node make_plate.js 0.36 0.37 0.38 0.39` with `SET='{"supExactGap":true}'` prints four different gaps. `npm run support:exact-gap`
 checks it.
+
+## Interface test A - D (2026-11-25)
+
+0.36 - 0.39 exact all peeled off equally easily, and the shelves held to their columns. Next: the underside's finish. Four shelves at an
+exact 0.37, a 20 s **Interface wait** before the part goes down on the supports (support rows; the planner's `interfaceWait`), and each
+support its own interface (`supportOptions` on a support object: `supportInterfaceSpacingMm`, `supportInterfacePattern`):
+
+| Shelf | Interface |
+| --- | --- |
+| A | the default: lines a line apart, about half closed (the control, with the wait) |
+| B | closed (spacing 0), the angle rule |
+| C | closed, rectilinear - every interface layer one way |
+| D | closed, concentric |
+
+    VARIANTS='[{"label":"A","gap":0.37,"opts":{}},{"label":"B","gap":0.37,"opts":{"supportInterfaceSpacingMm":0}},...]' \
+    NAME='TPU interface test A-D' SET='{"supExactGap":true,"ifaceWait":20}' node make_variants.js

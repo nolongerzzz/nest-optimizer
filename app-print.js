@@ -138,6 +138,8 @@
                            /* EXACT GAP: the support's top stands the Top Z distance to the dot under the part, its own layers ending there (needs Independent
                               support layer height); off: rounded up to whole part layers, as the gate's Bambu references are */
                            supExactGap: false,
+                           /* INTERFACE WAIT (s): before the first part layer over a support's top, a wait off the part, the fan on; 0 none */
+                           ifaceWait: 0,
                            /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). They start at the printer profile's values (settingsFromConfig);
                               these are Bambu's own defaults, for a card with no profile. NSO's old numbers (top 0.18, first layer solid, a bridge of
                               5 mm not held) are the Print card's built-in saved setting "NSO classic" */
@@ -366,7 +368,7 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [], braceEvery: 0, flowTest: null, supExactGap: false,
+      bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, bridgeFirst: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null, bridgeTempFrom: null, coolWait: null, coolPillar: null, pauseAt: [], braceEvery: 0, flowTest: null, supExactGap: false, ifaceWait: 0,
       /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
          keys; a key the profile does not hold is this slicer's own default */
       supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
@@ -517,6 +519,7 @@
         return [Math.min(60, a[0]), a.length > 1 ? Math.max(-20, Math.min(20, a[1])) : 1, a.length > 2 && a[2] > 0 ? Math.max(0.5, Math.min(50, a[2])) : 5];
       })(s.flowTest),
       supExactGap: s.supExactGap === true || s.supExactGap === 'on',
+      ifaceWait: (function (v) { v = parseFloat(v); return !isFinite(v) || v <= 0 ? 0 : Math.round(Math.min(120, v)); })(s.ifaceWait),
       braceEvery: (function (v) { v = parseFloat(v); return !isFinite(v) || v <= 0 ? 0 : Math.round(Math.max(1, Math.min(50, v)) * 10) / 10; })(s.braceEvery),
       coolPillar: s.coolPillar === true || s.coolPillar === 'on' ? true : s.coolPillar === false || s.coolPillar === 'off' ? false : null,
       coolWait: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.min(60, v) * 10) / 10; })(s.coolWait),   /* 0: none */
@@ -777,7 +780,7 @@
 
   /** What the planner is told beside the config: the filament's cooling (undefined: NSO's default profile), its start G-code, the temperature steps. */
   function plannerExtras(config, settings) {
-    if (!settings) return { cooling: undefined, filamentStart: undefined, tempSteps: undefined, bridgeTemp: undefined, bridgeTempFrom: undefined, hangSpeed: undefined, coolWait: undefined, pauseAt: undefined, flowTest: undefined };
+    if (!settings) return { cooling: undefined, filamentStart: undefined, tempSteps: undefined, bridgeTemp: undefined, bridgeTempFrom: undefined, hangSpeed: undefined, coolWait: undefined, pauseAt: undefined, flowTest: undefined, interfaceWait: undefined };
     var f = filamentOf(settings.filament), PL = lazy('nso-print-planner.js', 'NSOPrintPlanner'), CP = lazy('nso-cooling-profiles.js', 'NSOCoolingProfiles');
     var S = PL.settingsFrom(config);
     return {
@@ -789,6 +792,7 @@
       hangSpeed: hangSpeedOf(config, settings) || undefined,
       coolWait: coolWaitOf(config, settings) || undefined,
       pauseAt: settings.pauseAt && settings.pauseAt.length ? settings.pauseAt : undefined,
+      interfaceWait: settings.ifaceWait > 0 ? settings.ifaceWait : undefined,
       flowTest: settings.flowTest ? { start: settings.flowTest[0], step: settings.flowTest[1], bandMm: settings.flowTest[2] } : undefined
     };
   }
@@ -855,6 +859,7 @@
                role: p.support ? (p.brim ? 'brim' : 'support') : 'part', hostKey: p.support ? p.hostSourceId : undefined,
                interfaceLayers: p.support ? p.interfaceLayers : undefined,
                supportGapMm: p.support && p.supportGapMm > 0 ? p.supportGapMm : undefined,      /* a support's own top gap (nso_slicer.js) */
+               supportOptions: p.support && p.supportOptions ? p.supportOptions : undefined,      /* ...and its own interface */
                sheetLayerMm: p.support ? p.sheetLayerMm : undefined,
                paint: p.support ? null : (p.paint || null) };            /* its painted colours (nso_paint.js): the layers' filament slots */
     });
@@ -1092,7 +1097,7 @@
       var ex = plannerExtras(config, settings);
       /* a painted project's filaments go into the file's CONFIG_BLOCK as lists, under the card's own changes */
       if (assets.filamentOver) over = Object.assign({}, assets.filamentOver, over);
-      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps, bridgeTemp: ex.bridgeTemp, bridgeTempFrom: ex.bridgeTempFrom, hangSpeed: ex.hangSpeed, coolWait: ex.coolWait, pauseAt: ex.pauseAt, flowTest: ex.flowTest, coolPillarObj: pillar ? objects.length : undefined }).then(function (out) {
+      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps, bridgeTemp: ex.bridgeTemp, bridgeTempFrom: ex.bridgeTempFrom, hangSpeed: ex.hangSpeed, coolWait: ex.coolWait, pauseAt: ex.pauseAt, flowTest: ex.flowTest, interfaceWait: ex.interfaceWait, coolPillarObj: pillar ? objects.length : undefined }).then(function (out) {
         var seen = {};
         var labels = out.plan.labels.filter(function (l) { return !pillar || l.index !== objects.length; });   /* the pillar is no piece of the owner's */
         out.plan.layers.forEach(function (l) { l.features.forEach(function (f) { seen[f] = 1; }); });
@@ -1100,7 +1105,7 @@
         return {
           ok: true, reason: '', bytes: out.bytes, features: Object.keys(seen), objects: labels.length,
           labels: labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
-          stats: { layers: st.layers, seconds: st.seconds.total, startSeconds: st.seconds.start, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ, tempBands: st.tempBands || null, bridgeTemp: st.bridgeTemp || null, coolWait: st.coolWait || null, coolPillar: pillar ? pillar.info : null, pauses: st.pauses || null, flowTest: st.flowTest || null,
+          stats: { layers: st.layers, seconds: st.seconds.total, startSeconds: st.seconds.start, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ, tempBands: st.tempBands || null, bridgeTemp: st.bridgeTemp || null, coolWait: st.coolWait || null, coolPillar: pillar ? pillar.info : null, pauses: st.pauses || null, flowTest: st.flowTest || null, interfaceWait: st.interfaceWait || null,
                    changes: st.changes ? st.changes.length : 0, tower: st.tower || null, towerNote: st.towerNote || null },
           tune: settings ? tuneWords(config, ex.hangSpeed) : null,                                                             // the bridge and retraction numbers it prints with
           filament: filamentWords(config, settings),                                                             // what it prints with, in words
@@ -1438,7 +1443,7 @@
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
       bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band'),
-      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'), coolWait: v('slice-set-cool-wait'), coolPillar: v('slice-set-cool-pillar'), pauseAt: v('slice-set-pause-at'), braceEvery: v('slice-set-brace'), flowTest: v('slice-set-flow-test'), supExactGap: v('slice-set-sup-exact'),
+      bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), hangSpeed: v('slice-set-hang-speed'), bridgeTemp: v('slice-set-bridge-temp'), bridgeTempFrom: v('slice-set-bridge-temp-from'), coolWait: v('slice-set-cool-wait'), coolPillar: v('slice-set-cool-pillar'), pauseAt: v('slice-set-pause-at'), braceEvery: v('slice-set-brace'), flowTest: v('slice-set-flow-test'), supExactGap: v('slice-set-sup-exact'), ifaceWait: v('slice-set-sup-iface-wait'),
       flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), retractBefore: v('slice-set-retract-before'), zHop: v('slice-set-zhop'),
       project: S.project
     }));
@@ -1474,6 +1479,7 @@
     set('slice-set-brace', st.braceEvery ? st.braceEvery : '');
     set('slice-set-flow-test', st.flowTest ? st.flowTest.join(', ') : '');
     set('slice-set-sup-exact', !!st.supExactGap);
+    set('slice-set-sup-iface-wait', st.ifaceWait ? st.ifaceWait : '');
     showFilamentRows();
     FILAMENT_ROWS.forEach(function (r) { if (st[r[1]] != null) set(r[0], st[r[1]]); });
     filamentNote(); bridgeNote();

@@ -2028,6 +2028,10 @@
     var flowTest = opts.flowTest && +opts.flowTest.start > 0 && +opts.flowTest.bandMm > 0
       ? { start: +opts.flowTest.start, step: +opts.flowTest.step || 0, bandMm: +opts.flowTest.bandMm } : null;
     var flowBands = [];
+    /* INTERFACE WAIT (opts.interfaceWait, s): before the first layer of a part laid over a support's top (its last Support interface layer), a
+       wait off the part, the fan on, so the interface has set before the part goes down on it (the owner's CR-TPU shelves, 2026-11-25: peeling
+       is easy at every gap; the question is how clean). One wait at each such layer, whatever the number of supports under it. */
+    var ifaceWait = opts.interfaceWait > 0 ? +opts.interfaceWait : 0, ifaceAt = {}, ifaceStat = [];
     /* THE COOL PILLAR (opts.coolPillarObj: the index of the app's pillar object): printed first on each layer, the wait spent over it */
     /* PAUSE AT (opts.pauseAt: heights, mm): before the first layer at or over each, the nozzle retracts, lifts 5 mm, goes to the printer's park
        (the A1 mini's purge spot; elsewhere the plate's back-left corner) and the printer pauses (Bambu's machine_pause_gcode, M400 U1) - for
@@ -2052,6 +2056,28 @@
       if (res.objects.some(function (ob) { var Lr = ob.layers[pi]; return Lr && Lr.paths.length; })) printing.push(pi);
     }
     var top = res.planes[printing[printing.length - 1]].printZ;
+    if (ifaceWait) {
+      var tops = [];
+      res.objects.forEach(function (ob) {
+        if (ob.role !== 'support') return;
+        ob.layers.forEach(function (L, j) {
+          if (!L || !L.paths || !L.paths.some(function (p) { return p.feature === 'Support interface'; })) return;
+          /* the support's next layer with lines (on its own grid the shared list has the part's planes between) */
+          var up = null;
+          for (var jn = j + 1; jn < ob.layers.length; jn++) if (ob.layers[jn] && ob.layers[jn].paths && ob.layers[jn].paths.length) { up = ob.layers[jn]; break; }
+          if (up && up.paths.some(function (p) { return p.feature === 'Support interface'; })) return;
+          tops.push(L.printZ != null ? L.printZ : res.planes[j].printZ);
+        });
+      });
+      tops.forEach(function (zt) {
+        for (var q = 0; q < printing.length; q++) {
+          var plq = res.planes[printing[q]];
+          if (plq.printZ - plq.h < zt - 1e-6) continue;
+          if (res.objects.some(function (ob) { var Lq = ob.layers[printing[q]]; return ob.role !== 'support' && ob.role !== 'brim' && Lq && Lq.paths && Lq.paths.length; })) { ifaceAt[q] = true; }
+          break;
+        }
+      });
+    }
     if (top > bed.z) return { ok: false, reason: 'the print is ' + top.toFixed(1) + ' mm tall; the ' + Pr.printer + ' prints ' + bed.z + ' mm' };
     var vals = { nozzle: S.temp.nozzleInitial, nozzleT: S.temp.nozzle, bed: S.temp.bedInitial, bedMax: Math.max(S.temp.bed, S.temp.bedInitial), box: box,
                  cy: box.y + box.h / 2, maxZ: top,
@@ -2627,6 +2653,14 @@
         flushRetract();
         closeObject();
         if (st.coolWait) { coolWaitOff(st.coolWait, items[0] && items[0].obj === pillarObj ? items[0].pts[0] : null); st.coolWait = null; }
+        if (ifaceAt[pj]) {
+          var ib = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+          items.forEach(function (it) { it.pts.forEach(function (q) { if (q[0] < ib.x0) ib.x0 = q[0]; if (q[0] > ib.x1) ib.x1 = q[0]; if (q[1] < ib.y0) ib.y0 = q[1]; if (q[1] > ib.y1) ib.y1 = q[1]; }); });
+          put('; NSO interface wait: the part goes down on a support top at ' + fc(z, 4) + ' mm');
+          coolWaitOff({ seconds: ifaceWait, box: ib }, null);
+          waitStat.layers--; waitStat.total -= ifaceWait;                       /* counted as the interface's, not the cool wait's */
+          ifaceStat.push(+z.toFixed(3));
+        }
         if (pauseK < pauseAt.length && z >= pauseAt[pauseK] - 1e-6) {
           while (pauseK < pauseAt.length && z >= pauseAt[pauseK] - 1e-6) pauseK++;
           pauseHere(z);
@@ -2950,6 +2984,7 @@
         towerNote: towerNote,
         pauses: pauseStat.length ? pauseStat : null,
         flowTest: flowTest ? flowBands : null,
+        interfaceWait: ifaceWait ? { seconds: ifaceWait, layers: ifaceStat } : null,
         coolWait: coolWait ? { seconds: coolWait, layers: waitStat.layers, total: +waitStat.total.toFixed(1) } : null,
         bridgeTemp: bridgeT != null ? { temp: bridgeT, changes: bridgeStat.changes, layers: bridgeStat.layers, secondsEach: BRIDGE_TEMP_SECONDS, fromLayer: +opts.bridgeTempFrom >= 2 ? +opts.bridgeTempFrom : null } : null,
         tempBands: steps ? bands : null,                       // the temperature steps as written: [{ temp, fromZ, layer }]

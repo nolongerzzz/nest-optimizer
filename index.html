@@ -594,6 +594,9 @@
                         <input type="checkbox" id="slice-set-sup-indep" checked autocomplete="off"> Independent support layer height</label>
                       <label class="vp-check" for="slice-set-sup-exact" title="On: the support's top stands the Top Z distance to the dot under the part - its own layers end there - so 0.36, 0.37, 0.38 each print as typed. Off: rounded up to whole part layers (at 0.2 mm layers everything from 0.21 to 0.40 prints as 0.4). Needs Independent support layer height.">
                         <input type="checkbox" id="slice-set-sup-exact" autocomplete="off"> Exact top gap</label>
+                      <label class="vp-bend-field" for="slice-set-sup-iface-wait">Interface wait
+                        <input type="number" id="slice-set-sup-iface-wait" min="0" max="120" step="1" placeholder="off" inputmode="numeric" autocomplete="off"
+                               title="Before the first layer of the part laid over a support's top, the nozzle lifts, moves off the part and waits this long with the fan on, so the interface has set before the part goes down on it. Empty or 0: off."><span>s</span></label>
                     </div>
                   </details>
                   <details class="vp-sec sup-adv-sec" id="sup-adv-sec">
@@ -3374,7 +3377,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=8d14fa2e"></script>
+  <script src="nso_slicer.js?v=bce2293f"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3592,7 +3595,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=01b26f07"></script>
+  <script src="app-supports-card.js?v=63cd3b47"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3600,11 +3603,11 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=11b96fe5"></script>
+  <script src="nso-print-planner.js?v=90257f46"></script>
   <script src="nso-gcode3mf-write.js?v=bd4593c7"></script>
   <!-- Bambu's nozzles and quality presets for the A1 mini and the P1S (app-print.js qualityOverlay; docs/PRINT-CARD.md "Nozzle and quality") -->
   <script src="nso-bambu-presets.js?v=0f5f48d7"></script>
-  <script src="app-print.js?v=01cd90d9"></script>
+  <script src="app-print.js?v=a49b8731"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
