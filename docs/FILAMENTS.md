@@ -338,7 +338,7 @@ proven to need on a printer goes into its entry (`keys`, `printerKeys`, `cooling
 |---|---|---|
 | Profile (PLA) - the owner's PLA is Bambu PLA Basic on both | the template (Generic PLA, 12 mm^3/s: to become PLA Basic after the mini's service, then its own flow bars) | Bambu PLA Basic, **30 mm^3/s** (the flow bars, 2026-11-26: walls held to 36, a faint line where 28 stepped to 30; Bambu's 21) |
 | CR-TPU 95A | 215 / 235 C, bed 30, slicer rules (temperature tower, string test, roofs); **supports: Top Z 0.2** (the shelves, 2026-11-25) | the owner's preset: 220 C, bed 30, fan 40 - 65 % |
-| ELEGOO PETG | the owner's preset 245 C, 10 mm^3/s; **supports: Top Z 0.33** (Supporttest, 2026-11-23) | Generic PETG 255 C, **16 mm^3/s** (the flow rings, 2026-11-25: clean as far as they reached - about 17, the rings' corners capping every band above it; Generic's 12 before); supports: Top Z 0.33 |
+| ELEGOO PETG | the owner's preset 245 C, 10 mm^3/s; **supports: Top Z 0.33** (Supporttest, 2026-11-23) | Generic PETG 255 C, **16 mm^3/s** (the flow bars, 2026-11-26: long walls clean to 32, corners rough from 11.9 mm - the 18 band - so 16, two under; Generic's 12 before); supports: Top Z 0.33 |
 
 **NSO's baseline support gap is 0.33 mm** (`nsoBaseline` in `app-print.js`, written into each printer's template as it is fetched, so
 every filament and the card start there; a template or project with its own number keeps it, and it stays over the fine quality presets'
@@ -394,6 +394,10 @@ On the capsule rebuilt from Studio's G-code, the necks print in about 1 s and wa
   2.25 deg at each joint, and Bambu's 9 mm/s jerk holds a joint like that to about 229 mm/s (9 / the turn in radians) - PLA's rings sounded
   the same from bottom to top, PETG's sped up only through its first bands. `models/flow-test` now has bars: three 110 x 14 mm hollow bars,
   whose long sides reach the asked speed (10000 mm/s^2 gets to 487 mm/s in 12 mm).
+- **The corners decide.** A bar's long side shows where the hotend stops melting; its corners show where the nozzle's pressure stops
+  keeping up with the braking. PLA Basic held both to 36. ELEGOO PETG held its long walls to 32 but its corners only to about 18. A part is
+  mostly corners and curves: the max flow is where the corners still hold, less a little. Better pressure advance (Bambu's flow dynamics
+  calibration) may raise PETG's corners - a test for later.
 - **Flow test** (the card's row, `flowTest`: start, step, every mm): a max-volumetric tower from any model. From the second layer every
   line of a band prints at exactly that flow of filament through the hotend (the bead times the flow ratio), whatever the feature's speed
   or the filament's max flow, with no slowing for layer time (`opts.flowTest` in the planner). Each band is marked in the file and the
