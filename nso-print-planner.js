@@ -672,12 +672,10 @@
       (L.sparsePolys ? L.sparsePolys : (L.sectionPolys || [])).forEach(function (p) { rings.push(p); });
       L.paths.forEach(function (p) {
         /* A SUPPORT RING WITH NO WIPE (CR-TPU since 2026-11-25): its seam is what the wipe forward used to seal - the owner's TPU trees split
-           straight up their aligned seams, one-wall rings stopping 0.06 mm short layer after layer. So such a ring starts a little further round
-           each layer (the golden ratio's share of it: no two seams over one another for many layers) and runs SUPPORT_RING_OVERLAP_MM past its
-           own start instead of stopping short. */
+           straight up their aligned seams, one-wall rings stopping 0.06 mm short layer after layer. The slicer now starts each ring further round
+           each layer (supportSeamStagger); here such a ring also runs SUPPORT_RING_OVERLAP_MM past its own start instead of stopping short. */
         var ringNoWipe = p.closed && !S.retract.wipe && /^Support/.test(p.feature || '') && p.pts.length > 3;
         var ring = p.pts;
-        if (ringNoWipe) { var k0 = Math.floor(((li * 0.6180339887) % 1) * ring.length) % ring.length; ring = ring.slice(k0).concat(ring.slice(0, k0)); }
         var pts = p.closed && ring.length ? ring.concat([ring[0]]) : ring;
         if (pts.length < 2) return;
         if (ringNoWipe) {

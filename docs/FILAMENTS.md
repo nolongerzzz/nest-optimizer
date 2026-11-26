@@ -404,8 +404,8 @@ On the capsule rebuilt from Studio's G-code, the necks print in about 1 s and wa
   readout. `models/flow-test`: a 50 mm tube with a band table.
 - **A support ring with no wipe** (2026-11-26): the owner's CR-TPU trees (supp_test, A1 mini) split straight up their seams - one-wall rings,
   every seam over the last, each stopping 0.06 mm short (the seam gap) with no wipe forward to seal it, the very split the wipe had cured on
-  the P1S's PLA trunks. With no wipe a support ring now starts further round each layer (the golden ratio's share of the ring) and runs
-  0.3 mm past its own start (`SUPPORT_RING_OVERLAP_MM`); `npm run support:exact-gap` checks it. Filaments that wipe are unchanged.
+  the P1S's PLA trunks. The slicer now starts every support ring further round each layer (`supportSeamStagger`), and with no wipe the planner
+  runs a support ring 0.3 mm past its own start (`SUPPORT_RING_OVERLAP_MM`); `npm run support:exact-gap` checks it. Filaments that wipe are unchanged.
 - With no z hop, the timelapse hook's way back is now always a travel of its own: a top run's glide after the hook had gone at the hook's
   F18000 (found on the pillar's top).
 
