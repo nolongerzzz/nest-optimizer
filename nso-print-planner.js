@@ -2625,7 +2625,11 @@
         });
       }
       /* COOL WAIT: what this layer still lacks of opts.coolWait at the speeds it now prints at, waited out off the part before the next one */
-      if (coolWait && !first && !lastLayer) {
+      /* ...not after a layer of supports alone: a support's own layer (independent support layer height) falls between two of the part's, and
+         the part's own layer has just been printed - the owner's supp_test in CR-TPU stopped 1 - 2 s off the plate on every support-only layer
+         under its trees (2026-11-26) */
+      var partHere = items.some(function (it) { var ob = res.objects[it.obj]; return ob && ob.role !== 'support' && ob.role !== 'brim'; });
+      if (coolWait && !first && !lastLayer && partHere) {
         var lackS = coolWait - (layerSecondsOf(items, S, cool.mode, null) + changeSec);
         if (lackS >= COOL_WAIT_MIN) {
           var wb = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
