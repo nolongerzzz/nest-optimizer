@@ -352,7 +352,8 @@ prints it - CR-TPU releases there. **Exact top gap** (support rows, `supExactGap
 the gap under the part. Then: 0.36 - 0.39 exact peeled off equally too; **0.2 (one layer of air) peeled off and
 left the smoothest underside**, a little sticky at the edges; four interfaces at 0.2 (the default, closed crosswise, closed one way, closed
 concentric) with a 20 s interface wait could not be told apart. **CR-TPU's own support gap is 0.2** (`tune`: `supTopZ`), the default
-interface, no wait.
+interface, no wait. Then exact gaps under it (2026-11-26: 0.05, 0.1, 0.15, 0.2): 0.15 still peeled, 0.1 and 0.05
+did not, and 0.15's underside could not be told from 0.2's - **0.2 stays**, a margin over where peeling stops.
 
 Still open: supports for CR-TPU against a print, and the PETG Supporttest printed from NSO's own slice.
 
