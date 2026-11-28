@@ -34,6 +34,13 @@
 //                    this change (pinned), now sound
 //   7  one copy      the lid trim lives once, in app-cut.js, and both engines
 //                    call it
+//   8  odd rings     a Ø5 / bore Ø2.5 straw whose outside has 92 points and
+//                    bore 66, the end strip-merged between them (the shape of
+//                    the Capri-Sun straw that showed it): Round R 0.02 - 0.5 on
+//                    both ends sound. A clip point 1.04e-4 off a ring point
+//                    used to survive the 5e-5 lid snap and then share a 1e-4
+//                    weld cell with it - 8 non-manifold edges at R 0.02 / 0.04
+//                    / 0.05
 
 const fs = require('fs');
 const os = require('os');
@@ -391,9 +398,49 @@ function oneCopy() {
     said.length === 1 && /R must be under/.test(said[0]), said.map(s => s.trim()).join(' | '));
 }
 
+/* ============================== 8. odd ring counts ============================== */
+function oddRings() {
+  console.log('\n== 8. a straw end, 92 points outside and 66 in the bore ==');
+  const RO = 2.5, RI = 1.25, NO = 92, NI = 66, H = 20, o = [];
+  const P = (r, a, z) => [r * Math.cos(a), r * Math.sin(a), z];
+  const tri = (a, b, c) => o.push(...a, ...b, ...c);
+  for (let i = 0; i < NO; i++) {
+    const a = 2 * Math.PI * i / NO, b = 2 * Math.PI * (i + 1) / NO;
+    tri(P(RO, a, 0), P(RO, b, 0), P(RO, b, H)); tri(P(RO, a, 0), P(RO, b, H), P(RO, a, H));
+  }
+  for (let i = 0; i < NI; i++) {
+    const a = 2 * Math.PI * i / NI, b = 2 * Math.PI * (i + 1) / NI;
+    tri(P(RI, a, 0), P(RI, b, H), P(RI, b, 0)); tri(P(RI, a, 0), P(RI, a, H), P(RI, b, H));
+  }
+  // each end: one strip merging the two rings by angle
+  for (const [z, up] of [[H, true], [0, false]]) {
+    let i = 0, j = 0;
+    while (i < NO || j < NI) {
+      const ao = 2 * Math.PI * (i + 1) / NO, ai = 2 * Math.PI * (j + 1) / NI;
+      const O0 = P(RO, 2 * Math.PI * i / NO, z), I0 = P(RI, 2 * Math.PI * j / NI, z);
+      if (j >= NI || (i < NO && ao <= ai)) { const O1 = P(RO, ao, z); up ? tri(O0, O1, I0) : tri(O0, I0, O1); i++; }
+      else { const I1 = P(RI, ai, z); up ? tri(O0, I1, I0) : tri(O0, I0, I1); j++; }
+    }
+  }
+  const straw = new Float32Array(o);
+  const bad = [];
+  for (const R of [0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.1, 0.2, 0.3, 0.5]) {
+    for (const keepMin of [false, true]) {
+      const r = soften(straw, keepMin, R, 'fillet');
+      const sc = r.out ? E.nsoSealScore(r.out) : null;
+      if (!sc || sc.open || sc.nm) bad.push('R ' + R + (keepMin ? ' bottom' : ' top') + ': ' + (r.err || JSON.stringify(sc)));
+    }
+  }
+  check('Round R 0.02 - 0.5 on both ends: closed and manifold', bad.length === 0, bad.join(' | '));
+  const r = soften(straw, false, 0.05, 'fillet');
+  const v = r.out ? validate(r.out) : null;
+  check('  ...R 0.05 through mesh_validate', !!(v && v.ok), v ? v.summary : r.err);
+}
+
 plates().then(() => {
   solidCylinder();
   oneCopy();
+  oddRings();
 }).catch((e) => {
   check('the vendored kernel loads and the plates build', false, e && e.message);
 }).finally(() => {

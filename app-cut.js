@@ -5359,7 +5359,14 @@ function rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR) {
   {
     const targets = [];
     for (const L of loops) { for (const q of L.ring2) targets.push(q); for (const q of L.poly) targets.push(q); }
-    rawSnapPieces2(lidPieces, targets);
+    // 2e-4, not the default 5e-5: everything downstream (the lid edge splits,
+    // the weld, nsoSealScore) keys points on a 1e-4 grid, and two points that
+    // survive the snap but share a grid cell become one vertex there - a lid
+    // triangle collapses onto an edge already in use and the rim comes out
+    // non-manifold. Anything past the cell's diagonal (1.41e-4) cannot share
+    // one. The Capri-Sun straw's end (92 points outside, 66 in the bore) put a
+    // clip point 1.04e-4 off a ring point at R 0.05 and 0.02: 8 nm edges.
+    rawSnapPieces2(lidPieces, targets, 2e-4);
   }
 
   // Two lid triangles clipped by the same ring do not pick up the same points
