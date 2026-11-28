@@ -59,10 +59,29 @@ These failed whatever the angle - a cut straight across a tube too - and were wh
   wall vertices there met the band's foot in T-junctions. Each is now recorded against its loop segment and the
   band's first row is stitched through it (`L.bottom` in `rawCapRebuildFromRings`).
 
+- **The ribs.** A Cut crosses every facet of a tube twice - at its edge and at its diagonal - so half the outline
+  points sit inside one facet, with no crease to say which way is down the wall. Square to the edge inside the
+  facet is 45 degrees off the tube's line on a 45 degree cut: those feet slid sideways by R while their neighbours
+  went straight down, and the wall between folded over - long ribs down the bore at R 1.5. Such a point now takes
+  its way down from the creased points either side, laid into its own facet (`rawLeanRing`); only a loop with no
+  crease anywhere (a prism's flat walls) goes square to its edges. The band's foot is then put on the wall itself,
+  the nearest point of the wall triangles (`rawFootOnWall`).
+- **Setback jumps.** Where walls leaning very differently meet at a corner the setback jumps from `R tan(22.5)` to
+  `R / tan(22.5)`; the mitre folded the ring backwards (teeth, or `turns this face inside out`). The setback may now
+  change by at most half its run along the loop (the radius there is the one it fits), and any ring edge still
+  running backwards is collapsed onto the crossing of its neighbours (`rawRimUnkink2`).
+
+`soften:slant` section 7 is the owner's piece: a Stock tube stretched to twice its height and cut at Bevel 45 (a whole
+ellipse), Round and Bevel R 0.5 / 1 / 1.5 - sound, no triangle folded back on its neighbour, nothing outside the tube.
+
 `soften:slant` section 6 cuts a Stock tube with the Cut card's own split at Bevel 45 and Bevel 90 and softens every
 cut face of both halves.
 
 ## Not here
+
+A cut face that runs off the piece's end (a 45 degree cut through a tube shorter than its diameter) has corners
+where it, the tube wall and the end face meet. It bakes sound, but a few slivers at those corners can fold and stand
+up to 0.05 mm off the wall at R 1 and over.
 
 A slanted face's Full wrap (every face at once) - a slanted piece is never a box. The angle is clamped to 20 - 160
 degrees; a knife edge sharper than 20 degrees is rounded as if it were 20.

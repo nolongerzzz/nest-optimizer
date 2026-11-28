@@ -141,6 +141,11 @@ function rawLoopWallLean(fc, axisIdx, keepMin, poly2d, other) {
   const into = keepMin ? 1 : -1;
   const acc = poly2d.map(() => [0, 0, 0]);
   const near = poly2d.map(() => Infinity);
+  // the wall facets that meet at each loop point (a mesh vertex on the cap)
+  const ptKey = (x, y) => Math.round(x * 1e4) + '|' + Math.round(y * 1e4);
+  const ptAt = new Map();
+  poly2d.forEach((p, i) => ptAt.set(ptKey(p[0], p[1]), i));
+  const facets = poly2d.map(() => []);
   for (const t of fc.wallTriIdx) {
     const V = [fc.vert(t, 0), fc.vert(t, 1), fc.vert(t, 2)];
     for (let k = 0; k < 3; k++) {
@@ -169,6 +174,14 @@ function rawLoopWallLean(fc, axisIdx, keepMin, poly2d, other) {
       if (best < 0 || bestD > 0.1) continue;
       for (let q = 0; q < 3; q++) acc[best][q] += w[q] / wl * el;
       near[best] = Math.min(near[best], bestD);
+      // this facet's normal, against each loop point it touches
+      const nf = [e[1] * w[2] - e[2] * w[1], e[2] * w[0] - e[0] * w[2], e[0] * w[1] - e[1] * w[0]];
+      const nfl = Math.hypot(nf[0], nf[1], nf[2]);
+      for (const V0 of [A, B]) {
+        const k = ptKey(V0[other[0]], V0[other[1]]);
+        const at = ptAt.get(k);
+        if (at != null) facets[at].push([nf[0] / nfl, nf[1] / nfl, nf[2] / nfl]);
+      }
     }
   }
   let leans = false;
@@ -180,7 +193,7 @@ function rawLoopWallLean(fc, axisIdx, keepMin, poly2d, other) {
     if (Math.abs(w[axisIdx] * into - 1) > 1e-6) leans = true;
     return w;
   });
-  return leans ? { dirs: dirs, into: into } : null;
+  return leans ? { dirs: dirs, into: into, facets: facets } : null;
 }
 
 // The rim round's rows on a leaning wall. At each loop point the face runs in
@@ -204,44 +217,195 @@ function rawEdgeDir3(a, b, from3) {
   return [e[0] / l, e[1] / l, e[2] / l];
 }
 
+// Collapse the ring edges that run backwards against their loop edge, in
+// place: both ends of each go to the crossing of the ring edges either side
+// (their midpoint where those are parallel), and their depths to the mean.
+// Repeated until none is left; collapsed points coincide and the rebuild
+// drops the zero-area triangles that leaves.
+function rawRimUnkink2(flat, depths, poly) {
+  const n = flat.length;
+  const back = (i) => {
+    const i1 = (i + 1) % n;
+    const ex = poly[i1][0] - poly[i][0], ey = poly[i1][1] - poly[i][1];
+    const fx = flat[i1][0] - flat[i][0], fy = flat[i1][1] - flat[i][1];
+    return ex * fx + ey * fy < -1e-12;
+  };
+  for (let guard = 0; guard < 4 * n; guard++) {
+    let i = -1;
+    for (let k = 0; k < n; k++) if (back(k)) { i = k; break; }
+    if (i < 0) return;
+    const i0 = (i - 1 + n) % n, i1 = (i + 1) % n, i2 = (i + 2) % n;
+    const P = flat[i0], Q = flat[i], U = flat[i1], V = flat[i2];
+    const dx = Q[0] - P[0], dy = Q[1] - P[1], gx = V[0] - U[0], gy = V[1] - U[1];
+    const den = dx * gy - dy * gx;
+    let X;
+    if (Math.abs(den) > 1e-12) {
+      const t = ((U[0] - P[0]) * gy - (U[1] - P[1]) * gx) / den;
+      X = [P[0] + dx * t, P[1] + dy * t];
+      // a crossing far off the kink is a near-parallel pair: keep it local
+      const span = Math.hypot(V[0] - P[0], V[1] - P[1]) + 1e-9;
+      if (Math.hypot(X[0] - (Q[0] + U[0]) / 2, X[1] - (Q[1] + U[1]) / 2) > span) X = null;
+    }
+    if (!X) X = [(Q[0] + U[0]) / 2, (Q[1] + U[1]) / 2];
+    const d = (depths[i] + depths[i1]) / 2;
+    flat[i] = X.slice(); flat[i1] = X.slice();
+    depths[i] = d; depths[i1] = d;
+  }
+}
+
+// Each point of a band's first row moved to the nearest point of the face's
+// wall triangles, in place. Only toward the wall, never above the face.
+function rawFootOnWall(row, fc, capPlane, axisIdx, intoBody) {
+  const tris = fc.wallTriIdx.map(t => [fc.vert(t, 0), fc.vert(t, 1), fc.vert(t, 2)]);
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const closest = (p, a, b, c) => {
+    // Ericson, Real-Time Collision Detection 5.1.5
+    const ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+    const d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) return a;
+    const bp = sub(p, b), d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return b;
+    const vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); return [a[0] + ab[0] * v, a[1] + ab[1] * v, a[2] + ab[2] * v]; }
+    const cp = sub(p, c), d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return c;
+    const vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); return [a[0] + ac[0] * w, a[1] + ac[1] * w, a[2] + ac[2] * w]; }
+    const va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+      const w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+      return [b[0] + (c[0] - b[0]) * w, b[1] + (c[1] - b[1]) * w, b[2] + (c[2] - b[2]) * w];
+    }
+    const den = 1 / (va + vb + vc), v = vb * den, w = vc * den;
+    return [a[0] + ab[0] * v + ac[0] * w, a[1] + ab[1] * v + ac[1] * w, a[2] + ab[2] * v + ac[2] * w];
+  };
+  for (let i = 0; i < row.length; i++) {
+    const p = row[i];
+    let best = null, bd = Infinity;
+    for (const T of tris) {
+      const q = closest(p, T[0], T[1], T[2]);
+      const d = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2 + (q[2] - p[2]) ** 2;
+      if (d < bd) { bd = d; best = q; }
+    }
+    // a foot that would rise above the face, or jump far, stays where it was
+    if (best && Math.sqrt(bd) < 0.25 && (best[axisIdx] - capPlane) * intoBody > 1e-9) row[i] = best;
+  }
+}
+
 function rawLeanRing(lean, poly2d, inwardNormal2, from3, capPlane, axisIdx, R, chamfer, PHI, STEPS) {
   const n = poly2d.length;
   const into = lean.into;
   const MIN_A = 20 * Math.PI / 180;
   const P = [];
+  const down = [0, 0, 0]; down[axisIdx] = into;
+  const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const unit3 = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1e-9; return [a[0] / l, a[1] / l, a[2] / l]; };
+  // Down the wall from each point. Where two facets meet there, the line they
+  // share (on a faceted tube, the tube's own line) - the only way down that
+  // stays in both - unless it runs nearly flat to the face (a corner where
+  // the face meets a wall and an end face at once). A point inside one facet
+  // has no such line: a Cut crosses every facet of a tube twice, at its edge
+  // and at its diagonal, so half the points are of this kind. Square to the
+  // edge inside the facet is a different way down at each of them (45 degrees
+  // off the tube's line on a 45 degree cut), the foot slid sideways by R, and
+  // the wall between two such feet folded over: ribs down the bore. Such a
+  // point takes its way down from the creased points either side, laid into
+  // its own facet. Only a loop with no crease anywhere - a prism's flat walls
+  // - goes square to its edges.
+  const W = [], crease = [], plane = [];
+  for (let i = 0; i < n; i++) {
+    const curr = poly2d[i], next = poly2d[(i + 1) % n];
+    const wa = lean.dirs[(i - 1 + n) % n], wb = lean.dirs[i];
+    const ea = rawEdgeDir3(poly2d[(i - 1 + n) % n], curr, from3), eb = rawEdgeDir3(curr, next, from3);
+    let na = unit3(rawCross3(ea, wa)), nb = unit3(rawCross3(eb, wb));
+    const fs = lean.facets ? lean.facets[i] : null;
+    if (fs && fs.length >= 2) {
+      let bi = 0, bj = 1, bc = -1;
+      for (let a2 = 0; a2 < fs.length; a2++) for (let b2 = a2 + 1; b2 < fs.length; b2++) {
+        const c = rawCross3(fs[a2], fs[b2]), cl = Math.hypot(c[0], c[1], c[2]);
+        if (cl > bc) { bc = cl; bi = a2; bj = b2; }
+      }
+      if (bc > 1e-3) { na = fs[bi]; nb = fs[bj]; }
+      else { na = fs[0]; nb = fs[0]; }
+    }
+    let w = rawCross3(na, nb);
+    const wl = Math.hypot(w[0], w[1], w[2]);
+    const wd = Math.abs(dot3([wa[0] + wb[0], wa[1] + wb[1], wa[2] + wb[2]], down)) / 2;
+    const rd = wl > 1e-3 ? Math.abs(dot3(w, down)) / wl : 0;
+    if (wl > 1e-3 && rd >= 0.5 * wd) {
+      if (dot3(w, down) < 0) w = [-w[0], -w[1], -w[2]];
+      W.push(unit3(w)); crease.push(true);
+    } else {
+      W.push(unit3([wa[0] + wb[0], wa[1] + wb[1], wa[2] + wb[2]])); crease.push(false);
+    }
+    plane.push(na);
+  }
+  if (crease.some(c => c)) {
+    const seg = [];
+    for (let i = 0; i < n; i++) { const a2 = poly2d[i], b2 = poly2d[(i + 1) % n]; seg.push(Math.hypot(b2[0] - a2[0], b2[1] - a2[1])); }
+    for (let i = 0; i < n; i++) {
+      if (crease[i]) continue;
+      let j = i, dj = 0, k = i, dk = 0;
+      do { dj += seg[(j - 1 + n) % n]; j = (j - 1 + n) % n; } while (!crease[j] && j !== i);
+      do { dk += seg[k]; k = (k + 1) % n; } while (!crease[k] && k !== i);
+      const t = dj / (dj + dk || 1);
+      let w = [W[j][0] * (1 - t) + W[k][0] * t, W[j][1] * (1 - t) + W[k][1] * t, W[j][2] * (1 - t) + W[k][2] * t];
+      // into this point's own facet
+      const pn = plane[i], wn = dot3(w, pn);
+      w = [w[0] - wn * pn[0], w[1] - wn * pn[1], w[2] - wn * pn[2]];
+      if (Math.hypot(w[0], w[1], w[2]) > 1e-6 && dot3(w, down) > 0) W[i] = unit3(w);
+    }
+  }
   for (let i = 0; i < n; i++) {
     const prev = poly2d[(i - 1 + n) % n], curr = poly2d[i], next = poly2d[(i + 1) % n];
     const n1 = inwardNormal2(prev, curr), n2 = inwardNormal2(curr, next);
     let bx = n1[0] + n2[0], by = n1[1] + n2[1];
     const bl = Math.hypot(bx, by) || 1e-9; bx /= bl; by /= bl;
     const cosHalf = Math.max(bx * n1[0] + by * n1[1], 0.3);
-    // Down the wall from this point: where its two edges' walls are two
-    // facets, the line they share (on a faceted tube, the tube's own line) -
-    // the only way down that stays in both; where they are one plane, the
-    // common direction.
-    const wa = lean.dirs[(i - 1 + n) % n], wb = lean.dirs[i];
-    const ea = rawEdgeDir3(poly2d[(i - 1 + n) % n], curr, from3), eb = rawEdgeDir3(curr, next, from3);
-    const na = rawCross3(ea, wa), nb = rawCross3(eb, wb);
-    let w = rawCross3(na, nb);
-    let wl = Math.hypot(w[0], w[1], w[2]);
-    const down = [0, 0, 0]; down[axisIdx] = into;
-    if (wl > 1e-3 && Math.abs(w[0] * down[0] + w[1] * down[1] + w[2] * down[2]) > 1e-3 * wl) {
-      if (w[0] * down[0] + w[1] * down[1] + w[2] * down[2] < 0) w = [-w[0], -w[1], -w[2]];
-    } else {
-      w = [wa[0] + wb[0], wa[1] + wb[1], wa[2] + wb[2]];
-      wl = Math.hypot(w[0], w[1], w[2]);
-    }
-    wl = wl || 1e-9;
-    w = [w[0] / wl, w[1] / wl, w[2] / wl];
+    const w = W[i];
     const u = from3([bx, by], 0);
     const cosA = u[0] * w[0] + u[1] * w[1] + u[2] * w[2];
     const alpha = Math.max(MIN_A, Math.min(Math.PI - MIN_A, Math.acos(Math.max(-1, Math.min(1, cosA)))));
     const setback = chamfer ? R : R / Math.tan(alpha / 2);
     // w split into its part across the face (2D, in the rim's own u/v) and
     // its depth into the body
-    const wFlat = [], other = [0, 1, 2].filter(a => a !== axisIdx);
+    const wFlat = [], other = [0, 1, 2].filter(a2 => a2 !== axisIdx);
     wFlat.push(w[other[0]], w[other[1]]);
     P.push({ m: [bx / cosHalf, by / cosHalf], wFlat, wDepth: w[axisIdx] * into, alpha, setback });
+  }
+  // The setback may change along the loop by at most half its run (taking the
+  // smaller wherever it would change faster), and the radius there is the one
+  // that setback fits. Where two walls leaning very differently meet at a
+  // corner - a cut face running off a tube's end - the setback jumps from
+  // R tan(22.5) to R / tan(22.5) in one step, and the mitre between them folds
+  // the ring backwards: teeth round the rim. Limited, the round tapers into
+  // the corner instead.
+  {
+    const SLOPE = 0.5;
+    const seg = [];
+    for (let i = 0; i < n; i++) {
+      const a = poly2d[i], b = poly2d[(i + 1) % n];
+      seg.push(Math.hypot(b[0] - a[0], b[1] - a[1]));
+    }
+    const sb = P.map(p => p.setback);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let k = 0; k < 2 * n; k++) {
+        const i = k % n, j = (i + 1) % n;
+        sb[j] = Math.min(sb[j], sb[i] + SLOPE * seg[i]);
+      }
+      for (let k = 2 * n; k > 0; k--) {
+        const j = k % n, i = (j - 1 + n) % n;
+        sb[i] = Math.min(sb[i], sb[j] + SLOPE * seg[i]);
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      if (sb[i] < P[i].setback) {
+        // the radius this setback fits, for Round; Bevel's legs are the setback
+        P[i].R = chamfer ? sb[i] : sb[i] * Math.tan(P[i].alpha / 2);
+        P[i].setback = sb[i];
+      } else P[i].R = R;
+    }
   }
   return (i, s) => {
     const p = P[i], sb = p.setback;
@@ -249,7 +413,7 @@ function rawLeanRing(lean, poly2d, inwardNormal2, from3, capPlane, axisIdx, R, c
     if (chamfer) { const t = s / STEPS; x = sb * t; y = sb * (1 - t); }
     else {
       const f = PHI[s] / (Math.PI / 2);
-      const om = Math.PI - p.alpha, so = Math.sin(om), c = R / Math.sin(p.alpha);
+      const om = Math.PI - p.alpha, so = Math.sin(om), c = p.R / Math.sin(p.alpha);
       const A = Math.sin((1 - f) * om) / so, B = Math.sin(f * om) / so;
       x = c - A * c + B * (sb - c);
       y = c + A * (sb - c) - B * c;
@@ -352,6 +516,14 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
         depths.push(chamfer ? R * (1 - t) : R * (1 - Math.sin(phi)));
         flat.push(vertexOffset(i, inset));
       }
+      // A leaning wall's setback changes along the loop - R tan(22.5) where a
+      // wall leans out, R / tan(22.5) where one leans in - and a mitre between
+      // two of them can land past a short edge beside it: that ring edge runs
+      // backwards without the ring crossing itself, so the fold trim below
+      // never sees it (it showed as teeth round a Cut face's rim). The true
+      // inset there is where the ring edges either side of the backwards one
+      // meet: both its ends go to that point (rawRimUnkink2).
+      if (leanRing && s > 0) rawRimUnkink2(flat, depths, poly2d);
       // Where the outline bends tighter than the inset, the offset folds back
       // over itself (a swallowtail). The fold is cut off at the point where it
       // crosses, which is what an inset by that distance really is: a round
@@ -361,10 +533,28 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
         const folds = rawRimTrimFolds2(flat, area2 >= 0 ? 1 : -1, requestedR);
         if (s === STEPS) bends += folds;
       }
+      // Points the collapse and the trim brought within a weld cell of each
+      // other become one exact point, so the band's sliver between them is
+      // dropped as the zero-area triangle it is, not welded into an edge
+      // used three times.
+      if (leanRing) {
+        for (let i = 1; i <= n; i++) {
+          const a = flat[(i - 1) % n], j = i % n, b = flat[j];
+          if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 2e-4 && Math.abs(depths[j] - depths[(i - 1) % n]) < 2e-4) {
+            flat[j] = a.slice(); depths[j] = depths[(i - 1) % n];
+          }
+        }
+      }
       return flat.map((uv, i) => from3(uv, capPlane + intoBody * depths[i]));
     };
     const rings = [];
     for (let s = 0; s <= STEPS; s++) rings.push(ringAt(s));
+    // On a leaning wall the band's foot is put ON the wall: the nearest point
+    // of the piece's own wall triangles. Read off the facets either side of a
+    // point, the way down can run past a facet's side, and on a faceted tube
+    // the facet's plane past its side is outside the piece (0.08 mm proud at
+    // R 1.5 on a Cut tube end).
+    if (leanRing) rawFootOnWall(rings[0], fc, capPlane, axisIdx, intoBody);
     const Lp = { pts: F.pts, poly: poly2d, Rs: Rs, rings: rings, hole: F.hole };
     // The wall's top edge goes down the wall to the band's first row, not
     // straight down the axis (rawCapRebuildFromRings' drop).
@@ -4742,7 +4932,19 @@ function softenObliqueFace(rawTris, normal, plane, R, mode) {
     if (was) { res[i] = was[0]; res[i + 1] = was[1]; res[i + 2] = was[2]; continue; }
     for (let c = 0; c < 3; c++) res[i + c] = F[0][c] * out[i] + F[1][c] * out[i + 1] + F[2][c] * out[i + 2];
   }
-  return res;
+  // A point the engine made on top of one it kept (a band foot landing on an
+  // untouched corner) comes back a rounding apart from it: put back exactly
+  // and turned back respectively. The triangle between the two is a sliver
+  // the weld (1e-4) makes a doubled edge of. It has no area to keep, and
+  // dropping it takes both uses of that edge with it.
+  const q = 1e4, vk = (k) => Math.round(res[k] * q) + '|' + Math.round(res[k + 1] * q) + '|' + Math.round(res[k + 2] * q);
+  const keep = [];
+  for (let t = 0; t + 8 < res.length; t += 9) {
+    const a = vk(t), b = vk(t + 3), c = vk(t + 6);
+    if (a === b || b === c || c === a) continue;
+    for (let k = 0; k < 9; k++) keep.push(res[t + k]);
+  }
+  return keep.length === res.length ? res : new Float32Array(keep);
 }
 
 // Does any wall meet this face off square? The Corners engines put their

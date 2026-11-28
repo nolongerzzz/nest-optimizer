@@ -25,6 +25,11 @@
 //                     through a slit and leaves outline points 0.005 mm apart;
 //                     both used to come out open (the fresh lid, the stitched
 //                     foot - rawFreshLid2 / L.bottom in app-cut.js)
+//   7  ribs           the owner's piece: a Stock tube stretched to twice its
+//                     height and cut at Bevel 45, so the cut face is a whole
+//                     ellipse. Round and Bevel R 0.5 / 1 / 1.5: sound, no
+//                     triangle folded back on its neighbour (the ribs down the
+//                     bore at R 1.5), no vertex outside the uncut tube
 
 const fs = require('fs');
 const os = require('os');
@@ -81,6 +86,39 @@ function seal(s) {
   let open = 0, nm = 0;
   use.forEach(c => { if (c % 2) open++; if (c > 2) nm++; });
   return { open, nm };
+}
+
+/* Pairs of triangles, at least one of them new, folded back on each other
+   (normals more than about 100 degrees apart): the ribs a wall folded over
+   by a foot slid sideways shows. */
+function folds(before, after) {
+  const tk = (s, t) => [0, 1, 2].map(k => [0, 1, 2].map(c => Math.round(s[t + 3 * k + c] * 1e4)).join(',')).sort().join('|');
+  const old = new Set();
+  for (let t = 0; t < before.length; t += 9) old.add(tk(before, t));
+  const q = 1e4, vk = (i) => Math.round(after[i] * q) + '|' + Math.round(after[i + 1] * q) + '|' + Math.round(after[i + 2] * q);
+  const E = new Map(), N = [], A = [], fresh = [];
+  for (let t = 0; t < after.length; t += 9) {
+    fresh.push(!old.has(tk(after, t)));
+    const u = [after[t+3]-after[t], after[t+4]-after[t+1], after[t+5]-after[t+2]], v = [after[t+6]-after[t], after[t+7]-after[t+1], after[t+8]-after[t+2]];
+    const c = [u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]], L = Math.hypot(c[0], c[1], c[2]);
+    N.push(L > 1e-12 ? [c[0]/L, c[1]/L, c[2]/L] : null); A.push(L / 2);
+    const K = [vk(t), vk(t + 3), vk(t + 6)];
+    for (let e = 0; e < 3; e++) {
+      const a = K[e], b = K[(e + 1) % 3];
+      if (a === b) continue;
+      const k = a < b ? a + '~' + b : b + '~' + a;
+      if (!E.has(k)) E.set(k, []);
+      E.get(k).push(t / 9);
+    }
+  }
+  let n = 0;
+  for (const ts of E.values()) {
+    if (ts.length !== 2) continue;
+    const [a, b] = ts;
+    if (!(fresh[a] || fresh[b]) || !N[a] || !N[b] || A[a] < 1e-6 || A[b] < 1e-6) continue;
+    if (N[a][0]*N[b][0] + N[a][1]*N[b][1] + N[a][2]*N[b][2] < -0.2) n++;
+  }
+  return n;
 }
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-soften-slant-'));
@@ -305,6 +343,73 @@ withApp(async (page) => {
     const bad = res.filter(x => x !== 'ok');
     check('Bevel ' + bev + ': every flat face of both halves, Round and Bevel R 0.05 / 0.2, sound',
           bad.length === 0 && res.length > 0, bad.length ? bad.join(' | ') : res.length + ' bakes');
+  }
+
+  console.log('\n=== 7. ribs: a stretched tube cut at 45 ===');
+  {
+    const raw = await page.evaluate(() => { window.nsoStockShelf.drop('tube'); return Array.from(state.models[state.models.length - 1].rawTris); });
+    const tall = new Float32Array(raw);
+    for (let k = 2; k < tall.length; k += 3) tall[k] *= 2;
+    const f = path.join(TMP, 'tall.stl');
+    writeSTL(f, tall, 'tall tube');
+    const tid = await loadSTL(page, f);
+    await page.waitForTimeout(400);
+    const res = await page.evaluate((id) => {
+      const m = state.models.find(x => x.id === id);
+      selectPlaced(state.placed.findIndex(p => p && p.sourceId === id));
+      state.cutT = 0.5; setCutMiter(0);
+      const el = document.getElementById('cut-bevel-deg'); el.value = '45'; el.dispatchEvent(new Event('change'));
+      const halves = cutSplitAt(m, getCutPlaneForSplit(m));
+      const out = [];
+      for (const T of [halves.rawA, halves.rawB]) {
+        // the cut face: the biggest flat patch not square to an axis
+        const acc = [0, 0, 0];
+        let best = null;
+        const groups = [];
+        for (let t = 0; t + 8 < T.length; t += 9) {
+          const ux = T[t+3]-T[t], uy = T[t+4]-T[t+1], uz = T[t+5]-T[t+2], vx = T[t+6]-T[t], vy = T[t+7]-T[t+1], vz = T[t+8]-T[t+2];
+          const c = [uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx], L = Math.hypot(c[0], c[1], c[2]);
+          if (!(L > 1e-12)) continue;
+          const n = [c[0]/L, c[1]/L, c[2]/L];
+          if (Math.max(Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])) > 0.99) continue;
+          let g = groups.find(g => g.n[0]*n[0] + g.n[1]*n[1] + g.n[2]*n[2] > 0.9995);
+          if (!g) { g = { n, acc: [0, 0, 0], area: 0 }; groups.push(g); }
+          g.acc[0] += c[0]; g.acc[1] += c[1]; g.acc[2] += c[2]; g.area += L / 2;
+        }
+        groups.sort((a, b) => b.area - a.area);
+        const g = groups[0], l = Math.hypot(g.acc[0], g.acc[1], g.acc[2]), n = [g.acc[0]/l, g.acc[1]/l, g.acc[2]/l];
+        let plane = -Infinity;
+        for (let i = 0; i + 2 < T.length; i += 3) plane = Math.max(plane, n[0]*T[i] + n[1]*T[i+1] + n[2]*T[i+2]);
+        const bakes = [];
+        for (const mode of ['fillet', 'chamfer']) for (const R of [0.5, 1, 1.5]) {
+          try { bakes.push({ mode, R, soup: Array.from(softenObliqueFace(T, n, plane, R, mode)) }); }
+          catch (e) { bakes.push({ mode, R, err: e.message }); }
+        }
+        out.push({ before: Array.from(T), n, plane, bakes });
+      }
+      return out;
+    }, tid);
+    for (let h = 0; h < res.length; h++) {
+      const H = res[h], before = H.before;
+      // the uncut tube: its axis is raw Z, centred in the piece's footprint
+      let lo = [Infinity, Infinity], hi = [-Infinity, -Infinity], rmin = Infinity, rmax = 0;
+      for (let k = 0; k < before.length; k += 3) for (let c = 0; c < 2; c++) { lo[c] = Math.min(lo[c], before[k + c]); hi[c] = Math.max(hi[c], before[k + c]); }
+      const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2;
+      for (let k = 0; k < before.length; k += 3) { const r = Math.hypot(before[k] - cx, before[k + 1] - cy); rmin = Math.min(rmin, r); rmax = Math.max(rmax, r); }
+      for (const b of H.bakes) {
+        const name = 'half ' + (h + 1) + ', ' + (b.mode === 'fillet' ? 'Round' : 'Bevel') + ' R ' + b.R;
+        if (b.err) { check(name + ': bakes', false, b.err); continue; }
+        const sc = seal(b.soup), fo = folds(before, b.soup);
+        let worst = 0;
+        for (let k = 0; k < b.soup.length; k += 3) {
+          const r = Math.hypot(b.soup[k] - cx, b.soup[k + 1] - cy);
+          const over = H.n[0] * b.soup[k] + H.n[1] * b.soup[k + 1] + H.n[2] * b.soup[k + 2] - H.plane;
+          worst = Math.max(worst, r - rmax, rmin - r, over);
+        }
+        check(name + ': sound, no ribs, nothing outside the tube', sc.open === 0 && sc.nm === 0 && fo === 0 && worst < 1e-3,
+              'open ' + sc.open + ' nm ' + sc.nm + ' folded ' + fo + ' outside ' + worst.toFixed(4));
+      }
+    }
   }
 }).then(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
