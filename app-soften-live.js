@@ -452,7 +452,7 @@
     try {
       res = softenCompute(m, { R: rNow(), mode: style, fullWrap: fullWrapNow(),
                                edgePick: edgeOn, edges: edgePicks.slice(),
-                               newJobs: picks.map(function (p) { return { axisIdx: p.axisIdx, keepMin: p.keepMin, plane: p.plane, recessed: p.recessed }; }) },
+                               newJobs: picks.map(function (p) { return { axisIdx: p.axisIdx, keepMin: p.keepMin, plane: p.plane, recessed: p.recessed, normal: p.normal || null }; }) },
                           deliver(my));
     } catch (e) {
       res = { ok: false, reason: 'Soften failed - ' + ((e && e.message) || e) };
@@ -595,14 +595,16 @@
      at a time. `pick` is storeFacePick's answer. */
   function toggleFace(pk) {
     if (typeof nsoMaskIsExcludedPick === 'function' &&
-        nsoMaskIsExcludedPick(m, pk.rawAxisIdx, pk.rawKeepMin, pk.rawPlane, pk.recessed)) {
+        nsoMaskIsExcludedPick(m, pk.rawAxisIdx, pk.rawKeepMin, pk.rawPlane, pk.recessed, pk.rawNormal)) {
       say('That face is painted out - include it first, or pick another face', true);
       return false;
     }
     var at = -1;
-    for (var i = 0; i < picks.length; i++) if (picks[i].axisIdx === pk.rawAxisIdx && picks[i].keepMin === pk.rawKeepMin) at = i;
+    var mine = { axisIdx: pk.rawAxisIdx, keepMin: pk.rawKeepMin, plane: pk.rawPlane, recessed: !!pk.recessed,
+                 normal: pk.rawNormal || null };
+    for (var i = 0; i < picks.length; i++) if (softenSameFace(picks[i], mine)) at = i;
     if (at >= 0) picks.splice(at, 1);
-    else picks.push({ axisIdx: pk.rawAxisIdx, keepMin: pk.rawKeepMin, plane: pk.rawPlane, recessed: !!pk.recessed });
+    else picks.push(mine);
     if (!picks.length && typeof clearFacePick === 'function') clearFacePick();
     recompute();
     return true;

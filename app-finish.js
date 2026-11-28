@@ -124,6 +124,140 @@ function rawRimTrimFolds2(ring, wind, scale) {
   throw e;
 }
 
+// ---------- a wall that leans off square to the face ----------
+// The rim round was built for walls square to the face: every ring point is
+// its loop point moved in across the face and straight down the axis. On a
+// wall that leans - a tube cut off at 45 degrees, a wedge - straight down
+// the axis is not down the wall, and the band's foot stood up to R sin(lean)
+// off the wall, a lip proud of the piece.
+//
+// rawLoopWallLean reads, for each edge of a face loop, the direction that
+// runs DOWN the wall square to the edge: off the wall triangles that sit on
+// that edge (their third vertex, less its part along the edge). Null when
+// every wall is square to the face to 1e-6 - the old construction stands,
+// bit for bit.
+function rawLoopWallLean(fc, axisIdx, keepMin, poly2d, other) {
+  const n = poly2d.length;
+  const into = keepMin ? 1 : -1;
+  const acc = poly2d.map(() => [0, 0, 0]);
+  const near = poly2d.map(() => Infinity);
+  for (const t of fc.wallTriIdx) {
+    const V = [fc.vert(t, 0), fc.vert(t, 1), fc.vert(t, 2)];
+    for (let k = 0; k < 3; k++) {
+      const A = V[k], B = V[(k + 1) % 3], C = V[(k + 2) % 3];
+      if (!fc.isOnCap(A) || !fc.isOnCap(B) || fc.isOnCap(C)) continue;
+      const e = [B[0] - A[0], B[1] - A[1], B[2] - A[2]];
+      const el = Math.hypot(e[0], e[1], e[2]);
+      if (!(el > 1e-9)) continue;
+      e[0] /= el; e[1] /= el; e[2] /= el;
+      const c = [C[0] - A[0], C[1] - A[1], C[2] - A[2]];
+      const ce = c[0] * e[0] + c[1] * e[1] + c[2] * e[2];
+      const w = [c[0] - ce * e[0], c[1] - ce * e[1], c[2] - ce * e[2]];
+      const wl = Math.hypot(w[0], w[1], w[2]);
+      if (!(wl > 1e-9) || w[axisIdx] * into <= 0) continue;
+      // the loop edge this wall edge lies on: nearest to its midpoint
+      const mx = (A[other[0]] + B[other[0]]) / 2, my = (A[other[1]] + B[other[1]]) / 2;
+      let best = -1, bestD = Infinity;
+      for (let j = 0; j < n; j++) {
+        const a = poly2d[j], b = poly2d[(j + 1) % n];
+        const ex = b[0] - a[0], ey = b[1] - a[1], len2 = ex * ex + ey * ey;
+        let u = len2 > 1e-18 ? ((mx - a[0]) * ex + (my - a[1]) * ey) / len2 : 0;
+        u = Math.max(0, Math.min(1, u));
+        const d = Math.hypot(mx - (a[0] + ex * u), my - (a[1] + ey * u));
+        if (d < bestD) { bestD = d; best = j; }
+      }
+      if (best < 0 || bestD > 0.1) continue;
+      for (let q = 0; q < 3; q++) acc[best][q] += w[q] / wl * el;
+      near[best] = Math.min(near[best], bestD);
+    }
+  }
+  let leans = false;
+  const dirs = acc.map((a) => {
+    const l = Math.hypot(a[0], a[1], a[2]);
+    const w = [0, 0, 0];
+    if (l > 1e-12) { w[0] = a[0] / l; w[1] = a[1] / l; w[2] = a[2] / l; }
+    else w[axisIdx] = into;                 // no wall read on this edge: square
+    if (Math.abs(w[axisIdx] * into - 1) > 1e-6) leans = true;
+    return w;
+  });
+  return leans ? { dirs: dirs, into: into } : null;
+}
+
+// The rim round's rows on a leaning wall. In the section square to each loop
+// edge k the face runs in along u_k and the wall runs down along w_k, at an
+// angle a_k between them. Round is the arc of radius R tangent to both, which
+// touches each a setback R / tan(a/2) from the edge (R at 90 degrees, more
+// where the wall leans in over the face, less where it leans out). Bevel is a
+// flat band R along each. A row's point at a loop vertex is where its two
+// edges' offset lines come closest - the mitre, on a square wall. The first
+// row, on the wall itself, is put on the line where the two walls meet, so
+// the wall's top edge, dropped to it, stays in the wall's own planes.
+// Returns ringAt(i, s) -> { flat: [u, v], depth } in the rim builder's terms.
+function rawLeanRing(lean, poly2d, inwardNormal2, from3, capPlane, axisIdx, R, chamfer, PHI, STEPS) {
+  const n = poly2d.length;
+  const into = lean.into;
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const unit = (a) => { const l = Math.hypot(a[0], a[1], a[2]); return l > 1e-15 ? mul(a, 1 / l) : a; };
+  const MIN_A = 20 * Math.PI / 180;
+  const E = [];
+  for (let k = 0; k < n; k++) {
+    const a = poly2d[k], b = poly2d[(k + 1) % n];
+    const e = unit(from3([b[0] - a[0], b[1] - a[1]], 0));
+    const u = from3(inwardNormal2(a, b), 0);
+    const w = lean.dirs[k];
+    const alpha = Math.max(MIN_A, Math.min(Math.PI - MIN_A, Math.acos(Math.max(-1, Math.min(1, dot(u, w))))));
+    const setback = chamfer ? R : R / Math.tan(alpha / 2);
+    E.push({ e, u, w, alpha, setback, nrm: unit(cross(e, w)) });
+  }
+  // (x along u, y along w) of row s on edge k
+  const profile = (k, s) => {
+    const P = E[k], sb = P.setback;
+    if (chamfer) { const t = s / STEPS; return [sb * t, sb * (1 - t)]; }
+    const f = PHI[s] / (Math.PI / 2);
+    const om = Math.PI - P.alpha, so = Math.sin(om);
+    const c = R / Math.sin(P.alpha);
+    const A = Math.sin((1 - f) * om) / so, B = Math.sin(f * om) / so;
+    return [c - A * c + B * (sb - c), c + A * (sb - c) - B * c];
+  };
+  const axis = [0, 0, 0]; axis[axisIdx] = into;
+  return (i, s) => {
+    const k0 = (i - 1 + n) % n, k1 = i;
+    const p0 = profile(k0, s), p1 = profile(k1, s);
+    const g0 = add(mul(E[k0].u, p0[0]), mul(E[k0].w, p0[1]));
+    const g1 = add(mul(E[k1].u, p1[0]), mul(E[k1].w, p1[1]));
+    let d = null;
+    if (s === 0) {
+      // on the wall: the line the two walls share, at the rows' mean depth
+      const dl = cross(E[k0].nrm, E[k1].nrm);
+      if (Math.hypot(dl[0], dl[1], dl[2]) > 1e-6) {
+        let du = unit(dl);
+        if (dot(du, axis) < 0) du = mul(du, -1);
+        const depth = (dot(g0, axis) + dot(g1, axis)) / 2;
+        if (dot(du, axis) > 1e-6) d = mul(du, depth / dot(du, axis));
+      }
+    }
+    if (!d) {
+      const e0 = E[k0].e, e1 = E[k1].e;
+      const b = dot(e0, e1), den = 1 - b * b;
+      if (den < 1e-10) d = mul(add(g0, g1), 0.5);
+      else {
+        const w0 = sub(g0, g1), dd = dot(e0, w0), ee = dot(e1, w0);
+        const t = (b * ee - dd) / den, r = (ee - b * dd) / den;
+        d = mul(add(add(g0, mul(e0, t)), add(g1, mul(e1, r))), 0.5);
+      }
+    }
+    const L = poly2d[i];
+    const flat = [L[0], L[1]];
+    let o = 0;
+    for (let q = 0; q < 3; q++) if (q !== axisIdx) flat[o++] += d[q];
+    return { flat: flat, depth: d[axisIdx] * into };
+  };
+}
+
 function rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, requestedR, opts) {
   opts = opts || {};
   // A face that will not take R is refused with the R it will take
@@ -153,7 +287,7 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
   const from3 = (uv, along) => { const p=[0,0,0]; p[other[0]]=uv[0]; p[other[1]]=uv[1]; p[axisIdx]=along; return p; };
 
   const loops = [];
-  let peakR = Infinity, loopPts = 0, holes = 0, bends = 0;
+  let peakR = Infinity, loopPts = 0, holes = 0, bends = 0, leans = 0;
   for (const F of fc.loops) {
     if (F.pts.length < 3) throw new Error('cap boundary too small to fillet');
     const poly2d = raw2DWeldLoop(F.pts.map(flat2), 0.08);
@@ -195,11 +329,23 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
       const cosHalf = Math.max(bx*n1[0]+by*n1[1], 0.3);
       return [curr[0]+bx*(radius/cosHalf), curr[1]+by*(radius/cosHalf)];
     };
+    // A wall that leans off square to the face - a tube cut at 45 degrees -
+    // gets the round fitted to the angle it really makes with the face
+    // (rawLeanRing). Walls square to the face keep the code below, unchanged.
+    const lean = rawLoopWallLean(fc, axisIdx, keepMin, poly2d, other);
+    const leanRing = lean ? rawLeanRing(lean, poly2d, inwardNormal2, from3, capPlane, axisIdx,
+                                        requestedR, chamfer, PHI, STEPS) : null;
     const ringAt = (s) => {
       const phi = PHI[s];
       const t = chamfer ? s / STEPS : Math.sin(phi);
       const flat = [], depths = [];
       for (let i = 0; i < n; i++) {
+        if (leanRing) {
+          const d = leanRing(i, s);
+          flat.push(d.flat);
+          depths.push(d.depth);
+          continue;
+        }
         const R = Rs[i];
         const inset = chamfer ? R * t : R * (1 - Math.cos(phi));
         depths.push(chamfer ? R * (1 - t) : R * (1 - Math.sin(phi)));
@@ -218,7 +364,11 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
     };
     const rings = [];
     for (let s = 0; s <= STEPS; s++) rings.push(ringAt(s));
-    loops.push({ pts: F.pts, poly: poly2d, Rs: Rs, rings: rings, hole: F.hole });
+    const Lp = { pts: F.pts, poly: poly2d, Rs: Rs, rings: rings, hole: F.hole };
+    // The wall's top edge goes down the wall to the band's first row, not
+    // straight down the axis (rawCapRebuildFromRings' drop).
+    if (leanRing) { Lp.lean = true; leans++; }
+    loops.push(Lp);
     loopPts += n;
     if (F.hole) holes++;
   }
@@ -234,6 +384,7 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
     loops: loops.length,
     holes: holes,
     bends: bends,
+    leans: leans,
     rows: STEPS,
     radius: peakR,
     requested: requestedR
@@ -1753,6 +1904,20 @@ function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode, pickPlane) {
   }
   if (mode === 'chamfer' && typeof rawChamferCut === 'function') {
     return rawChamferCut(rawTris, axisIdx, plane, keepMin, R);
+  }
+  // Walls that lean off square to the face (a slanted cut): the Corners
+  // engines are built for square walls. Corners+edges is the edge rounded all
+  // the way round, as on a curved rim; Corners has nothing it can put a ball
+  // on and says so.
+  if ((mode === 'cornersedges' || mode === 'corners') && rawCapWallsLean(rawTris, axisIdx, keepMin)) {
+    if (mode === 'corners') {
+      throw new Error('Corners needs walls square to the face, and this face\'s walls lean - ' +
+                      'Round or Corners+edges rounds its whole rim');
+    }
+    const out = rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, R, { profile: 'round' });
+    rawVertexBallCorners.lastBuild = Object.assign({}, rawPerimeterFilletInPlace.lastBuild,
+                                                   { rimRound: true, why: 'the walls lean off square to the face' });
+    return out;
   }
   if (mode === 'cornersedges') {
     // Corners+edges: the setback bake. Four vertex blends, four edge bands,
@@ -4470,7 +4635,7 @@ function applySoftenOnFace(face) {
   // A painted-out face is not baked, whatever mode is selected. Refused here,
   // before the run is touched, so the piece and the paint both stay put.
   if (typeof nsoMaskIsExcludedPick === 'function' &&
-      nsoMaskIsExcludedPick(m, rawAxisIdx, keepMinFace, pick.rawPlane, pick.recessed)) {
+      nsoMaskIsExcludedPick(m, rawAxisIdx, keepMinFace, pick.rawPlane, pick.recessed, pick.rawNormal)) {
     if (typeof removeFaceHelper === 'function') removeFaceHelper();
     setStatus('That face is painted out - include it first, or pick another face', true);
     return;
@@ -4480,7 +4645,8 @@ function applySoftenOnFace(face) {
     R: R,
     mode: getEdgeTreat(),
     fullWrap: getFullWrap(),
-    newJobs: [{ axisIdx: rawAxisIdx, keepMin: keepMinFace, plane: pick.rawPlane, recessed: !!pick.recessed }]
+    newJobs: [{ axisIdx: rawAxisIdx, keepMin: keepMinFace, plane: pick.rawPlane, recessed: !!pick.recessed,
+                normal: pick.rawNormal || null }]
   }, commitSoften);
 }
 
@@ -4507,6 +4673,84 @@ function applySoftenOnFace(face) {
    kernel and calls it later, or says why not through setStatus and never
    calls it (state.nsoWrapBusy is the flag that tells those two apart) - or
    { ok: false, reason } with the same words setStatus was just given. */
+// Two Soften picks name the same face: the same axis and side, or - for a
+// slanted face - the same outward normal.
+function softenSameFace(a, b) {
+  if (a.normal || b.normal) {
+    if (!a.normal || !b.normal) return false;
+    return a.normal[0] * b.normal[0] + a.normal[1] * b.normal[1] + a.normal[2] * b.normal[2] > 0.9999;
+  }
+  return a.axisIdx === b.axisIdx && a.keepMin === b.keepMin;
+}
+
+// Soften on a flat face that is square to no axis - a tube cut off at 45
+// degrees. The per-face engines work on the outer plane of a raw axis, so the
+// piece is turned until the face's outward normal is +Z, the face is softened
+// there as the top face, and the piece is turned back. Every vertex the engine
+// did not move is put back on its own original coordinates, bit for bit, so
+// the rest of the piece - its axis faces above all - is not left with the
+// rotation's rounding on it. The walls round a cut like this lean off square
+// to the face; the rim round fits each to the angle it really makes
+// (rawLeanRing).
+function softenObliqueFace(rawTris, normal, plane, R, mode) {
+  const nl = Math.hypot(normal[0], normal[1], normal[2]);
+  if (!(nl > 0)) throw new Error('the clicked face has no direction');
+  const nz = [normal[0] / nl, normal[1] / nl, normal[2] / nl];
+  const h = Math.abs(nz[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  let e1 = [h[1] * nz[2] - h[2] * nz[1], h[2] * nz[0] - h[0] * nz[2], h[0] * nz[1] - h[1] * nz[0]];
+  const l1 = Math.hypot(e1[0], e1[1], e1[2]);
+  e1 = [e1[0] / l1, e1[1] / l1, e1[2] / l1];
+  const e2 = [nz[1] * e1[2] - nz[2] * e1[1], nz[2] * e1[0] - nz[0] * e1[2], nz[0] * e1[1] - nz[1] * e1[0]];
+  const F = [e1, e2, nz];
+  const rot = new Float64Array(rawTris.length);
+  const back = new Map();
+  // keyed at float32: the engines hand back float32 soup, so an untouched
+  // vertex comes back as the float32 of its turned position
+  const fr = Math.fround;
+  const key = (x, y, z) => fr(x) + ',' + fr(y) + ',' + fr(z);
+  for (let i = 0; i + 2 < rawTris.length; i += 3) {
+    const x = rawTris[i], y = rawTris[i + 1], z = rawTris[i + 2];
+    for (let r = 0; r < 3; r++) rot[i + r] = F[r][0] * x + F[r][1] * y + F[r][2] * z;
+    back.set(key(rot[i], rot[i + 1], rot[i + 2]), [x, y, z]);
+  }
+  const top = rawExtremeOf(rot, 2, false);
+  if (!isFinite(top) || Math.abs(top - plane) > FACE_PICK_TOL) {
+    throw new Error('the clicked face is not the outermost on its slant');
+  }
+  const out = softenSelectedFace(rot, 2, false, R, mode, top);
+  const res = new Float32Array(out.length);
+  for (let i = 0; i + 2 < out.length; i += 3) {
+    const was = back.get(key(out[i], out[i + 1], out[i + 2]));
+    if (was) { res[i] = was[0]; res[i + 1] = was[1]; res[i + 2] = was[2]; continue; }
+    for (let c = 0; c < 3; c++) res[i + c] = F[0][c] * out[i] + F[1][c] * out[i + 1] + F[2][c] * out[i + 2];
+  }
+  return res;
+}
+
+// Does any wall meet this face off square? The Corners engines put their
+// balls and bands for walls square to the face; on a leaning wall they would
+// stand off it.
+function rawCapWallsLean(rawTris, axisIdx, keepMin) {
+  const fc = rawCapFaceContext(rawTris, axisIdx, keepMin);
+  const into = keepMin ? 1 : -1;
+  for (const t of fc.wallTriIdx) {
+    const V = [fc.vert(t, 0), fc.vert(t, 1), fc.vert(t, 2)];
+    for (let k = 0; k < 3; k++) {
+      const A = V[k], B = V[(k + 1) % 3], C = V[(k + 2) % 3];
+      if (!fc.isOnCap(A) || !fc.isOnCap(B) || fc.isOnCap(C)) continue;
+      const e = [B[0] - A[0], B[1] - A[1], B[2] - A[2]];
+      const el = Math.hypot(e[0], e[1], e[2]);
+      if (!(el > 1e-9)) continue;
+      const c = [C[0] - A[0], C[1] - A[1], C[2] - A[2]];
+      const ce = (c[0] * e[0] + c[1] * e[1] + c[2] * e[2]) / (el * el);
+      const w = [c[0] - ce * e[0], c[1] - ce * e[1], c[2] - ce * e[2]];
+      const wl = Math.hypot(w[0], w[1], w[2]);
+      if (wl > 1e-9 && Math.abs(w[axisIdx] * into / wl - 1) > 1e-4) return true;
+    }
+  }
+  return false;
+}
+
 function softenCompute(m, o, commit) {
   commit = commit || commitSoften;
   const R = o.R, mode = o.mode, fullWrap = !!o.fullWrap;
@@ -4539,8 +4783,9 @@ function softenCompute(m, o, commit) {
   const firstOfRun = !run.result;
   // Naming the same face again re-bakes that face at the new R and mode
   // rather than treating it twice.
-  const jobs = run.jobs.filter(j => !newJobs.some(n => n.axisIdx === j.axisIdx && n.keepMin === j.keepMin));
-  newJobs.forEach(n => jobs.push({ axisIdx: n.axisIdx, keepMin: n.keepMin, plane: n.plane, R: R, mode: mode }));
+  const jobs = run.jobs.filter(j => !newJobs.some(n => softenSameFace(n, j)));
+  newJobs.forEach(n => jobs.push({ axisIdx: n.axisIdx, keepMin: n.keepMin, plane: n.plane, R: R, mode: mode,
+                                   normal: n.normal || null }));
 
   const sealScore = nsoSealScore;
   // ---- whole-solid wrap ----
@@ -4664,8 +4909,9 @@ function softenCompute(m, o, commit) {
     for (const j of order) {
       try {
         if (typeof nsoMaskIsExcludedPick === 'function' &&
-            nsoMaskIsExcludedPick(m, j.axisIdx, j.keepMin, j.plane)) { j.dead = true; continue; }
-        working = softenSelectedFace(working, j.axisIdx, j.keepMin, j.R, j.mode, j.plane);
+            nsoMaskIsExcludedPick(m, j.axisIdx, j.keepMin, j.plane, false, j.normal)) { j.dead = true; continue; }
+        working = j.normal ? softenObliqueFace(working, j.normal, j.plane, j.R, j.mode)
+                           : softenSelectedFace(working, j.axisIdx, j.keepMin, j.R, j.mode, j.plane);
         j.build = lastBuildFor(j.mode);
       } catch (err) {
         // "Every corner is already rounded" is a no-op, not a failure - but
@@ -4720,7 +4966,8 @@ function softenCompute(m, o, commit) {
   if (nothingToAdd) {
     text = 'Soften ok - nothing to add on this face (' + nothingToAdd + ')' + faces;
   } else if (mode === 'cornersedges' && ball && ball.rimRound) {
-    text = 'corners+edges: this rim bends in curves, so all of it is rounded - R ' + ball.radius.toFixed(2) +
+    text = 'corners+edges: ' + (ball.leans ? 'this face\'s walls lean' : 'this rim bends in curves') +
+           ', so all of it is rounded - R ' + ball.radius.toFixed(2) +
            ' on ' + ball.loopPts + ' loop pts' + rimBends(ball) + faces;
   } else if (mode === 'cornersedges' && ball && ball.vertices != null) {
     text = 'corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
@@ -6120,6 +6367,17 @@ function storeFacePick(hit) {
     return null;
   }
   if (!face.flat) {
+    // A flat face square to no axis - a slanted cut - is Soften's to take:
+    // softenObliqueFace turns the piece so it faces +Z. Cap and the rest keep
+    // their axis faces.
+    const softening = state.softenArmed || !!(window.nsoSoftenLive && window.nsoSoftenLive.on());
+    const slant = softening ? storeObliquePick(model, mesh, hit) : null;
+    if (slant) return slant;
+    if (softening && slant === null && state.nsoObliqueWhy) {
+      setStatus(state.nsoObliqueWhy, true);
+      state.nsoObliqueWhy = null;
+      return null;
+    }
     setStatus('Click a flat face - that spot is on a curve', true);
     return null;
   }
@@ -6201,6 +6459,88 @@ function storeFacePick(hit) {
   return pick;
 }
 
+// A Soften pick on a flat face that is square to no axis. The face is named
+// by its outward normal in the piece's raw space and its plane along that
+// normal (n . p = plane); it must be the outermost plane that way, the one
+// softenObliqueFace turns to the top. The normal is the raw patch's own,
+// area weighted over every raw triangle on that plane facing that way - not
+// the one triangle under the cursor. Null, with state.nsoObliqueWhy set when
+// there is a reason to give, when the spot is not such a face.
+function storeObliquePick(model, mesh, hit) {
+  state.nsoObliqueWhy = null;
+  const nLocal = hit.face.normal.clone().normalize();
+  // display -> raw is a fixed swap of axes (rawAxisFromDisplay): x is x,
+  // display y is raw z, display z is raw -y
+  let n = [nLocal.x, -nLocal.z, nLocal.y];
+  const T = model.rawTris;
+  const patch = (nn) => {
+    let best = -Infinity;
+    for (let i = 0; i + 2 < T.length; i += 3) {
+      const d = nn[0] * T[i] + nn[1] * T[i + 1] + nn[2] * T[i + 2];
+      if (d > best) best = d;
+    }
+    const acc = [0, 0, 0];
+    let area = 0;
+    for (let t = 0; t + 8 < T.length; t += 9) {
+      const ux = T[t+3]-T[t], uy = T[t+4]-T[t+1], uz = T[t+5]-T[t+2];
+      const vx = T[t+6]-T[t], vy = T[t+7]-T[t+1], vz = T[t+8]-T[t+2];
+      const cx = uy*vz-uz*vy, cy = uz*vx-ux*vz, cz = ux*vy-uy*vx;
+      const L = Math.hypot(cx, cy, cz);
+      if (!(L > 1e-12) || (cx*nn[0] + cy*nn[1] + cz*nn[2]) / L < 0.9995) continue;
+      let on = true;
+      for (let v = 0; v < 3 && on; v++) {
+        const d = nn[0] * T[t + v*3] + nn[1] * T[t + v*3 + 1] + nn[2] * T[t + v*3 + 2];
+        if (Math.abs(d - best) > FACE_PICK_TOL) on = false;
+      }
+      if (!on) continue;
+      acc[0] += cx; acc[1] += cy; acc[2] += cz; area += L / 2;
+    }
+    return { best, acc, area };
+  };
+  let P = patch(n);
+  if (!(P.area > 0)) {
+    state.nsoObliqueWhy = 'Click an outer face - that slanted face is not the outside of the piece that way';
+    return null;
+  }
+  const al = Math.hypot(P.acc[0], P.acc[1], P.acc[2]);
+  n = [P.acc[0] / al, P.acc[1] / al, P.acc[2] / al];
+  P = patch(n);
+  // the click must be on that outer plane, not a parallel face further in
+  mesh.updateMatrixWorld();
+  const pLocal = mesh.worldToLocal(hit.point.clone());
+  const pos = mesh.geometry.attributes.position;
+  let dispBest = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    const d = nLocal.x * pos.getX(i) + nLocal.y * pos.getY(i) + nLocal.z * pos.getZ(i);
+    if (d > dispBest) dispBest = d;
+  }
+  const dispHit = nLocal.x * pLocal.x + nLocal.y * pLocal.y + nLocal.z * pLocal.z;
+  if (Math.abs(dispHit - dispBest) > Math.max(FACE_PICK_TOL, 0.05)) {
+    state.nsoObliqueWhy = 'Click an outer face - that one is recessed ' + Math.abs(dispBest - dispHit).toFixed(2) +
+                          'mm behind the outside';
+    return null;
+  }
+  const nWorld = nLocal.clone().transformDirection(mesh.matrixWorld).normalize();
+  const pWorld = hit.point.clone();
+  const planeW = nWorld.dot(pWorld);
+  const worldTris = facePatchWorldTris(mesh, nWorld, planeW);
+  const pick = {
+    modelId: model.id,
+    oblique: true,
+    worldPoint: pWorld, worldNormal: nWorld, worldPlane: planeW,
+    localPoint: pLocal, localNormal: nLocal,
+    // the face in raw space: no axis, its normal and plane
+    rawAxisIdx: -1, rawKeepMin: false,
+    rawNormal: n, rawPlane: P.best,
+    recessed: false,
+    point: pWorld.clone(),
+    worldTris: worldTris
+  };
+  state.facePick = pick;
+  showPlanarHighlight(mesh, pick);
+  return pick;
+}
+
 // Read the stored pick for a model, re-validated against that model's live
 // raw soup. Returns null if there is no pick, it belongs to another piece,
 // or the piece has moved on under it — callers treat null as "click a
@@ -6209,6 +6549,17 @@ function getFacePick(model) {
   const pick = state.facePick;
   if (!pick || !model || pick.modelId !== model.id) return null;
   if (!model.rawTris || model.rawAxis !== 'zup') return null;
+  if (pick.oblique) {
+    const T = model.rawTris, n = pick.rawNormal;
+    let best = -Infinity;
+    for (let i = 0; i + 2 < T.length; i += 3) {
+      const d = n[0] * T[i] + n[1] * T[i + 1] + n[2] * T[i + 2];
+      if (d > best) best = d;
+    }
+    if (!isFinite(best) || Math.abs(best - pick.rawPlane) > FACE_PICK_TOL) return null;
+    pick.rawPlane = best;
+    return pick;
+  }
   // A recessed pick names a plane inside the piece, so the outer plane is not
   // what it should be re-validated against. It is only ever a "go" for the
   // whole-solid wrap, which reads the skip list and not this plane, so the

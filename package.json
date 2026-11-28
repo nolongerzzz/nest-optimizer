@@ -395,6 +395,7 @@
     "boxedges:test": "node tools/nso_box_edges_test.js",
     "meshedges:test": "node tools/nso_mesh_edges_test.js",
     "soften:meshedges": "node tools/nso_soften_mesh_edges_drive_check.js",
+    "soften:slant": "node tools/nso_soften_slant_drive_check.js",
     "delete:audit": "node tools/nso_paint_delete_audit.js",
     "delete:test": "node tools/nso_paint_delete_test.js",
     "delete:drive": "node tools/nso_paint_delete_drive_check.js",
@@ -858,6 +859,7 @@
     "outline:cost",
     "soften:live",
     "soften:edges",
-    "soften:meshedges"
+    "soften:meshedges",
+    "soften:slant"
   ]
 }

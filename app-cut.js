@@ -5504,7 +5504,44 @@ function rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR) {
     }
     return capPlane + intoBody * bestR;
   };
-  const dropTo = (p3) => { const q = p3.slice(); q[axisIdx] = depthOf(flat2(p3)); return q; };
+  // A loop whose wall leans (rawLeanRing, app-finish.js) has its band's first
+  // row down the wall, not straight down the axis: a wall vertex on that loop
+  // moves by the first row's offset, read off the nearest segment, so it stays
+  // in its own wall and meets the band. Loops with square walls take the
+  // depth-only drop above, unchanged.
+  const anyLean = loops.some(L => L.lean);
+  const dropTo = (p3) => {
+    if (anyLean) {
+      const uv = flat2(p3);
+      let bestD = Infinity, hit = null;
+      for (const L of loops) {
+        const poly = L.poly, n = poly.length;
+        for (let i = 0; i < n; i++) {
+          const a = poly[i], b = poly[(i+1)%n];
+          const ex = b[0]-a[0], ey = b[1]-a[1];
+          const len2 = ex*ex + ey*ey;
+          let u = len2 > 1e-18 ? ((uv[0]-a[0])*ex + (uv[1]-a[1])*ey) / len2 : 0;
+          u = Math.max(0, Math.min(1, u));
+          const d = Math.hypot(uv[0] - (a[0]+ex*u), uv[1] - (a[1]+ey*u));
+          if (d < bestD) { bestD = d; hit = { L, i, u }; }
+        }
+      }
+      if (hit && hit.L.lean) {
+        const L = hit.L, n = L.poly.length, i1 = (hit.i + 1) % n, u = hit.u;
+        const r0 = L.rings[0][hit.i], r1 = L.rings[0][i1];
+        const l0 = from3(L.poly[hit.i], capPlane), l1 = from3(L.poly[i1], capPlane);
+        const q = p3.slice();
+        for (let c = 0; c < 3; c++) {
+          const ring = r0[c] + (r1[c] - r0[c]) * u;
+          // the depth is set, not added: the vertex's own height carries the
+          // cap's float noise, and the band's row does not
+          q[c] = c === axisIdx ? ring : q[c] + ring - (l0[c] + (l1[c] - l0[c]) * u);
+        }
+        return q;
+      }
+    }
+    const q = p3.slice(); q[axisIdx] = depthOf(flat2(p3)); return q;
+  };
   // A wall triangle's cap-plane edge is split at every loop vertex lying on
   // it first: the rebuilt loop carries points the original wall edge knows
   // nothing about, and without the split the ring's outer row and the wall's

@@ -121,7 +121,11 @@
   };
   // The face a Soften pick names: the outer plane on rawAxisIdx, min side if
   // rawKeepMin, max side otherwise.
-  window.nsoMaskIsExcludedPick = function (m, rawAxisIdx, rawKeepMin, rawPlane, inner) {
+  window.nsoMaskIsExcludedPick = function (m, rawAxisIdx, rawKeepMin, rawPlane, inner, rawNormal) {
+    // A slanted face (Soften's oblique pick) has no axis: it is its normal.
+    if (rawAxisIdx != null && rawAxisIdx < 0) {
+      return !!rawNormal && rawPlane != null && window.nsoMaskIsExcludedRaw(m, rawNormal, rawPlane, null, false, false);
+    }
     if (rawAxisIdx == null || rawPlane == null) return false;
     const n = [0, 0, 0];
     n[rawAxisIdx] = rawKeepMin ? -1 : 1;
