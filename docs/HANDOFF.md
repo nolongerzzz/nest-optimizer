@@ -134,6 +134,7 @@ merging its list by hand. The list below is generated.
 - [Rotate rings - honest rings, click-or-drag arrows, Turn first (2026-10-11)](handoff/rotate-rings-honest-rings-click-or-drag-arrows-turn-first.md)
 - [Rotate rings - steady radius, quieter rails, degree markers, piece-frame leans (2026-10-12)](handoff/rotate-rings-steady-radius-quieter-rails-degree-markers-piece.md)
 - [Scale ring rows - Outer Ø · Bore Ø · Wall, one face each (2026-10-20)](handoff/scale-ring-rows-outer-bore-wall-one-face-each.md)
+- [Scale zones in Scale - part of a piece scaled, the rest kept (2026-11-28)](handoff/scale-zones.md)
 - [Sculpt tier 1 — vertex adjacency + global smoothing (landed, `app-sculpt.js`)](handoff/sculpt-tier-1-vertex-adjacency-global-smoothing.md)
 - [Seat anywhere on a flat target - the axis chooser's tie-break was a direction (2026-09-20)](handoff/seat-anywhere-on-a-flat-target-the-axis-choosers-tie-break-was.md)
 - [Seat here - seating against a curved or irregular target (2026-09-18)](handoff/seat-here-seating-against-a-curved-or-irregular-target.md)

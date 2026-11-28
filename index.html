@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=b52cdf89" />
+  <link rel="stylesheet" href="styles.css?v=d83323c4" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1465,6 +1465,70 @@
               <div class="scale-actions">
               <button id="btn-scale-feature-set" class="btn" type="button" disabled title="Bake the feature size the ghost shows: one Undo step. Enter in a box does the same.">Set</button>
               <button id="btn-scale-feature-cancel" class="btn btn-secondary" type="button" disabled title="Put Feature size away; the piece was never changed (Esc does the same).">Cancel</button>
+              </div>
+              </div>
+              </div>
+              <!-- SCALE ZONES (app-scale-zones.js, nso_scale_zones.js; docs/SCALE-ZONES.md):
+                   scale PART of the piece and keep the rest - Keep zones (red) never move,
+                   Scale zones (blue) say what changes. Ghost while the numbers move; Set bakes. -->
+              <div class="scale-zones" id="scale-zones">
+              <button id="btn-scale-zones" class="btn btn-secondary" type="button" aria-pressed="false" aria-controls="scale-zones-panel"
+              title="Scale PART of the piece and keep the rest exactly as it is: a shower head bigger on the same threaded fitting, a thumb screw's head bigger on the same thread, one pillar of a test up or down. Put a red Keep zone on what must not change, or a blue Scale zone on what should - each is fitted to the part you click.">Scale zones</button>
+              <div id="scale-zones-panel" class="scale-zones-panel" hidden>
+              <p id="scale-zones-readout" class="hint" aria-live="polite">Scale part of a piece and keep the rest: a head on the same thread, one pillar of many.</p>
+              <div class="scale-unit scale-zones-add" role="group" aria-label="Add a zone">
+              <button id="btn-scale-zones-keep" class="scale-unit-btn" type="button" aria-pressed="false" title="Then click what must NOT change - a thread, a fitting, a shaft. A red zone is fitted round it; nothing inside a Keep zone moves. Shift-click puts a plain box there instead.">+ Keep</button>
+              <button id="btn-scale-zones-scale" class="scale-unit-btn" type="button" aria-pressed="false" title="Then click the part to resize - a head, one pillar. A blue zone is fitted round it; only what is inside a Scale zone changes. Shift-click puts a plain box there instead.">+ Scale</button>
+              </div>
+              <ul id="scale-zones-list" class="scale-zones-list" aria-label="Zones on this piece"></ul>
+              <div id="scale-zones-edit" class="scale-zones-edit" hidden>
+              <div class="scale-unit scale-zones-kind" role="group" aria-label="The picked zone">
+              <button id="btn-scale-zones-kind-keep" class="scale-unit-btn" type="button" aria-pressed="false" title="Nothing inside this zone moves">Keep</button>
+              <button id="btn-scale-zones-kind-scale" class="scale-unit-btn" type="button" aria-pressed="false" title="What is inside this zone is scaled">Scale</button>
+              <button id="btn-scale-zones-shape-box" class="scale-unit-btn" type="button" aria-pressed="false" title="A box, along the piece's own X, Y and Z">Box</button>
+              <button id="btn-scale-zones-shape-cyl" class="scale-unit-btn" type="button" aria-pressed="false" title="A cylinder - for round parts: a thread, a shaft, a pillar">Cylinder</button>
+              <button id="btn-scale-zones-delete" class="scale-unit-btn" type="button" title="Take the picked zone away (Delete does the same)">Delete</button>
+              </div>
+              <div class="scale-unit scale-zones-axis" id="scale-zones-axis-row" role="group" aria-label="The cylinder's axis" hidden>
+              <button id="btn-scale-zones-axis-0" class="scale-unit-btn" type="button" aria-pressed="false" title="The cylinder runs along X">along X</button>
+              <button id="btn-scale-zones-axis-1" class="scale-unit-btn" type="button" aria-pressed="false" title="The cylinder runs along Y">along Y</button>
+              <button id="btn-scale-zones-axis-2" class="scale-unit-btn" type="button" aria-pressed="false" title="The cylinder runs along Z (up)">along Z</button>
+              </div>
+              <div class="scale-zones-grid">
+              <div class="edit-row scale-row" id="scale-zones-size0-row"><label for="scale-zones-size0" id="scale-zones-size0-label">X</label><input id="scale-zones-size0" type="number" min="0.01" step="0.1" aria-label="Zone size" /><span class="hint scale-zones-u">mm</span></div>
+              <div class="edit-row scale-row" id="scale-zones-size1-row"><label for="scale-zones-size1" id="scale-zones-size1-label">Y</label><input id="scale-zones-size1" type="number" min="0.01" step="0.1" aria-label="Zone size" /><span class="hint scale-zones-u">mm</span></div>
+              <div class="edit-row scale-row" id="scale-zones-size2-row"><label for="scale-zones-size2" id="scale-zones-size2-label">Z</label><input id="scale-zones-size2" type="number" min="0.01" step="0.1" aria-label="Zone size" /><span class="hint scale-zones-u">mm</span></div>
+              <div class="edit-row scale-row"><label for="scale-zones-cx">at X</label><input id="scale-zones-cx" type="number" step="0.1" title="The zone's centre, in the piece's own coordinates" aria-label="Zone centre X" /><span class="hint scale-zones-u">mm</span></div>
+              <div class="edit-row scale-row"><label for="scale-zones-cy">at Y</label><input id="scale-zones-cy" type="number" step="0.1" title="The zone's centre, in the piece's own coordinates" aria-label="Zone centre Y" /><span class="hint scale-zones-u">mm</span></div>
+              <div class="edit-row scale-row"><label for="scale-zones-cz">at Z</label><input id="scale-zones-cz" type="number" step="0.1" title="The zone's centre, in the piece's own coordinates" aria-label="Zone centre Z" /><span class="hint scale-zones-u">mm</span></div>
+              </div>
+              </div>
+              <div class="edit-row scale-row" id="scale-zones-all-row">
+              <label for="scale-zones-all">Scale</label>
+              <input id="scale-zones-all" type="number" min="5" max="2000" step="1" value="100" title="How big the scaled part becomes, in % of what it is now, every way" aria-label="Scale percent" />
+              <span class="hint">%</span>
+              <input type="range" id="scale-zones-all-slider" class="scale-slider" min="25" max="400" step="1" value="100" aria-label="Scale slider - previews on the piece, Set bakes it" />
+              </div>
+              <label class="scale-zones-check"><input type="checkbox" id="scale-zones-peraxis" /> Per axis</label>
+              <div id="scale-zones-axes" hidden>
+              <div class="edit-row scale-row"><label for="scale-zones-x">X</label><input id="scale-zones-x" type="number" min="5" max="2000" step="1" value="100" aria-label="Scale X percent" /><span class="hint">%</span><input type="range" id="scale-zones-x-slider" class="scale-slider" min="25" max="400" step="1" value="100" aria-label="Scale X slider" /></div>
+              <div class="edit-row scale-row"><label for="scale-zones-y">Y</label><input id="scale-zones-y" type="number" min="5" max="2000" step="1" value="100" aria-label="Scale Y percent" /><span class="hint">%</span><input type="range" id="scale-zones-y-slider" class="scale-slider" min="25" max="400" step="1" value="100" aria-label="Scale Y slider" /></div>
+              <div class="edit-row scale-row"><label for="scale-zones-z">Z</label><input id="scale-zones-z" type="number" min="5" max="2000" step="1" value="100" aria-label="Scale Z (up) percent" /><span class="hint">%</span><input type="range" id="scale-zones-z-slider" class="scale-slider" min="25" max="400" step="1" value="100" aria-label="Scale Z slider" /></div>
+              </div>
+              <div class="scale-unit scale-zones-anchor" role="group" aria-label="What stays put">
+              <button id="btn-scale-zones-anchor-join" class="scale-unit-btn" type="button" aria-pressed="true" title="The scaled part grows out of (or shrinks into) the place it meets the kept part - the neck, the underside of a head, the foot of a pillar. The pink dot shows it.">Join</button>
+              <button id="btn-scale-zones-anchor-centre" class="scale-unit-btn" type="button" aria-pressed="false" title="Scale each part about its own middle">Centre</button>
+              <button id="btn-scale-zones-anchor-base" class="scale-unit-btn" type="button" aria-pressed="false" title="Scale each part about the middle of its bottom">Base</button>
+              </div>
+              <div class="edit-row scale-row">
+              <label for="scale-zones-blend">Blend</label>
+              <input id="scale-zones-blend" type="number" min="0" max="200" step="0.5" value="0" title="0: the change steps at the zone's edge. More: it eases in over this distance from the edge, so the joint tapers instead." aria-label="Blend distance" />
+              <span class="hint scale-zones-u">mm</span>
+              </div>
+              <p id="scale-zones-note" class="hint scale-preview-note" aria-live="polite"></p>
+              <div class="scale-actions">
+              <button id="btn-scale-zones-set" class="btn" type="button" disabled title="Bake what the green ghost shows: one Undo step. Enter in a box does the same.">Set</button>
+              <button id="btn-scale-zones-cancel" class="btn btn-secondary" type="button" disabled title="Put Scale zones away; the piece was never changed (Esc does the same). The zones stay on the piece for next time.">Cancel</button>
               </div>
               </div>
               </div>
@@ -3392,7 +3456,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=85e73836"></script>
-  <script src="app-core.js?v=761245ad"></script>
+  <script src="app-core.js?v=2dd42263"></script>
   <!-- A painted piece shown in its filament colours (nso_paint.js). After app-core.js. -->
   <script src="app-paint-view.js?v=60c6dc2c"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
@@ -3402,7 +3466,7 @@
 
 
 
-  <script src="app-cut.js?v=12b7b790"></script>
+  <script src="app-cut.js?v=7df34f1b"></script>
   <!-- Cut card, Follow strand: the sized blade put square across a cord and walked along it (nso_strand.js, docs/CUT-FOLLOW.md). After app-cut.js. -->
   <!-- Cut card, Notch From / To: the notch set by its two ends. After app-cut.js. -->
   <script src="app-cut-notch-span.js?v=c62e150e"></script>
@@ -3412,7 +3476,7 @@
   <script src="app-cut-plate.js?v=187bdbdd"></script>
   <!-- Cut card, Plane blade: shave the nearer end off flat, no 1 mm minimum. After app-cut.js (cutSplitAt) and app-cut-plate.js. -->
   <script src="app-cut-plane.js?v=0aa7d315"></script>
-  <script src="app-finish.js?v=28021d18"></script>
+  <script src="app-finish.js?v=8bcf45d9"></script>
   <script src="app-sculpt.js?v=f522aee3"></script>
   <script src="app-extend.js?v=e24e3562"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
@@ -3476,6 +3540,8 @@
   <script src="app-scale.js?v=68c344d3"></script>
   <script src="nso_feature_size.js?v=414e2b63"></script>
   <script src="app-scale-feature.js?v=98d953b3"></script>
+  <script src="nso_scale_zones.js?v=314b8c59"></script>
+  <script src="app-scale-zones.js?v=a4adfff2"></script>
   <script src="app-brush.js?v=2aff434b"></script>
   <!-- Pull: nso_densify.js is the shared subdivision (the gun will use it too), nso_pull.js the field and its guards, app-pull.js the pointer session. docs/PULL.md -->
   <script src="nso_densify.js?v=0b7748d1"></script>
@@ -3523,7 +3589,7 @@
   <script src="app-hollow.js?v=f99c09ad"></script>
   <script src="app-foam.js?v=d28d8921"></script>
   <script src="app-thicken-live.js?v=4dc96b30"></script>
-  <script src="app-soften-live.js?v=ecc70fff"></script>
+  <script src="app-soften-live.js?v=7f36bcfa"></script>
   <script src="app-seat-surface.js?v=4b0f2e5d"></script>
   <script src="app-asm-editor.js?v=bcc7534d"></script>
   <script src="nso_interlock.js?v=d3c3b968"></script>
@@ -3538,7 +3604,7 @@
   <script src="app-raster.js?v=2f85efde"></script>
   <script src="app-relief.js?v=1b21822a"></script>
   <script src="app-mold.js?v=c7052190"></script>
-  <script src="app-mask.js?v=70da24fa"></script>
+  <script src="app-mask.js?v=a218e5b2"></script>
   <script src="app-seat-grid.js?v=7e42f602"></script>
   <script src="app-paint-delete.js?v=e9d1ec70"></script>
   <script src="app-extract-sel.js?v=0590eee5"></script>

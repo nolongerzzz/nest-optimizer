@@ -310,6 +310,7 @@ const UNDO_REPLACE_LABEL = {
   bossReplace: 'Undo: Step / Boss reverted',
   drawConnectReplace: 'Undo: Draw > Connect reverted',
   featureSizeReplace: 'Undo: Feature size reverted',
+  scaleZonesReplace: 'Undo: Scale zones reverted',
   detachReplace: 'Undo: Detach reverted',
   reattachReplace: 'Undo: Reattach reverted',
   stockReplace: 'Undo: Stock adjustment reverted',

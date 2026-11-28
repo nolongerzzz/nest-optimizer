@@ -552,6 +552,33 @@ select:focus, input:focus {
 #scale-feature-panel .scale-row .hint { margin: 0; white-space: nowrap; }
 #scale-feature-panel .scale-row .scale-slider { grid-column: 1 / -1; margin: 0; padding: 0; }
 #scale-feature-panel .scale-row .scale-slider:disabled { opacity: 0.4; }
+/* Scale zones (app-scale-zones.js): part of the piece scaled, the rest kept.
+   Laid out as Feature size; Keep zones read red, Scale zones blue. */
+#scale-card .scale-zones { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+#scale-card #btn-scale-zones[aria-pressed="true"] { border-color: #38bdf8; color: #fff; background: rgba(56, 189, 248, 0.15); }
+#scale-card .scale-zones-panel[hidden], #scale-zones-panel [hidden] { display: none !important; }
+#scale-card .scale-zones-panel > .hint { margin: 4px 0; }
+#scale-zones-panel .scale-unit { justify-content: flex-start; flex-wrap: wrap; margin: 4px 0; }
+#scale-zones-panel .scale-row {
+  display: grid;
+  grid-template-columns: 4.2rem 5.4rem 1fr;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+#scale-zones-panel .scale-row label { margin: 0; white-space: nowrap; }
+#scale-zones-panel .scale-row input[type="number"] { width: 100% !important; margin: 0; padding-top: 4px; padding-bottom: 4px; }
+#scale-zones-panel .scale-row .hint { margin: 0; white-space: nowrap; }
+#scale-zones-panel .scale-row .scale-slider { grid-column: 1 / -1; margin: 0; padding: 0; }
+#scale-zones-panel .scale-zones-grid .scale-row { grid-template-columns: 4.2rem 7rem 1fr; }
+.scale-zones-list { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.scale-zones-item { display: flex; align-items: stretch; gap: 4px; border-left: 3px solid #38bdf8; padding-left: 4px; }
+.scale-zones-item.is-keep { border-left-color: #ef4444; }
+.scale-zones-item.is-sel { background: rgba(250, 204, 21, 0.12); }
+.scale-zones-name { flex: 1; text-align: left; background: none; border: 0; color: inherit; font: inherit; font-size: 0.85em; padding: 3px 2px; cursor: pointer; }
+.scale-zones-del { background: none; border: 0; color: var(--muted, #94a3b8); cursor: pointer; font-size: 1em; padding: 0 6px; }
+.scale-zones-del:hover { color: #ef4444; }
+.scale-zones-check { display: flex; align-items: center; gap: 6px; font-size: 0.85em; margin: 2px 0 4px; }
 
 .library-list {
   position: absolute;

@@ -35,6 +35,16 @@ Smart build-plate packing for 3D printing.
   Every row has a **slider** and previews on the piece - a translucent ghost
   over it, the piece untouched - until **Set** bakes it (one Undo step).
   See [docs/SECTION.md](docs/SECTION.md)
+- **Scale zones** (at the foot of the Scale card): scale **part** of a piece and
+  keep the rest exactly as it is - a shower head bigger on the same threaded
+  fitting, a thumb screw's head bigger on the same thread, one pillar of a
+  stringing test up or down. **+ Keep** then a click puts a red zone round the
+  part under it (fitted to it: a thread, a shaft, a collar); nothing inside
+  moves. **+ Scale** puts a blue one: only what is inside changes. Zones drag
+  and stretch by handles or by number; a % (or X / Y / Z each), an anchor
+  (**Join** - the part grows out of where it meets the kept one - Centre or
+  Base) and an optional **Blend** distance. Green ghost, **Set** = one Undo
+  ([docs/SCALE-ZONES.md](docs/SCALE-ZONES.md))
 - **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
   by the measured line widths, grid / rectilinear / concentric / Archimedean chords / 3D honeycomb / gyroid / honeycomb / cubic / adaptive cubic / lightning infill by density, Hilbert curve and octagram spiral surfaces, top and bottom
   shells, and per-layer overhang / support-need calls - opened as a toolpath
