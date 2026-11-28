@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Printers</title>
+<link rel="stylesheet" href="printers.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <h1>Printers</h1>
+    <ul id="list" class="list"></ul>
+    <button id="btn-add" class="btn ghost wide">+ Add a printer</button>
+    <p id="keep-note" class="note"></p>
+  </aside>
+
+  <main class="main">
+    <section id="empty" class="pane">
+      <h2>No printer yet</h2>
+      <p>Add a printer to see its status, send it a sliced file and run the service tests.</p>
+      <p class="note">The printer has to be in <b>LAN Only</b> mode with <b>Developer Mode</b> on (on its screen, under Settings). Its address, serial number and access code are shown there too. Bambu Handy does not work for that printer while the mode is on.</p>
+    </section>
+
+    <section id="form" class="pane" hidden>
+      <h2 id="form-title">Add a printer</h2>
+      <div class="grid2">
+        <label>Name<input id="f-name" autocomplete="off" placeholder="A1 mini"></label>
+        <label>Model<select id="f-model"></select></label>
+        <label>Address (IP)<input id="f-host" autocomplete="off" placeholder="192.168.1.50" inputmode="decimal"></label>
+        <label>Serial number<input id="f-serial" autocomplete="off" spellcheck="false" placeholder="leave empty: Check fills it in"></label>
+        <label class="span2">Access code<input id="f-code" type="password" autocomplete="off" spellcheck="false" placeholder="from the printer's screen">
+          <span class="note" id="f-code-note"></span></label>
+      </div>
+      <div class="row">
+        <button id="btn-check" class="btn">Check the printer</button>
+        <span id="check-out" class="note"></span>
+      </div>
+      <div id="cert" class="cert" hidden>
+        <h3>This is the printer that answered</h3>
+        <dl>
+          <dt>Certificate name</dt><dd id="c-cn"></dd>
+          <dt>Issued by</dt><dd id="c-issuer"></dd>
+          <dt>Fingerprint</dt><dd id="c-fp" class="mono"></dd>
+          <dt>File transfer</dt><dd id="c-ftp"></dd>
+        </dl>
+        <p id="c-verdict" class="note"></p>
+      </div>
+      <div class="row end">
+        <button id="btn-cancel" class="btn ghost">Cancel</button>
+        <button id="btn-save" class="btn primary" disabled>Save this printer</button>
+      </div>
+      <p id="form-err" class="err"></p>
+    </section>
+
+    <section id="detail" class="pane" hidden>
+      <header class="head">
+        <div>
+          <h2 id="d-name"></h2>
+          <p id="d-sub" class="note"></p>
+        </div>
+        <div class="row">
+          <span id="d-link" class="pill">offline</span>
+          <button id="btn-connect" class="btn primary">Connect</button>
+          <button id="btn-edit" class="btn ghost">Edit</button>
+          <button id="btn-remove" class="btn ghost danger">Remove</button>
+        </div>
+      </header>
+      <p id="d-err" class="err"></p>
+
+      <div id="lockbar" class="lockbar" hidden>
+        <b>Service lock is on.</b> The app refuses anything that moves the head, and Resume. The printer's own touchscreen is not blocked: do not press Unload, Load or Home there while the locks are fitted.
+      </div>
+
+      <div class="tiles">
+        <div class="tile"><span class="k">State</span><span class="v" id="s-state">-</span><span class="sub" id="s-file"></span></div>
+        <div class="tile"><span class="k">Progress</span><span class="v" id="s-pct">-</span><span class="sub" id="s-layer"></span></div>
+        <div class="tile"><span class="k">Nozzle</span><span class="v" id="s-nozzle">-</span><span class="sub" id="s-nozzle-t"></span></div>
+        <div class="tile"><span class="k">Bed</span><span class="v" id="s-bed">-</span><span class="sub" id="s-bed-t"></span></div>
+      </div>
+      <div id="s-errors" class="errors" hidden></div>
+
+      <h3>Job</h3>
+      <div class="row">
+        <button class="btn" data-cmd="pause">Pause</button>
+        <button class="btn" data-cmd="resume">Resume</button>
+        <button class="btn danger" data-cmd="stop">Stop</button>
+        <button class="btn ghost" data-cmd="refresh">Refresh status</button>
+      </div>
+
+      <h3>Send a sliced file</h3>
+      <div id="pending" class="pending" hidden></div>
+      <div class="row">
+        <button id="btn-pick" class="btn">Choose a .gcode.3mf...</button>
+        <span id="file-name" class="note">No file chosen.</span>
+      </div>
+      <div class="opts">
+        <label><input type="checkbox" id="o-level" checked> Bed levelling</label>
+        <label><input type="checkbox" id="o-vib" checked> Vibration calibration</label>
+        <label><input type="checkbox" id="o-flow"> Flow calibration</label>
+        <label><input type="checkbox" id="o-lapse"> Timelapse</label>
+        <label><input type="checkbox" id="o-ams"> Use the AMS (slot 1)</label>
+      </div>
+      <div class="row">
+        <button id="btn-upload" class="btn" disabled>Upload only</button>
+        <button id="btn-print" class="btn primary" disabled>Send and print</button>
+        <progress id="prog" value="0" max="1" hidden></progress>
+        <span id="send-out" class="note"></span>
+      </div>
+
+      <h3>Service</h3>
+      <div class="row">
+        <button id="btn-lock" class="btn">Turn the service lock on</button>
+        <button class="btn" data-cmd="homeXY" title="Re-homes X and Y only. Z is never homed from here.">Re-home X / Y</button>
+        <button class="btn" data-cmd="clearError">Clear the error</button>
+      </div>
+      <div class="row">
+        <label class="inline">Nozzle <input id="t-nozzle" type="number" min="0" max="300" step="5" value="220"> &deg;C</label>
+        <button id="btn-nozzle" class="btn">Set</button>
+        <button id="btn-nozzle-off" class="btn ghost">Nozzle off</button>
+      </div>
+      <label class="block">G-code to run now
+        <textarea id="gcode" rows="3" spellcheck="false" placeholder="M104 S220"></textarea></label>
+      <div class="row">
+        <button id="btn-gcode" class="btn" disabled>Send</button>
+        <span id="gcode-verdict" class="note"></span>
+      </div>
+
+      <h3>Sent to the printer</h3>
+      <pre id="log" class="log"></pre>
+    </section>
+  </main>
+</div>
+<script src="printers.js"></script>
+</body>
+</html>

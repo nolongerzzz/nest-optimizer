@@ -1,0 +1,37 @@
+{
+  "name": "nso-desktop",
+  "productName": "Nest Optimizer",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Desktop shell for Nest Optimizer: the same static app in its own window, plus the printer link a browser page cannot open.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/link-test.js && node test/server-test.js && node test/updater-test.js",
+    "smoke": "sh test/smoke.sh",
+    "link": "node printer-link/cli.js",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "basic-ftp": "^5.0.5",
+    "mqtt": "^5.10.0"
+  },
+  "devDependencies": {
+    "aedes": "^0.51.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "ftp-srv": "^4.6.3"
+  },
+  "build": {
+    "appId": "com.nolongerzzz.nso",
+    "files": ["main.js", "preload-site.js", "preload-ui.js", "static-server.js", "store.js", "updater.js", "assets/**", "printer-link/**", "ui/**"],
+    "extraResources": [
+      { "from": "..", "to": "app-site",
+        "filter": ["index.html", "styles.css", "*.js", "vendor/**", "fixtures/**", "library/**", "models/**", "designs/**", "cth/**", "*.b64",
+                   "!desktop/**", "!tools/**", "!docs/**", "!node_modules/**", "!.git/**"] }
+    ],
+    "mac": { "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }], "category": "public.app-category.graphics-design" },
+    "linux": { "target": ["AppImage"], "category": "Graphics" }
+  }
+}
