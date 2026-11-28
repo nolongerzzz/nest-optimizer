@@ -44,11 +44,16 @@
     text('form-err', ''); text('check-out', 'Asking ' + host + '...'); $('cert').hidden = true; $('btn-save').disabled = true; S.probe = null;
     window.nso.printers.probe(host).then(un).then(function (r) {
       S.probe = r; text('check-out', '');
+      // The certificate's name is the printer's serial number, so an empty Serial row is filled from it.
+      var filled = false;
+      if (!$('f-serial').value.trim() && r.mqtt.subjectCN) { $('f-serial').value = r.mqtt.subjectCN; filled = true; }
       var serial = $('f-serial').value.trim();
       text('c-cn', r.mqtt.subjectCN || '(none)'); text('c-issuer', r.mqtt.issuerCN || '(none)'); text('c-fp', r.mqtt.fingerprint256);
       text('c-ftp', r.ftp ? 'answers on port 990' : 'no answer on port 990 (' + r.ftpError + ') - status and commands will work, sending files will not');
       var match = serial && r.mqtt.subjectCN && r.mqtt.subjectCN.toUpperCase() === serial.toUpperCase();
-      text('c-verdict', match
+      text('c-verdict', filled
+        ? 'The serial number was read from the printer\'s certificate and filled in. It should match the one on the printer (Settings > Device on its screen, or the sticker on the back). Saving pins this certificate: only a printer that presents it will be sent the access code.'
+        : match
         ? 'The certificate carries the serial number you entered. Saving pins this certificate: only a printer that presents it will be sent the access code.'
         : 'The certificate\'s name is not the serial number you entered. Check the serial on the printer\'s screen. If they should match and do not, do not save.');
       $('c-verdict').className = match ? 'note' : 'err';
