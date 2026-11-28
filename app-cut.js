@@ -5309,7 +5309,40 @@ function rawSnapPieces2(pieces, targets, tol) {
 // Lid, wall and band for a face whose rings are built. `fc` is the
 // rawCapFaceContext the loops came from. Returns the triangle soup as a
 // plain array; the caller wraps it.
-function rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR) {
+// The lid as a constrained Delaunay triangulation of the rings themselves
+// (nso_cdt.js): the outline's innermost ring with each hole's ring as a hole.
+// Its corners are the rings' own points, so it meets the band edge for edge.
+function rawFreshLid2(loops) {
+  const CDT = (typeof NSO_CDT !== 'undefined') ? NSO_CDT
+            : ((typeof window !== 'undefined' && window.NSO_CDT) ? window.NSO_CDT : null);
+  if (!CDT) throw new Error('the fresh lid needs nso_cdt.js');
+  const pts = [], segs = [], seen = new Map();
+  const idOf = (p) => {
+    const k = p[0] + ',' + p[1];
+    if (seen.has(k)) return seen.get(k);
+    seen.set(k, pts.length);
+    pts.push([p[0], p[1]]);
+    return pts.length - 1;
+  };
+  for (const L of loops) {
+    const ids = [];
+    for (const p of L.ring2) {
+      const id = idOf(p);
+      if (!ids.length || ids[ids.length - 1] !== id) ids.push(id);
+    }
+    while (ids.length > 1 && ids[0] === ids[ids.length - 1]) ids.pop();
+    if (ids.length < 3) throw new Error('a ring collapsed to nothing');
+    for (let i = 0; i < ids.length; i++) segs.push([ids[i], ids[(i + 1) % ids.length]]);
+  }
+  const r = CDT.triangulate(pts, segs);
+  if (!r || !r.tris || !r.nTri) throw new Error('the fresh lid did not triangulate' + (r && r.reason ? ' - ' + r.reason : ''));
+  const out = [];
+  for (let t = 0; t < r.nTri; t++) out.push([pts[r.tris[3*t]], pts[r.tris[3*t+1]], pts[r.tris[3*t+2]]]);
+  return out;
+}
+
+function rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR, opts) {
+  opts = opts || {};
   const other = [0, 1, 2].filter(a => a !== axisIdx);
   const capPlane = fc.capPlane, vert = fc.vert, isOnCap = fc.isOnCap;
   const flat2 = (p3) => [p3[other[0]], p3[other[1]]];
@@ -5351,8 +5384,14 @@ function rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR) {
   const out = [];
 
   // ---------- lid: original cap triangles trimmed back to the rings ----------
-  const capPolys = fc.capTriIdx.map(t => [flat2(vert(t,0)), flat2(vert(t,1)), flat2(vert(t,2))]);
-  const lidPieces = rawLidTrimToRings2(capPolys, loops, requestedR);
+  // opts.freshLid: the lid laid fresh inside the rings (rawFreshLid2), not
+  // the cap's own triangles trimmed back. The trim keeps the face's
+  // triangulation and is what every face gets first; a cap the trim cannot
+  // follow - a Cut's annulus, filled through a slit from the outline to the
+  // hole, whose two sides the trim splits differently - is rebuilt this way
+  // by the caller (rawPerimeterFilletBuild).
+  const lidPieces = opts.freshLid ? rawFreshLid2(loops)
+    : rawLidTrimToRings2(fc.capTriIdx.map(t => [flat2(vert(t,0)), flat2(vert(t,1)), flat2(vert(t,2))]), loops, requestedR);
 
   // Lid points that two clips landed a hair apart, or a hair off a ring or
   // loop point, become one point (rawSnapPieces2).
@@ -5510,7 +5549,35 @@ function rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR) {
   // in its own wall and meets the band. Loops with square walls take the
   // depth-only drop above, unchanged.
   const anyLean = loops.some(L => L.lean);
-  const dropTo = (p3) => {
+  // A wall vertex that drops partway along a band edge - an outline point the
+  // weld took out (raw2DWeldLoop, 0.08 mm: a Cut leaves points 0.005 mm apart)
+  // - is a corner the band's first row does not have. Each is recorded against
+  // its loop segment, and the band's first row is stitched through it below;
+  // without that the wall's top edge and the band's foot meet in T-junctions.
+  for (const L of loops) L.bottom = new Map();
+  const noteBottom = (uv, q) => {
+    let bestD = Infinity, hit = null;
+    for (const L of loops) {
+      const poly = L.poly, n = poly.length;
+      for (let i = 0; i < n; i++) {
+        const a = poly[i], b = poly[(i+1)%n];
+        const ex = b[0]-a[0], ey = b[1]-a[1];
+        const len2 = ex*ex + ey*ey;
+        let u = len2 > 1e-18 ? ((uv[0]-a[0])*ex + (uv[1]-a[1])*ey) / len2 : 0;
+        u = Math.max(0, Math.min(1, u));
+        const d = Math.hypot(uv[0] - (a[0]+ex*u), uv[1] - (a[1]+ey*u));
+        if (d < bestD) { bestD = d; hit = { L, i, u, len: Math.sqrt(len2) }; }
+      }
+    }
+    if (!hit || !(hit.len > 0)) return;
+    // the segment's own ends are corners of the band already
+    if (hit.u * hit.len < 1e-6 || (1 - hit.u) * hit.len < 1e-6) return;
+    const list = hit.L.bottom.get(hit.i) || [];
+    if (!list.some(e => Math.abs(e.u - hit.u) * hit.len < 1e-9)) list.push({ u: hit.u, q: q });
+    hit.L.bottom.set(hit.i, list);
+  };
+  const dropTo = (p3) => { const q = dropTo0(p3); noteBottom(flat2(p3), q); return q; };
+  const dropTo0 = (p3) => {
     if (anyLean) {
       const uv = flat2(p3);
       let bestD = Infinity, hit = null;
@@ -5621,6 +5688,28 @@ function rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR) {
       for (let i = 0; i < n; i++) {
         const i1 = (i+1)%n;
         const A0=a[i], A1=a[i1], B0=b[i], B1=b[i1];
+        if (s === 0 && L.bottom.has(i) && !same(A0, A1)) {
+          // the foot stitched through the wall vertices recorded on it (and,
+          // on a one-row band, the lid side through its splits): two chains,
+          // zipped by where they lie along the segment
+          const bot = [{ u: 0, p: A0 }].concat(L.bottom.get(i).slice().sort((x,y)=>x.u-y.u).map(e => ({ u: e.u, p: e.q })), [{ u: 1, p: A1 }]);
+          const top = [{ u: 0, p: B0 }];
+          if (STEPS === 1 && L.splits.has(i) && !same(B0, B1)) {
+            const P = ring2[i], Q = ring2[i1];
+            for (const u of L.splits.get(i).slice().sort((x,y)=>x-y)) {
+              top.push({ u: u, p: from3([P[0] + (Q[0]-P[0])*u, P[1] + (Q[1]-P[1])*u], capPlane) });
+            }
+          }
+          top.push({ u: 1, p: B1 });
+          let j = 0, k = 0;
+          while (j < bot.length - 1 || k < top.length - 1) {
+            const nb = j < bot.length - 1 ? bot[j+1].u : Infinity;
+            const nt = k < top.length - 1 ? top[k+1].u : Infinity;
+            if (nb <= nt) { pushBand(bot[j].p, bot[j+1].p, top[k].p); j++; }
+            else { pushBand(bot[j].p, top[k+1].p, top[k].p); k++; }
+          }
+          continue;
+        }
         if (s === STEPS-1 && L.splits.has(i) && !same(B0, B1)) {
           const P = ring2[i], Q = ring2[i1];
           const chain = [B0];

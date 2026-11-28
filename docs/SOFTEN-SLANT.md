@@ -36,13 +36,31 @@ angle `a` it makes with the face set the profile (`rawLeanRing`):
 | **Corners+edges** | the whole rim rounded, as Round, and the status says the walls lean |
 | **Corners** | refused in words: it puts balls on corners between square walls |
 
-At a corner of the outline a row's point is where its two edges' offset lines come closest (the mitre, on square
-walls); the band's first row sits on the line the two walls share, so the wall's top edge, dropped to it, stays in
-its own planes. Faces whose walls are all square to them (to 1e-6) take the old construction unchanged - the pinned
+The profile is fitted per outline POINT, not per edge: the part across the face is mitred as the square-wall round
+mitres it, and the part down the wall runs along the line the point's two wall facets share (on a faceted tube, the
+tube's own line), or their common direction where they are one plane. Per-edge offsets were tried first: a Cut
+outline is unevenly spaced (a 0.2 mm edge between 1.5 mm ones), and offsets differing edge to edge slid a mitre far
+along a short edge and turned it backwards ("turns this face inside out"). Faces whose walls are all square to them (to 1e-6) take the old construction unchanged - the pinned
 results in `soften:holes` and `soften:rim` hold.
 
 This applies on axis faces too: a tube cut at 45 degrees and then laid on its cut has square-to-axis face and
 leaning walls, and gets the fitted round.
+
+## Faces the Cut tool made
+
+These failed whatever the angle - a cut straight across a tube too - and were what the owner hit first:
+
+- **The slit.** Cut fills an annulus through a slit from the outline to the hole. Trimming those triangles back to
+  the rounded edge split the slit's two sides at different points, and the lid came out open (or the trim's area
+  check refused: `the lid did not trim cleanly`). When the trim refuses, or leaves the piece less sealed than it
+  was, the lid is laid fresh inside the rings instead - a constrained Delaunay triangulation of the rings themselves
+  (`rawFreshLid2`, `nso_cdt.js`). Every face tries the trim first, so faces it always worked on are unchanged.
+- **The close points.** Cut leaves outline points 0.005 mm apart; the rim's 0.08 mm weld takes some out, and the
+  wall vertices there met the band's foot in T-junctions. Each is now recorded against its loop segment and the
+  band's first row is stitched through it (`L.bottom` in `rawCapRebuildFromRings`).
+
+`soften:slant` section 6 cuts a Stock tube with the Cut card's own split at Bevel 45 and Bevel 90 and softens every
+cut face of both halves.
 
 ## Not here
 

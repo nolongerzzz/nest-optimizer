@@ -183,78 +183,79 @@ function rawLoopWallLean(fc, axisIdx, keepMin, poly2d, other) {
   return leans ? { dirs: dirs, into: into } : null;
 }
 
-// The rim round's rows on a leaning wall. In the section square to each loop
-// edge k the face runs in along u_k and the wall runs down along w_k, at an
-// angle a_k between them. Round is the arc of radius R tangent to both, which
-// touches each a setback R / tan(a/2) from the edge (R at 90 degrees, more
-// where the wall leans in over the face, less where it leans out). Bevel is a
-// flat band R along each. A row's point at a loop vertex is where its two
-// edges' offset lines come closest - the mitre, on a square wall. The first
-// row, on the wall itself, is put on the line where the two walls meet, so
-// the wall's top edge, dropped to it, stays in the wall's own planes.
+// The rim round's rows on a leaning wall. At each loop point the face runs in
+// along u (the inward bisector, as the square-wall round uses) and the wall
+// runs down along w (the mean of the wall directions of the point's two
+// edges), at an angle a between them. Round is the arc of radius R tangent to
+// both, touching each a setback R / tan(a/2) from the edge (R at 90 degrees,
+// more where the wall leans in over the face, less where it leans out). Bevel
+// is a flat band R along each. The part across the face is mitred exactly as
+// the square-wall round mitres it (vertexOffset); the part down the wall runs
+// along w. Fitted per POINT, not per edge: a cut outline is unevenly spaced
+// (a 0.2 mm edge between 1.5 mm ones), and offsets that differ edge to edge
+// slide a mitre far along a short edge between two nearly straight ones,
+// turning it backwards.
 // Returns ringAt(i, s) -> { flat: [u, v], depth } in the rim builder's terms.
+function rawCross3(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function rawEdgeDir3(a, b, from3) {
+  const e = from3([b[0] - a[0], b[1] - a[1]], 0), l = Math.hypot(e[0], e[1], e[2]) || 1e-9;
+  return [e[0] / l, e[1] / l, e[2] / l];
+}
+
 function rawLeanRing(lean, poly2d, inwardNormal2, from3, capPlane, axisIdx, R, chamfer, PHI, STEPS) {
   const n = poly2d.length;
   const into = lean.into;
-  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-  const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-  const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
-  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-  const unit = (a) => { const l = Math.hypot(a[0], a[1], a[2]); return l > 1e-15 ? mul(a, 1 / l) : a; };
   const MIN_A = 20 * Math.PI / 180;
-  const E = [];
-  for (let k = 0; k < n; k++) {
-    const a = poly2d[k], b = poly2d[(k + 1) % n];
-    const e = unit(from3([b[0] - a[0], b[1] - a[1]], 0));
-    const u = from3(inwardNormal2(a, b), 0);
-    const w = lean.dirs[k];
-    const alpha = Math.max(MIN_A, Math.min(Math.PI - MIN_A, Math.acos(Math.max(-1, Math.min(1, dot(u, w))))));
-    const setback = chamfer ? R : R / Math.tan(alpha / 2);
-    E.push({ e, u, w, alpha, setback, nrm: unit(cross(e, w)) });
-  }
-  // (x along u, y along w) of row s on edge k
-  const profile = (k, s) => {
-    const P = E[k], sb = P.setback;
-    if (chamfer) { const t = s / STEPS; return [sb * t, sb * (1 - t)]; }
-    const f = PHI[s] / (Math.PI / 2);
-    const om = Math.PI - P.alpha, so = Math.sin(om);
-    const c = R / Math.sin(P.alpha);
-    const A = Math.sin((1 - f) * om) / so, B = Math.sin(f * om) / so;
-    return [c - A * c + B * (sb - c), c + A * (sb - c) - B * c];
-  };
-  const axis = [0, 0, 0]; axis[axisIdx] = into;
-  return (i, s) => {
-    const k0 = (i - 1 + n) % n, k1 = i;
-    const p0 = profile(k0, s), p1 = profile(k1, s);
-    const g0 = add(mul(E[k0].u, p0[0]), mul(E[k0].w, p0[1]));
-    const g1 = add(mul(E[k1].u, p1[0]), mul(E[k1].w, p1[1]));
-    let d = null;
-    if (s === 0) {
-      // on the wall: the line the two walls share, at the rows' mean depth
-      const dl = cross(E[k0].nrm, E[k1].nrm);
-      if (Math.hypot(dl[0], dl[1], dl[2]) > 1e-6) {
-        let du = unit(dl);
-        if (dot(du, axis) < 0) du = mul(du, -1);
-        const depth = (dot(g0, axis) + dot(g1, axis)) / 2;
-        if (dot(du, axis) > 1e-6) d = mul(du, depth / dot(du, axis));
-      }
+  const P = [];
+  for (let i = 0; i < n; i++) {
+    const prev = poly2d[(i - 1 + n) % n], curr = poly2d[i], next = poly2d[(i + 1) % n];
+    const n1 = inwardNormal2(prev, curr), n2 = inwardNormal2(curr, next);
+    let bx = n1[0] + n2[0], by = n1[1] + n2[1];
+    const bl = Math.hypot(bx, by) || 1e-9; bx /= bl; by /= bl;
+    const cosHalf = Math.max(bx * n1[0] + by * n1[1], 0.3);
+    // Down the wall from this point: where its two edges' walls are two
+    // facets, the line they share (on a faceted tube, the tube's own line) -
+    // the only way down that stays in both; where they are one plane, the
+    // common direction.
+    const wa = lean.dirs[(i - 1 + n) % n], wb = lean.dirs[i];
+    const ea = rawEdgeDir3(poly2d[(i - 1 + n) % n], curr, from3), eb = rawEdgeDir3(curr, next, from3);
+    const na = rawCross3(ea, wa), nb = rawCross3(eb, wb);
+    let w = rawCross3(na, nb);
+    let wl = Math.hypot(w[0], w[1], w[2]);
+    const down = [0, 0, 0]; down[axisIdx] = into;
+    if (wl > 1e-3 && Math.abs(w[0] * down[0] + w[1] * down[1] + w[2] * down[2]) > 1e-3 * wl) {
+      if (w[0] * down[0] + w[1] * down[1] + w[2] * down[2] < 0) w = [-w[0], -w[1], -w[2]];
+    } else {
+      w = [wa[0] + wb[0], wa[1] + wb[1], wa[2] + wb[2]];
+      wl = Math.hypot(w[0], w[1], w[2]);
     }
-    if (!d) {
-      const e0 = E[k0].e, e1 = E[k1].e;
-      const b = dot(e0, e1), den = 1 - b * b;
-      if (den < 1e-10) d = mul(add(g0, g1), 0.5);
-      else {
-        const w0 = sub(g0, g1), dd = dot(e0, w0), ee = dot(e1, w0);
-        const t = (b * ee - dd) / den, r = (ee - b * dd) / den;
-        d = mul(add(add(g0, mul(e0, t)), add(g1, mul(e1, r))), 0.5);
-      }
+    wl = wl || 1e-9;
+    w = [w[0] / wl, w[1] / wl, w[2] / wl];
+    const u = from3([bx, by], 0);
+    const cosA = u[0] * w[0] + u[1] * w[1] + u[2] * w[2];
+    const alpha = Math.max(MIN_A, Math.min(Math.PI - MIN_A, Math.acos(Math.max(-1, Math.min(1, cosA)))));
+    const setback = chamfer ? R : R / Math.tan(alpha / 2);
+    // w split into its part across the face (2D, in the rim's own u/v) and
+    // its depth into the body
+    const wFlat = [], other = [0, 1, 2].filter(a => a !== axisIdx);
+    wFlat.push(w[other[0]], w[other[1]]);
+    P.push({ m: [bx / cosHalf, by / cosHalf], wFlat, wDepth: w[axisIdx] * into, alpha, setback });
+  }
+  return (i, s) => {
+    const p = P[i], sb = p.setback;
+    let x, y;
+    if (chamfer) { const t = s / STEPS; x = sb * t; y = sb * (1 - t); }
+    else {
+      const f = PHI[s] / (Math.PI / 2);
+      const om = Math.PI - p.alpha, so = Math.sin(om), c = R / Math.sin(p.alpha);
+      const A = Math.sin((1 - f) * om) / so, B = Math.sin(f * om) / so;
+      x = c - A * c + B * (sb - c);
+      y = c + A * (sb - c) - B * c;
     }
     const L = poly2d[i];
-    const flat = [L[0], L[1]];
-    let o = 0;
-    for (let q = 0; q < 3; q++) if (q !== axisIdx) flat[o++] += d[q];
-    return { flat: flat, depth: d[axisIdx] * into };
+    return { flat: [L[0] + x * p.m[0] + y * p.wFlat[0], L[1] + x * p.m[1] + y * p.wFlat[1]], depth: y * p.wDepth };
   };
 }
 
@@ -375,7 +376,23 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
 
   // Lid, wall and band for every loop at once - the one rebuild both
   // cap-plane engines share (rawCapRebuildFromRings, app-cut.js).
-  const out = rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR);
+  // The cap's own triangles trimmed back to the rings first; where that
+  // cannot be followed (a Cut's slit annulus: the trim refuses, or leaves
+  // the slit's two sides split differently and the lid open), the lid is
+  // laid fresh inside the rings instead (rawFreshLid2, app-cut.js).
+  let out = null, freshLid = false;
+  try {
+    out = rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR);
+    const s0 = nsoSealScore(rawTris), s1 = nsoSealScore(out);
+    if (s1.open > s0.open || s1.nm > s0.nm) out = null;
+  } catch (e) {
+    if (!e || !/lid did not trim/.test(e.message || '')) throw e;
+    out = null;
+  }
+  if (!out) {
+    out = rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR, { freshLid: true });
+    freshLid = true;
+  }
 
   if (out.length < 9) throw new Error('perimeter fillet produced no geometry');
   rawPerimeterFilletInPlace.lastBuild = {
@@ -385,6 +402,7 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
     holes: holes,
     bends: bends,
     leans: leans,
+    freshLid: freshLid,
     rows: STEPS,
     radius: peakR,
     requested: requestedR

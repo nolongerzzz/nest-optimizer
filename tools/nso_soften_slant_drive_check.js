@@ -18,6 +18,13 @@
 //   5  headless       the engine at 15 / 30 / 45 / 60 degrees, R 0.05 - 0.5,
 //                     Round / Bevel / Corners+edges: closed and manifold, no
 //                     vertex outside the uncut piece, through mesh_validate
+//   6  a real Cut     a Stock tube cut in the app by the Cut card's own split
+//                     (cutSplitAt) at Bevel 45 and Bevel 90 (square across):
+//                     every cut face of both halves, Round and Bevel R 0.05 /
+//                     0.2, closed and manifold. The Cut fills its annulus
+//                     through a slit and leaves outline points 0.005 mm apart;
+//                     both used to come out open (the fresh lid, the stitched
+//                     foot - rawFreshLid2 / L.bottom in app-cut.js)
 
 const fs = require('fs');
 const os = require('os');
@@ -91,7 +98,7 @@ function headless() {
   vm.createContext(ctx);
   vm.runInContext('var state = {}; var THREE = {};', ctx);
   for (const f of ['nso_thickness.js', 'nso_stock.js', 'app-cut.js', 'app-sculpt.js', 'app-finish.js',
-                   'app-extend.js', 'app-fatten.js', 'nso_section.js', 'nso_ring.js']) {
+                   'app-extend.js', 'app-fatten.js', 'nso_section.js', 'nso_ring.js', 'nso_cdt.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
   }
   for (const ang of [15, 30, 45, 60]) {
@@ -245,6 +252,59 @@ withApp(async (page) => {
     i = await info();
     check('Corners refused in words: the walls lean', !!(i && !i.ok && /walls lean/.test(i.refused || i.readout || '')),
           i && (i.refused || i.readout));
+  }
+
+  console.log('\n=== 6. a real Cut ===');
+  for (const bev of ['45', '90']) {
+    const res = await page.evaluate((bev) => {
+      window.nsoStockShelf.drop('tube');
+      const m = state.models[state.models.length - 1];
+      selectPlaced(state.placed.findIndex(p => p && p.sourceId === m.id));
+      const sum = document.querySelector('#menu-cut > summary');
+      if (sum && !document.getElementById('menu-cut').open) sum.click();
+      state.cutT = 0.6; setCutMiter(0);
+      const el = document.getElementById('cut-bevel-deg'); el.value = bev; el.dispatchEvent(new Event('change'));
+      const halves = cutSplitAt(m, getCutPlaneForSplit(m));
+      const seal = (s) => nsoSealScore(s);
+      const out = [];
+      for (const raw of [halves.rawA, halves.rawB]) {
+        if (!raw) { out.push('a half is missing'); continue; }
+        // the cut face: the biggest flat patch whose normal is not the tube's axis
+        const T = raw, groups = [];
+        for (let t = 0; t + 8 < T.length; t += 9) {
+          const ux = T[t+3]-T[t], uy = T[t+4]-T[t+1], uz = T[t+5]-T[t+2], vx = T[t+6]-T[t], vy = T[t+7]-T[t+1], vz = T[t+8]-T[t+2];
+          const c = [uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx], L = Math.hypot(c[0], c[1], c[2]);
+          if (!(L > 1e-12)) continue;
+          const n = [c[0]/L, c[1]/L, c[2]/L];
+          let g = groups.find(g => g.n[0]*n[0] + g.n[1]*n[1] + g.n[2]*n[2] > 0.9995);
+          if (!g) { g = { n, acc: [0, 0, 0], area: 0 }; groups.push(g); }
+          g.acc[0] += c[0]; g.acc[1] += c[1]; g.acc[2] += c[2]; g.area += L / 2;
+        }
+        groups.sort((a, b) => b.area - a.area);
+        // the cut face is the patch the other half does not share a plane with: try every big patch
+        for (const g of groups.filter(g => g.area > 50 && Math.abs(g.acc[2]) / Math.hypot(g.acc[0], g.acc[1], g.acc[2]) > 0.1)) {
+          const l = Math.hypot(g.acc[0], g.acc[1], g.acc[2]), n = [g.acc[0]/l, g.acc[1]/l, g.acc[2]/l];
+          let plane = -Infinity;
+          for (let i = 0; i + 2 < T.length; i += 3) plane = Math.max(plane, n[0]*T[i] + n[1]*T[i+1] + n[2]*T[i+2]);
+          const axis = Math.max(Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])) > 0.9999;
+          for (const mode of ['fillet', 'chamfer']) for (const R of [0.05, 0.2]) {
+            try {
+              let o;
+              if (axis) {
+                const ax = [0, 1, 2].find(k => Math.abs(n[k]) > 0.9999), km = n[ax] < 0;
+                o = softenSelectedFace(T, ax, km, R, mode, rawExtremeOf(T, ax, km));
+              } else o = softenObliqueFace(T, n, plane, R, mode);
+              const sc = seal(o);
+              out.push((sc.open || sc.nm) ? (mode + ' R ' + R + ' n ' + n.map(x => x.toFixed(2)) + ': ' + JSON.stringify(sc)) : 'ok');
+            } catch (e) { out.push(mode + ' R ' + R + ' n ' + n.map(x => x.toFixed(2)) + ': ' + e.message); }
+          }
+        }
+      }
+      return out;
+    }, bev);
+    const bad = res.filter(x => x !== 'ok');
+    check('Bevel ' + bev + ': every flat face of both halves, Round and Bevel R 0.05 / 0.2, sound',
+          bad.length === 0 && res.length > 0, bad.length ? bad.join(' | ') : res.length + ' bakes');
   }
 }).then(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
