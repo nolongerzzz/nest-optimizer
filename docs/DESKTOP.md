@@ -79,6 +79,17 @@ Each rule is a print the owner lost on 2026-11-18.
 
 **The guard cannot see the touchscreen.** A press there bypasses it.
 
+## Verified on the owner's A1 mini (2026-11-28)
+
+- **Check the printer:** the certificate's name is the serial number; an empty Serial row is filled from it.
+- **Connect and status:** online; state, percent, layers, nozzle and bed match the touchscreen.
+- **The keychain** holds the access code on macOS.
+- **Upload** over FTPS, and **Send and print** with `project_file` and `url: file:///sdcard/<name>`: an
+  NSO-sliced TPU file (`capsule 1-A106 - A1 mini.gcode.3mf`, 528 layers) started and printed. First print
+  sent from NSO with no Bambu Studio in the path.
+
+Tests 1 to 3 below are therefore done for the A1 mini; 4 to 6 are open, and the P1S has not been tried.
+
 ## TO VERIFY on the owner's printers
 
 Everything about the protocol is from community documentation (OpenBambuAPI) and has only been run
