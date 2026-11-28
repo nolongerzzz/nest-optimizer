@@ -22,7 +22,7 @@ module.exports = async function ({ app, mainWin, openPrinters, store }) {
     await wait(4000);
     const site = await mainWin.webContents.executeJavaScript('({ d: !!(window.nsoDesktop && window.nsoDesktop.desktop), keys: Object.keys(window.nsoDesktop || {}), slicer: typeof window.NSO_Slicer, print: typeof window.NSO_Print, three: typeof window.THREE, title: document.title, req: typeof window.require, proc: typeof window.process })');
     ok(site.d, 'the site sees the desktop shell');
-    ok(site.keys.sort().join() === 'desktop,openPrinters', 'the site is given two things only', site.keys.join());
+    ok(site.keys.sort().join() === 'checkForUpdates,desktop,openPrinters', 'the site is given three things only', site.keys.join());
     ok(site.slicer === 'object' && site.print === 'object', 'the site\'s own scripts loaded', JSON.stringify(site));
     ok(site.req === 'undefined' && site.proc === 'undefined', 'no Node in the page');
     ok(errors.length === 0, 'no console errors on load', errors.slice(0, 3).join(' | '));
@@ -32,9 +32,19 @@ module.exports = async function ({ app, mainWin, openPrinters, store }) {
     const git = await mainWin.webContents.executeJavaScript('fetch("/.git/HEAD").then(r => r.status)');
     ok(git === 404, 'and not the repository');
 
+    const stripInfo = await mainWin.webContents.executeJavaScript('(function(){var s=document.getElementById("nso-desktop-strip"),u=document.getElementById("nso-desktop-update");return s?{n:s.querySelectorAll("button").length,upd:u.hidden,label:s.lastChild.textContent}:null})()');
+    ok(stripInfo && stripInfo.n === 2 && stripInfo.upd === true && stripInfo.label === 'Printers', 'the window has its Printers button, and no Update button when there is none', JSON.stringify(stripInfo));
+    mainWin.webContents.send('site:update-state', { available: { short: 'abc1234', count: 3 }, busy: false });
+    await wait(150);
+    ok(await mainWin.webContents.executeJavaScript('var u=document.getElementById("nso-desktop-update"); !u.hidden && u.textContent === "Update ready (3)"'), 'an update shows as a button in the window');
+    await shot(mainWin, 'site-update-ready.png');
+    ok(/^Nest Optimizer/.test(mainWin.getTitle()), 'the title is the app\'s', mainWin.getTitle());
+
     m = await mock.start();
+    await mainWin.webContents.executeJavaScript('document.querySelector("#nso-desktop-strip button:last-child").click()');
+    await wait(300);
     const ui = openPrinters();
-    await new Promise((r) => ui.webContents.once('did-finish-load', r));
+    if (ui.webContents.isLoading()) await new Promise((r) => ui.webContents.once('did-finish-load', r));
     await wait(400);
     const js = (code) => ui.webContents.executeJavaScript(code);
     const until = async (code, ms) => { const t = Date.now(); while (Date.now() - t < (ms || 5000)) { if (await js(code)) return true; await wait(100); } return false; };

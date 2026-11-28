@@ -1,7 +1,7 @@
 # The desktop app: the same site in its own window, with the printer link
 
 `desktop/` (Electron). Mac first, then Linux. The web version is unchanged and stays the live preview.
-Checks: `cd desktop && npm test` (89, no display needed) and `npm run smoke` (19, the real app against a mock printer).
+Checks: `cd desktop && npm test` (115, no display needed) and `npm run smoke` (22, the real app against a mock printer).
 
 ## Why
 
@@ -9,18 +9,55 @@ A browser page cannot open the connections a Bambu printer uses (MQTT over TLS, 
 secret in the keychain, and cannot write files without a download prompt. A desktop shell can. NSO is
 static files, so the shell loads the same files: one codebase, two ways to run it.
 
-## Run it
+## Install it, and the launcher
 
 ```
 cd desktop
-npm install        # once
-npm start          # opens Nest Optimizer; Printer > Printers... (Cmd/Ctrl+Shift+P) opens the printer window
+bash install.sh
 ```
 
-It runs from the repository as it is checked out, so a `git pull` and a restart is an update.
-`npm run dist:mac` / `npm run dist:linux` build an installable app (a `.dmg`, an AppImage) with
-electron-builder. **Not yet run on a Mac**: the mac build is unsigned, so macOS asks once (right-click >
-Open) and the keychain prompt names the app.
+`install.sh` is the Safex apps' installer, carried over: it checks Node.js (18 or newer) and git, runs
+`npm install`, and adds a clickable launcher.
+
+- **Mac:** `~/Applications/Nest Optimizer.app` (Launchpad, Spotlight; drag it to the Dock). It is a small
+  launcher that starts the app from this folder, with the plate icon. The menu bar still says "Electron":
+  the name comes from Electron's own bundle, which is left unmodified.
+- **Linux:** a "Nest Optimizer" menu entry with its icon (`tools/install-menu-entry.sh`). It starts with
+  `--no-sandbox`, as the Safex apps do: an npm-installed Electron's sandbox helper is not set up on current
+  Ubuntu, and the window only loads this folder's own files.
+- `npm start` in `desktop/` still works. Run `install.sh` again after moving the folder.
+
+The app is not packaged: it runs from the checkout, which is what lets it update itself.
+`npm run dist:mac` / `dist:linux` (electron-builder) are configured but unused and untested.
+
+## Updates: merge, and the app offers it
+
+**The app follows the git branch its folder is on.** A copy on `main` is offered whatever lands on `main`.
+
+```
+test on the web preview (claude-wip)  ->  merge to main  ->  the desktop app says "Update ready"
+```
+
+- It looks 8 seconds after it starts and every 6 hours, and from **Update > Check for Updates...**
+- When there is something, an **Update ready (n)** button appears in the window (bottom right, beside
+  **Printers**) and a dialog lists the changes. **Update and restart** applies them; **Later** leaves it,
+  and the button stays.
+- The window's title says what is running: `Nest Optimizer - main @ 1a2b3c4 (2026-11-28)`.
+- **Update > Go Back to the Previous Version...** undoes the last update (once). The update is offered again.
+
+What `updater.js` will and will not do (it is safexplug's updater's care, on git):
+
+- It only **fast-forwards**. A copy with edited files, or with commits of its own, is left exactly as it
+  is and told why. Nothing is merged, stashed or discarded.
+- The changes are **listed before** anything is applied, and applying is a separate confirmed step.
+- If `desktop/package.json` changed, `npm install` runs; if that fails, the code is **put back** as it was.
+- It needs git to be able to reach the repository without asking (the repository is private): the same
+  login a `git pull` in a terminal uses. It never prompts for a password; if it cannot reach GitHub it
+  says so.
+- The site's files and the app's own code update together: they are one checkout.
+
+To put a copy on `main` once `desktop/` has been merged there: `git checkout main` in its folder, then
+start the app.
 
 ## What is in it
 
@@ -28,10 +65,12 @@ Open) and the keychain prompt names the app.
 |---|---|
 | `main.js` | the Electron main process: the windows, the menu, the checks on who may call what |
 | `static-server.js` | serves the repo's site files on `127.0.0.1` only (the page fetches its fixtures, so it needs http). Refuses `..`, dotfiles, `desktop/`, `node_modules/`, any other Host name, anything but GET |
-| `preload-site.js` | all the NSO page is given: `window.nsoDesktop = { desktop: true, openPrinters() }` |
+| `preload-site.js` | all the NSO page is given: `window.nsoDesktop = { desktop, openPrinters(), checkForUpdates() }`, and the Printers / Update strip it adds to the window (the site's files are not changed for it) |
 | `preload-ui.js`, `ui/` | the Printers window and its bridge. Only that window may reach printers |
 | `store.js` | the printers kept between runs (below) |
 | `printer-link/` | the link itself: pure Node, no Electron. `cli.js` runs it from a terminal |
+| `updater.js` | the self-update on git (above) |
+| `install.sh`, `tools/` | the installer, the launchers, the icon's drawing script |
 
 The page has no Node, no `require`, no file access (`contextIsolation`, `sandbox`, no `nodeIntegration`).
 It cannot navigate away or open windows.
@@ -113,6 +152,8 @@ against the mock in `desktop/test/`. In this order, each on a scrap print:
 - The phone dashboard (the shell serving a status page over Tailscale).
 - Park at the service position and creep to the lock (needs test 4 first); the lock checklist screen.
 - The Node slicing pool for multi-core slices; reading and writing presets as files.
-- Auto-update, signing and notarising the Mac build.
+- A packaged, signed Mac build (the app runs from its checkout instead).
+- The Mac launcher and the update dialogs have not been run on a Mac yet; `updater.js` itself is checked
+  on throwaway repositories (`test/updater-test.js`, 26).
 - A check of `desktop/` in the repository's own `npm test` (it has its own `package.json` so Electron
   is not installed for the site's checks).

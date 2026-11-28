@@ -18,3 +18,8 @@ cannot do: a link to the owner's Bambu printers. Nothing in the site's own files
   The Mac build (`npm run dist:mac`) has not been run on a Mac.
 - **Also in this PR:** `docs/PRINT-SETTINGS-AUDIT.md`, a read-only audit of which Bambu printer / filament /
   process settings NSO's planner and engine honour, with a ranked "bring over next" list.
+- **Launcher and updates (2026-11-28):** `bash desktop/install.sh` installs and adds a clickable launcher
+  (Mac: `~/Applications/Nest Optimizer.app`; Linux: a menu entry), as the Safex apps' installer does. The app
+  follows the git branch its folder is on: merge to `main`, and a copy on `main` shows **Update ready**;
+  it fast-forwards, runs `npm install` if the app's parts changed, and restarts. Edited or diverged copies
+  are left alone. Go back undoes the last update. `desktop/updater.js`, `test/updater-test.js` (26).

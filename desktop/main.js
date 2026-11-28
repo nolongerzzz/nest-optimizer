@@ -15,9 +15,13 @@ const os = require('os');
 const staticServer = require('./static-server');
 const { Store } = require('./store');
 const { PrinterLink, probe, MODELS, MQTT_PORT, FTPS_PORT } = require('./printer-link');
+const updater = require('./updater');
 
 const SITE_ROOT = app.isPackaged ? path.join(process.resourcesPath, 'app-site') : path.resolve(__dirname, '..');
 const UI_FILE = path.join(__dirname, 'ui', 'printers.html');
+const REPO = path.resolve(__dirname, '..');           // the checkout this copy runs from, and updates
+const ICON = path.join(__dirname, 'assets', 'icon.png');
+const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
 let siteUrl = '';
 let mainWin = null;
@@ -25,6 +29,7 @@ let uiWin = null;
 let store = null;
 const links = new Map();      // printer id -> PrinterLink
 let pendingSend = null;       // a .gcode.3mf the site just exported, waiting for the Printers window
+const upd = { current: null, available: null, busy: false, askedFor: '' };
 
 // The smoke check runs against a throwaway profile, never the owner's.
 if (process.env.NSO_DESKTOP_SMOKE) app.setPath('userData', process.env.NSO_DESKTOP_SMOKE);
@@ -36,10 +41,12 @@ function toUi(channel, ...args) { if (uiWin && !uiWin.isDestroyed()) uiWin.webCo
 
 function createMain() {
   mainWin = new BrowserWindow({
-    width: 1560, height: 980, minWidth: 1000, minHeight: 640, backgroundColor: '#0c0f16', title: 'Nest Optimizer',
+    width: 1560, height: 980, minWidth: 1000, minHeight: 640, backgroundColor: '#0c0f16', title: 'Nest Optimizer', icon: ICON,
     webPreferences: { preload: path.join(__dirname, 'preload-site.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
+  mainWin.on('page-title-updated', (e) => { e.preventDefault(); mainWin.setTitle(titleText()); });
   mainWin.loadURL(siteUrl + '/index.html');
+  mainWin.webContents.on('did-finish-load', () => { mainWin.setTitle(titleText()); pushUpdateState(); });
   // The window shows the site and nothing else: no navigating away, no new windows.
   mainWin.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(siteUrl + '/')) e.preventDefault(); });
   mainWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
@@ -85,8 +92,59 @@ function linkFor(id) {
 }
 function dropLink(id) { const l = links.get(id); if (l) { l.close(); l.removeAllListeners(); links.delete(id); } }
 
+// ---------------------------------------------------------------- updates
+function logFile() { return path.join(app.getPath('userData'), 'last-update.json'); }
+function titleText() { return 'Nest Optimizer' + (upd.current ? '  -  ' + upd.current.branch + ' @ ' + upd.current.short + ' (' + upd.current.date + ')' : ''); }
+function pushUpdateState() {
+  if (!mainWin || mainWin.isDestroyed()) return;
+  mainWin.webContents.send('site:update-state', { available: upd.available ? { short: upd.available.short, count: upd.available.count } : null, busy: upd.busy });
+}
+
+/** Look for an update. manual: the owner asked, so say what was found either way. */
+async function checkForUpdates(manual) {
+  if (upd.busy || app.isPackaged) return;
+  const r = await updater.check(REPO);
+  if (r.current) { upd.current = r.current; if (mainWin) mainWin.setTitle(titleText()); }
+  upd.available = r.ok && !r.upToDate ? r.available : null;
+  pushUpdateState();
+  if (!r.ok) { if (manual || r.blocked) dialog.showMessageBox(mainWin, { type: 'warning', message: 'Not updated', detail: r.reason }); return; }
+  if (r.upToDate) { if (manual) dialog.showMessageBox(mainWin, { type: 'info', message: 'This copy is up to date.', detail: r.current.branch + ' @ ' + r.current.short + ', ' + r.current.date + '\n' + r.current.subject }); return; }
+  if (!manual && upd.askedFor === r.available.commit) return;      // already said "later" to this one
+  upd.askedFor = r.available.commit;
+  const a = r.available;
+  const more = a.count > a.subjects.length ? '\n... and ' + (a.count - a.subjects.length) + ' more' : '';
+  const go = dialog.showMessageBoxSync(mainWin, {
+    type: 'question', buttons: ['Update and restart', 'Later'], defaultId: 0, cancelId: 1,
+    message: 'An update is ready: ' + a.count + ' change' + (a.count > 1 ? 's' : '') + ' on ' + r.current.branch,
+    detail: a.subjects.map((x) => '- ' + x).join('\n') + more + (a.depsChanged ? '\n\nThis one also installs new parts, which can take a minute.' : '') + '\n\nA print already running on the printer carries on; this app only watches it.'
+  });
+  if (go === 0) applyUpdate();
+}
+
+async function applyUpdate() {
+  if (upd.busy) return;
+  upd.busy = true; pushUpdateState();
+  const r = await updater.apply(REPO, { logFile: logFile() });
+  upd.busy = false;
+  if (!r.ok) { pushUpdateState(); dialog.showMessageBox(mainWin, { type: 'warning', message: 'Not updated', detail: r.reason }); return; }
+  if (r.nothing) { upd.available = null; pushUpdateState(); return; }
+  app.relaunch(); app.exit(0);
+}
+
+async function goBack() {
+  const l = updater.lastUpdate(logFile());
+  if (!l) { dialog.showMessageBox(mainWin, { type: 'info', message: 'There is no earlier version on record to go back to.' }); return; }
+  const go = dialog.showMessageBoxSync(mainWin, { type: 'question', buttons: ['Go back and restart', 'Cancel'], defaultId: 1, cancelId: 1, message: 'Go back to the version before the last update?', detail: 'From ' + l.to.slice(0, 7) + ' back to ' + l.from.slice(0, 7) + '. The update will be offered again next time.' });
+  if (go !== 0) return;
+  const r = await updater.rollback(REPO, { logFile: logFile() });
+  if (!r.ok) { dialog.showMessageBox(mainWin, { type: 'warning', message: 'Not changed', detail: r.reason }); return; }
+  upd.askedFor = l.to;
+  app.relaunch(); app.exit(0);
+}
+
 function wireIpc() {
   ipcMain.on('site:open-printers', (e) => { if (mainWin && e.sender === mainWin.webContents) openPrinters(); });
+  ipcMain.on('site:check-updates', (e) => { if (mainWin && e.sender === mainWin.webContents) checkForUpdates(true); });
 
   handle('app:info', () => ({ version: app.getVersion(), platform: process.platform, canKeep: store.canKeep(), models: Object.keys(MODELS).map((k) => ({ id: k, label: MODELS[k].label })) }));
   handle('printers:list', () => store.list());
@@ -181,6 +239,10 @@ function buildMenu() {
     ...(isMac ? [{ role: 'appMenu' }] : []),
     { role: 'fileMenu' }, { role: 'editMenu' }, { role: 'viewMenu' },
     { label: 'Printer', submenu: [{ label: 'Printers...', accelerator: 'CmdOrCtrl+Shift+P', click: () => openPrinters() }] },
+    { label: 'Update', submenu: [
+      { label: 'Check for Updates...', click: () => checkForUpdates(true) },
+      { label: 'Go Back to the Previous Version...', click: () => goBack() }
+    ] },
     { role: 'windowMenu' }
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -193,7 +255,13 @@ app.whenReady().then(async () => {
   wireIpc();
   wireDownloads();
   buildMenu();
+  if (process.platform === 'darwin' && app.dock && fs.existsSync(ICON)) app.dock.setIcon(ICON);
   createMain();
+  if (!app.isPackaged && !process.env.NSO_DESKTOP_SMOKE) {
+    updater.info(REPO).then((i) => { if (i.ok) { upd.current = i; if (mainWin) mainWin.setTitle(titleText()); } });
+    setTimeout(() => checkForUpdates(false), 8000);
+    setInterval(() => checkForUpdates(false), CHECK_EVERY_MS);
+  }
   if (process.env.NSO_DESKTOP_SMOKE) require('./test/smoke-hook')({ app, mainWin, openPrinters, siteUrl, store });
   app.on('activate', () => { if (!mainWin) createMain(); });
 });
